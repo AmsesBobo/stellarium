@@ -70,6 +70,7 @@ void AtmosphereDialog::createDialogContent()
 	connectDoubleProperty(ui->pressureDoubleSpinBox,"StelSkyDrawer.atmospherePressure");
 	connectDoubleProperty(ui->temperatureDoubleSpinBox,"StelSkyDrawer.atmosphereTemperature");
 	connectDoubleProperty(ui->extinctionDoubleSpinBox,"StelSkyDrawer.extinctionCoefficient");
+	connectBoolProperty(ui->empiricalStellarVisibilityCheckBox, "StelSkyDrawer.flagEmpiricalStellarVisibility");
 	connect(StelApp::getInstance().getStelPropertyManager()->getProperty(STATUS_TEXT_PROPERTY),
 			&StelProperty::changed, this, [this](const QVariant& v){ ui->showMySky_statusLabel->setText(v.toString()); });
 	connect(StelApp::getInstance().getStelPropertyManager()->getProperty(ERROR_PROPERTY),

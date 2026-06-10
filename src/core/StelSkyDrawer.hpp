@@ -62,6 +62,7 @@ class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 	Q_PROPERTY(double lightPollutionLuminance READ getLightPollutionLuminance WRITE setLightPollutionLuminance NOTIFY lightPollutionLuminanceChanged)
 	Q_PROPERTY(bool flagDrawBigStarHalo READ getFlagDrawBigStarHalo WRITE setFlagDrawBigStarHalo NOTIFY flagDrawBigStarHaloChanged)
 	Q_PROPERTY(bool flagStarSpiky READ getFlagStarSpiky WRITE setFlagStarSpiky NOTIFY flagStarSpikyChanged)
+	Q_PROPERTY(bool flagEmpiricalStellarVisibility READ getFlagEmpiricalStellarVisibility WRITE setFlagEmpiricalStellarVisibility NOTIFY flagEmpiricalStellarVisibilityChanged)
 
 	Q_PROPERTY(bool flagStarMagnitudeLimit READ getFlagStarMagnitudeLimit WRITE setFlagStarMagnitudeLimit NOTIFY flagStarMagnitudeLimitChanged)
 	Q_PROPERTY(bool flagNebulaMagnitudeLimit READ getFlagNebulaMagnitudeLimit WRITE setFlagNebulaMagnitudeLimit NOTIFY flagNebulaMagnitudeLimitChanged)
@@ -147,6 +148,9 @@ public:
 	//! @return false if the object is too faint to be displayed
 	bool computeRCMag(float mag, RCMag*) const;
 
+	//! Return the least restrictive empirical limiting magnitude for the current Sun altitude and sky luminance.
+	float empiricalStellarVisibilityLimit(const Vec3d& sunAltAzPos, float skyLuminance) const;
+
 	//! Report that an object of luminance lum with an on-screen area of area pixels is currently displayed
 	//! This information is used to determine the world adaptation luminance
 	//! This method should be called during the update operations of the main loop
@@ -225,10 +229,22 @@ public slots:
 	//! Get whether to draw stars with rays
 	bool getFlagStarSpiky() const {return flagStarSpiky;}
 
+	//! Toggle empirical naked-eye stellar visibility in twilight and bright skies.
+	void setFlagEmpiricalStellarVisibility(bool b);
+	//! Get whether empirical naked-eye stellar visibility is in force.
+	bool getFlagEmpiricalStellarVisibility() const {return flagEmpiricalStellarVisibility;}
+
 	//! Get the magnitude of the currently faintest visible point source
 	//! It depends on the zoom level, on the eye adaptation and on the point source rendering parameters
 	//! @return the limit V mag at which a point source will be displayed
 	float getLimitMagnitude() const {return limitMagnitude;}
+
+	//! Get the magnitude offset applied to stars to match empirical naked-eye visibility in twilight and bright skies.
+	float getEmpiricalStellarMagnitudeOffset() const {return empiricalStellarMagnitudeOffset;}
+	//! Get the magnitude offset applied to solar-system point sources for empirical visibility.
+	float getEmpiricalSolarSystemMagnitudeOffset() const {return empiricalStellarMagnitudeOffset;}
+	//! Get the current empirical naked-eye stellar limiting magnitude.
+	float getEmpiricalStellarLimitMagnitude() const {return empiricalStellarLimitMagnitude;}
 
 	//! Toggle the application of user-defined star magnitude limit.
 	//! If enabled, stars fainter than the magnitude set with
@@ -343,6 +359,8 @@ signals:
 	void flagDrawBigStarHaloChanged(bool b);
 	//! Emitted on change of star texture
 	void flagStarSpikyChanged(bool b);
+	//! Emitted whenever empirical stellar visibility is toggled
+	void flagEmpiricalStellarVisibilityChanged(bool b);
 
 	//! Emitted whenever the star magnitude limit flag is toggled
 	void flagStarMagnitudeLimitChanged(bool b);
@@ -444,6 +462,7 @@ private:
 	double twinkleAmount;      //! magnitude range of atmospheric flicker at horizon
 	bool flagDrawBigStarHalo;
 	bool flagStarSpiky;
+	bool flagEmpiricalStellarVisibility;
 
 	//! Informing the drawer whether atmosphere is displayed.
 	//! This is used to avoid twinkling/simulate extinction/refraction.
@@ -466,6 +485,10 @@ private:
 
 	//! Current magnitude limit for point sources
 	float limitMagnitude;
+
+	//! Star-only magnitude offset used to make the precomputed star table match empirical visibility.
+	float empiricalStellarMagnitudeOffset;
+	float empiricalStellarLimitMagnitude;
 
 	//! Current magnitude luminance
 	float limitLuminance;

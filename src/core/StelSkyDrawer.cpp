@@ -33,6 +33,8 @@
 #include "StelModuleMgr.hpp"
 #include "LandscapeMgr.hpp"
 #include "Landscape.hpp"
+#include "SolarSystem.hpp"
+#include "Planet.hpp"
 
 #include <QOpenGLContext>
 #include <QOpenGLVertexArrayObject>
@@ -42,6 +44,7 @@
 #include <QSettings>
 #include <QDebug>
 #include <QtGlobal>
+#include <algorithm>
 
 // The 0.025 corresponds to the maximum eye resolution in degree
 #define EYE_RESOLUTION (0.25f)
@@ -60,6 +63,7 @@ StelSkyDrawer::StelSkyDrawer(StelCore* acore) :
 	twinkleAmount(0.0),
 	flagDrawBigStarHalo(true),
 	flagStarSpiky(false),
+	flagEmpiricalStellarVisibility(false),
 	flagStarMagnitudeLimit(false),
 	flagNebulaMagnitudeLimit(false),
 	flagPlanetMagnitudeLimit(false),
@@ -67,6 +71,8 @@ StelSkyDrawer::StelSkyDrawer(StelCore* acore) :
 	starAbsoluteScaleF(1.),
 	starLinearScale(19.569f),
 	limitMagnitude(-100.f),
+	empiricalStellarMagnitudeOffset(0.f),
+	empiricalStellarLimitMagnitude(6.f),
 	limitLuminance(0.f),
 	customStarMagLimit(0.0),
 	customNebulaMagLimit(0.0),
@@ -91,6 +97,7 @@ StelSkyDrawer::StelSkyDrawer(StelCore* acore) :
 	setFlagForcedTwinkle(conf->value("stars/flag_forced_twinkle",false).toBool());
 	setFlagDrawBigStarHalo(conf->value("stars/flag_star_halo",true).toBool());
 	flagStarSpiky=(conf->value("stars/flag_star_spiky", false).toBool()); // too early to use the set method here!
+	setFlagEmpiricalStellarVisibility(conf->value("stars/flag_empirical_stellar_visibility", false).toBool());
 	setMaxAdaptFov(conf->value("stars/mag_converter_max_fov",70.0).toFloat());
 	setMinAdaptFov(conf->value("stars/mag_converter_min_fov",0.1).toFloat());
 	setFlagLuminanceAdaptation(conf->value("viewing/use_luminance_adaptation",true).toBool());
@@ -291,6 +298,33 @@ void StelSkyDrawer::update(double)
 
 	// update limit mag
 	limitMagnitude = computeLimitMagnitude();
+	empiricalStellarMagnitudeOffset = 0.f;
+	empiricalStellarLimitMagnitude = 6.f;
+	if (flagEmpiricalStellarVisibility && getFlagHasAtmosphere())
+	{
+		LandscapeMgr* landscapeMgr = GETSTELMODULE_SILENT(LandscapeMgr);
+		SolarSystem* solarSystem = GETSTELMODULE_SILENT(SolarSystem);
+		if (landscapeMgr && solarSystem && solarSystem->getSun())
+		{
+			Vec3d sunAltAz = solarSystem->getSun()->getAltAzPosAuto(core);
+			sunAltAz.normalize();
+			const float skyLuminance = qMax(landscapeMgr->getAtmosphereAverageLuminance(), static_cast<float>(lightPollutionLuminance));
+			const float empiricalLimitMagnitude = empiricalStellarVisibilityLimit(sunAltAz, skyLuminance);
+			empiricalStellarLimitMagnitude = empiricalLimitMagnitude;
+			const float currentLnFovFactor = lnfovFactor;
+			const float currentInputScale = eye->getInputScale();
+			const float referenceFov = qBound(minAdaptFov, 60.f, maxAdaptFov);
+			const float referencePowFactor = std::pow(60.f/qMax(0.7f, referenceFov), 0.8f);
+
+			eye->setInputScale(inScale*referencePowFactor);
+			lnfovFactor = std::log(1.f/50.f*2025000.f* 60.f*60.f / (referenceFov*referenceFov) / (EYE_RESOLUTION*EYE_RESOLUTION)/referencePowFactor/1.4f);
+			const float referenceLimitMagnitude = computeLimitMagnitude();
+			lnfovFactor = currentLnFovFactor;
+			eye->setInputScale(currentInputScale);
+
+			empiricalStellarMagnitudeOffset = qMax(0.f, qMin(referenceLimitMagnitude, 6.f) - empiricalLimitMagnitude);
+		}
+	}
 
 	// update limit luminance
 	limitLuminance = computeLimitLuminance();
@@ -421,6 +455,23 @@ bool StelSkyDrawer::computeRCMag(float mag, RCMag* rcMag) const
 	return true;
 }
 
+float StelSkyDrawer::empiricalStellarVisibilityLimit(const Vec3d& sunAltAzPos, float skyLuminance) const
+{
+	const double safeSunZ = qBound(-1.0, sunAltAzPos[2], 1.0);
+	const float sunAltitudeDeg = static_cast<float>(std::asin(safeSunZ) * M_180_PI);
+
+	const float effectiveSunAltitudeDeg = qMin(sunAltitudeDeg, -0.85f);
+
+	const float twilightLimitedMagnitude = (effectiveSunAltitudeDeg > -7.7f)
+			? (-2.01f - 0.81f * effectiveSunAltitudeDeg)
+			: (2.78f - 0.18f * effectiveSunAltitudeDeg);
+
+	const float luminanceLimitedMagnitude = (sunAltitudeDeg > -18.f)
+			? StelCore::luminanceToNELM(static_cast<float>(lightPollutionLuminance))
+			: StelCore::luminanceToNELM(qMax(0.f, skyLuminance));
+	return qMin(qMin(twilightLimitedMagnitude, luminanceLimitedMagnitude), 6.0f);
+}
+
 void StelSkyDrawer::preDrawPointSource(StelPainter* p)
 {
 	Q_ASSERT(p);
@@ -539,6 +590,9 @@ void StelSkyDrawer::drawSunCorona(StelPainter* painter, const Vec3f& v, float ra
 // Terminate drawing of a 3D model, draw the halo
 void StelSkyDrawer::postDrawSky3dModel(StelPainter* painter, const Vec3d& v, float illuminatedArea, float mag, const Vec3f& color, const bool isSun)
 {
+	if (!isSun)
+		mag += empiricalStellarMagnitudeOffset;
+
 	const float scale = StelApp::getInstance().getScreenScale();
 	const float pixPerRad = painter->getProjector()->getPixelPerRadAtCenter();
 	// Assume a disk shape
@@ -728,6 +782,16 @@ void StelSkyDrawer::setFlagStarSpiky(bool b)
 		flagStarSpiky=b;
 		StelApp::immediateSave("stars/flag_star_spiky", b);
 		emit flagStarSpikyChanged(flagStarSpiky);
+	}
+}
+
+void StelSkyDrawer::setFlagEmpiricalStellarVisibility(bool b)
+{
+	if (b!=flagEmpiricalStellarVisibility)
+	{
+		flagEmpiricalStellarVisibility=b;
+		StelApp::immediateSave("stars/flag_empirical_stellar_visibility", b);
+		emit flagEmpiricalStellarVisibilityChanged(flagEmpiricalStellarVisibility);
 	}
 }
 

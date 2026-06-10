@@ -287,7 +287,15 @@ bool StelSkyImageTile::drawTile(StelCore* core, StelPainter& sPainter, const Vec
 	}
 
 	// Draw the real texture for this image
+	const StelSkyDrawer* skyDrawer = core->getSkyDrawer();
 	float ad_lum = (luminance>0) ? qMin(1.0f, core->getToneReproducer()->adaptLuminanceScaled(luminance)) : 1.f;
+	if (luminance>0 && skyDrawer->getFlagHasAtmosphere() && skyDrawer->getFlagEmpiricalStellarVisibility())
+	{
+		const float empiricalSuppressionMagnitude = qMax(0.f, 6.f - skyDrawer->getEmpiricalStellarLimitMagnitude());
+		const float empiricalWeight = qBound(0.f, empiricalSuppressionMagnitude, 1.f);
+		const float empiricalLuminanceFactor = std::pow(10.f, -0.8f * empiricalSuppressionMagnitude);
+		ad_lum *= (1.f - empiricalWeight) + empiricalWeight * empiricalLuminanceFactor;
+	}
 	Vec4f color;
 	if (alphaBlend || texFader->state()==QTimeLine::Running)
 	{
@@ -303,7 +311,7 @@ bool StelSkyImageTile::drawTile(StelCore* core, StelPainter& sPainter, const Vec
 		color.set(ad_lum,ad_lum,ad_lum, 1.f);
 	}
 
-	const bool withExtinction=(getFrameType()!=StelCore::FrameAltAz && core->getSkyDrawer()->getFlagHasAtmosphere() && core->getSkyDrawer()->getExtinction().getExtinctionCoefficient()>=0.01f);
+	const bool withExtinction=(getFrameType()!=StelCore::FrameAltAz && skyDrawer->getFlagHasAtmosphere() && skyDrawer->getExtinction().getExtinctionCoefficient()>=0.01f);
 
 	for (const auto& poly : std::as_const(skyConvexPolygons))
 	{
@@ -358,7 +366,7 @@ bool StelSkyImageTile::drawTile(StelCore* core, StelPainter& sPainter, const Vec
 			Vec3d altAz = core->j2000ToAltAz(baryJ2000, StelCore::RefractionOff);
 			float extinctionMagnitude=0.0f;
 			altAz.normalize();
-			core->getSkyDrawer()->getExtinction().forward(altAz, &extinctionMagnitude);
+			skyDrawer->getExtinction().forward(altAz, &extinctionMagnitude);
 			// compute a simple factor from magnitude loss.
 			float extinctionFactor=std::pow(0.4f , extinctionMagnitude); // drop of one magnitude: factor 2.5 or 40%
 			extinctedColor[0]*=fabs(extinctionFactor);

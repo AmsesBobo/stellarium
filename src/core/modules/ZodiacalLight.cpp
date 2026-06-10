@@ -346,7 +346,13 @@ void main(void)
 	if(!renderProgram || !renderProgram->isLinked())
 		return;
 
-	const float nelm = StelCore::luminanceToNELM(drawer->getLightPollutionLuminance());
+	float nelm = StelCore::luminanceToNELM(drawer->getLightPollutionLuminance());
+	if (drawer->getFlagHasAtmosphere() && drawer->getFlagEmpiricalStellarVisibility())
+	{
+		const float empiricalLimit = drawer->getEmpiricalStellarLimitMagnitude();
+		const float empiricalWeight = qBound(0.f, 6.f - empiricalLimit, 1.f);
+		nelm = nelm*(1.f - empiricalWeight) + qMin(nelm, empiricalLimit)*empiricalWeight;
+	}
 	// Test for light pollution, return if too bad.
 	if (drawer->getFlagHasAtmosphere() && nelm < 5.5) return;
 

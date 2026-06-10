@@ -3790,6 +3790,8 @@ void Planet::draw(StelCore* core, float maxMagLabels, const QFont& planetNameFon
 
 	static SolarSystem *ss=GETSTELMODULE(SolarSystem);
 	const float vMagnitude=getVMagnitude(core, eclipseFactor);
+	const float empiricalMagnitudeOffset = core->getSkyDrawer()->getEmpiricalSolarSystemMagnitudeOffset();
+	const float empiricalVMagnitude = vMagnitude + empiricalMagnitudeOffset;
 
 	// Exclude drawing if user set a hard limit magnitude.
 	if (core->getSkyDrawer()->getFlagPlanetMagnitudeLimit() && ( vMagnitude > static_cast<float>(core->getSkyDrawer()->getCustomPlanetMagnitudeLimit())))
@@ -3840,12 +3842,12 @@ void Planet::draw(StelCore* core, float maxMagLabels, const QFont& planetNameFon
 	// If asteroid is too faint to be seen, don't bother rendering. (Massive speedup if people have hundreds of orbital elements!)
 	// AW: Added a special case for educational purpose to drawing orbits for the Solar System Observer
 	// Details: https://sourceforge.net/p/stellarium/discussion/278769/thread/4828ebe4/
-	const bool cutDimObjects=((vMagnitude-5.0f) > core->getSkyDrawer()->getLimitMagnitude()) && pType>=Planet::isAsteroid;
+	const bool cutDimObjects=((empiricalVMagnitude-5.0f) > core->getSkyDrawer()->getLimitMagnitude()) && pType>=Planet::isAsteroid;
 	if ((ss->getMarkerValue()==0.) && cutDimObjects && !core->getCurrentLocation().planetName.contains("Observer", Qt::CaseInsensitive))
 	{
 		return;
 	}
-	if (pType>=Planet::isAsteroid && (vMagnitude > ss->getMarkerMagThreshold()))
+	if (pType>=Planet::isAsteroid && (empiricalVMagnitude > ss->getMarkerMagThreshold()))
 		return;
 
 	Mat4d mat = Mat4d::translation(eclipticPos) * rotLocalToParent;
@@ -3903,7 +3905,7 @@ void Planet::draw(StelCore* core, float maxMagLabels, const QFont& planetNameFon
 		// by putting here, only draw orbit if Planet is visible for clarity
 		drawOrbit(core);  // TODO - fade in here also...
 
-		if (flagLabels && ang_dist>0.25f && maxMagLabels>getVMagnitudeWithExtinction(core, vMagnitude) && core->getFlagClearSky())
+		if (flagLabels && ang_dist>0.25f && maxMagLabels>getVMagnitudeWithExtinction(core, vMagnitude)+empiricalMagnitudeOffset && core->getFlagClearSky())
 			labelsFader=true;
 		else
 			labelsFader=false;

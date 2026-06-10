@@ -327,7 +327,13 @@ void main(void)
 	// Is there any way to calibrate this?
 	static LandscapeMgr *lMgr=GETSTELMODULE(LandscapeMgr);
 	const float atmFadeIntensity = lMgr->getAtmosphereFadeIntensity();
-	const float nelm = StelCore::luminanceToNELM(drawer->getLightPollutionLuminance());
+	float nelm = StelCore::luminanceToNELM(drawer->getLightPollutionLuminance());
+	if (drawer->getFlagHasAtmosphere() && drawer->getFlagEmpiricalStellarVisibility())
+	{
+		const float empiricalLimit = drawer->getEmpiricalStellarLimitMagnitude();
+		const float empiricalWeight = qBound(0.f, 6.f - empiricalLimit, 1.f);
+		nelm = nelm*(1.f - empiricalWeight) + qMin(nelm, empiricalLimit)*empiricalWeight;
+	}
 	const float bortleIntensity = 1.f+(15.5f-2*nelm)*atmFadeIntensity; // smoothed Bortle index moderated by atmosphere fader.
 
 	const float lum = drawer->surfaceBrightnessToLuminance(12.f+0.15f*bortleIntensity); // was 11.5; Source? How to calibrate the new texture?

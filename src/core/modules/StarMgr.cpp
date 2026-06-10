@@ -1380,6 +1380,7 @@ void StarMgr::draw(StelCore* core)
 	// Prepare a table for storing precomputed RCMag for all ZoneArrays
 	RCMag rcmag_table[RCMAG_TABLE_SIZE];
 	const float starStreakScale = core->getFlagClearSky()? 1.0f:0.6f;
+	const float empiricalStellarMagnitudeOffset = skyDrawer->getEmpiricalStellarMagnitudeOffset();
 	
 	// Draw all the stars of all the selected zones
 	for (const auto* z : std::as_const(gridLevels))
@@ -1390,7 +1391,7 @@ void StarMgr::draw(StelCore* core)
 		for (int i=0;i<RCMAG_TABLE_SIZE;++i)
 		{
 			const float mag = mag_min+0.05*i;  // 0.05 mag MagStepIncrement
-			if (skyDrawer->computeRCMag(mag, &rcmag_table[i])==false)
+			if (skyDrawer->computeRCMag(mag + empiricalStellarMagnitudeOffset, &rcmag_table[i])==false)
 			{
 				if (i==0)
 					goto exit_loop;
@@ -2676,5 +2677,3 @@ QStringList StarMgr::getCultureLabels(StarId hip, StelObject::CulturalDisplaySty
 	labels.removeAll(QString());
 	return labels;
 }
-
-

@@ -451,7 +451,7 @@ void Comet::update(int deltaTime)
 	const bool withAtmosphere=(core->getSkyDrawer()->getFlagHasAtmosphere());
 
 	StelToneReproducer* eye = core->getToneReproducer();
-	const float lum = core->getSkyDrawer()->surfaceBrightnessToLuminance(getVMagnitude(core)+13.0f); // How to calibrate?
+	const float lum = core->getSkyDrawer()->surfaceBrightnessToLuminance(getVMagnitude(core)+core->getSkyDrawer()->getEmpiricalSolarSystemMagnitudeOffset()+13.0f); // How to calibrate?
 	// Get the luminance scaled between 0 and 1
 	float aLum =eye->adaptLuminanceScaled(lum);
 
@@ -488,11 +488,11 @@ void Comet::update(int deltaTime)
 		// Just counting through the vertices might make a spiral appearance. Maybe even better than stackwise? Let's see...
 		static LandscapeMgr *lMgr=GETSTELMODULE(LandscapeMgr);
 		const float avgAtmLum=lMgr->getAtmosphereAverageLuminance();
-		const float brightnessDecreasePerVertexFromHead=1.0f/(COMET_TAIL_SLICES*COMET_TAIL_STACKS)  * avgAtmLum;
+		const float empiricalTailFade=core->getSkyDrawer()->getFlagEmpiricalStellarVisibility() ? qMax(0.f, 6.f-core->getSkyDrawer()->getEmpiricalStellarLimitMagnitude()) : 0.f;
+		const float brightnessDecreasePerVertexFromHead=1.0f/(COMET_TAIL_SLICES*COMET_TAIL_STACKS)  * (avgAtmLum+empiricalTailFade);
 		float brightnessPerVertexFromHead=1.0f;
-                
-        const Vec3d tailEclOffset = eclipticPos + aberrationPush;
-                
+		const Vec3d tailEclOffset = eclipticPos + aberrationPush;
+
 		gastailColorArr.clear();
 		dusttailColorArr.clear();
 		for (int i=0; i<gastailVertexArr.size(); ++i)
@@ -504,7 +504,8 @@ void Comet::update(int deltaTime)
 			float oneMag=0.0f;
 			extinction.forward(vertAltAz, &oneMag);
 			float extinctionFactor=std::pow(0.4f, oneMag); // drop of one magnitude: factor 2.5 or 40%
-			gastailColorArr.append(gasColor*extinctionFactor* brightnessPerVertexFromHead*intensityFovScale);
+			const float tailVertexBrightness=qMax(0.f, brightnessPerVertexFromHead);
+			gastailColorArr.append(gasColor*extinctionFactor*tailVertexBrightness*intensityFovScale);
 
 			// dusttail extinction:
 			vertAltAz = core->heliocentricEclipticToAltAz(dusttailVertexArr.at(i) + tailEclOffset, StelCore::RefractionOn);
@@ -513,7 +514,7 @@ void Comet::update(int deltaTime)
 			oneMag=0.0f;
 			extinction.forward(vertAltAz, &oneMag);
 			extinctionFactor=std::pow(0.4f, oneMag); // drop of one magnitude: factor 2.5 or 40%
-			dusttailColorArr.append(dustColor*extinctionFactor * brightnessPerVertexFromHead*intensityFovScale);
+			dusttailColorArr.append(dustColor*extinctionFactor*tailVertexBrightness*intensityFovScale);
 
 			brightnessPerVertexFromHead-=brightnessDecreasePerVertexFromHead;
 		}
@@ -536,6 +537,8 @@ void Comet::draw(StelCore* core, float maxMagLabels, const QFont& planetNameFont
 
 	static SolarSystem *ss=GETSTELMODULE(SolarSystem);
 	const float vMagnitude=getVMagnitude(core);
+	const float empiricalMagnitudeOffset = core->getSkyDrawer()->getEmpiricalSolarSystemMagnitudeOffset();
+	const float empiricalVMagnitude = vMagnitude + empiricalMagnitudeOffset;
 
 	// Exclude drawing if user set a hard limit magnitude.
 	if (core->getSkyDrawer()->getFlagPlanetMagnitudeLimit() && (vMagnitude > static_cast<float>(core->getSkyDrawer()->getCustomPlanetMagnitudeLimit())))
@@ -550,7 +553,7 @@ void Comet::draw(StelCore* core, float maxMagLabels, const QFont& planetNameFont
 	// Problematic: Early-out here of course disables the wanted hint circles for dim comets.
 	// The line makes hints for comets 5 magnitudes below sky limiting magnitude visible.
 	// If comet is too faint to be seen, don't bother rendering. (Massive speedup if people have hundreds of comet elements!)
-	if ((ss->getMarkerValue()==0.) && ((vMagnitude-5.0f) > core->getSkyDrawer()->getLimitMagnitude()) && !core->getCurrentLocation().planetName.contains("Observer", Qt::CaseInsensitive))
+	if ((ss->getMarkerValue()==0.) && ((empiricalVMagnitude-5.0f) > core->getSkyDrawer()->getLimitMagnitude()) && !core->getCurrentLocation().planetName.contains("Observer", Qt::CaseInsensitive))
 	{
 		return;
 	}
@@ -581,7 +584,7 @@ void Comet::draw(StelCore* core, float maxMagLabels, const QFont& planetNameFont
 		// by putting here, only draw orbit if Comet is visible for clarity
 		drawOrbit(core);  // TODO - fade in here also...
 
-		labelsFader = (flagLabels && ang_dist>0.25f && maxMagLabels>vMagnitude);
+		labelsFader = (flagLabels && ang_dist>0.25f && maxMagLabels>empiricalVMagnitude);
 
 		if (core->getFlagClearSky())
 		{ // encapsulate painter!
@@ -589,7 +592,7 @@ void Comet::draw(StelCore* core, float maxMagLabels, const QFont& planetNameFont
 			StelPainter sPainter(prjin);
 			drawHints(core, sPainter, planetNameFont);
 			Vec3f color=Vec3f(0.25, 0.75, 1);
-			if (vMagnitude < ss->getMarkerMagThreshold())
+			if (empiricalVMagnitude < ss->getMarkerMagThreshold())
 				ss->drawAsteroidMarker(core, &sPainter, screenPos[0], screenPos[1], color); // This does not draw directly, but record an entry to be drawn in a batch.
 		}
 
@@ -604,7 +607,7 @@ void Comet::draw(StelCore* core, float maxMagLabels, const QFont& planetNameFont
 
 	// If comet is too faint to be seen, don't bother rendering. (Massive speedup if people have hundreds of comets!)
 	// This test moved here so that hints are still drawn.
-	if ((vMagnitude-5.0f) > core->getSkyDrawer()->getLimitMagnitude())
+	if ((empiricalVMagnitude-5.0f) > core->getSkyDrawer()->getLimitMagnitude())
 	{
 		return;
 	}
@@ -652,7 +655,7 @@ void Comet::drawComa(StelCore* core, StelProjector::ModelViewTranformP transfo)
 	sPainter.setBlending(true, GL_ONE, GL_ONE);
 
 	StelToneReproducer* eye = core->getToneReproducer();
-	float lum = core->getSkyDrawer()->surfaceBrightnessToLuminance(getVMagnitudeWithExtinction(core)+11.0f); // How to calibrate?
+	float lum = core->getSkyDrawer()->surfaceBrightnessToLuminance(getVMagnitudeWithExtinction(core)+core->getSkyDrawer()->getEmpiricalSolarSystemMagnitudeOffset()+11.0f); // How to calibrate?
 	// Get the luminance scaled between 0 and 1
 	const float aLum =eye->adaptLuminanceScaled(lum);
 	const float magFactor=qBound(0.25f*intensityFovScale, aLum*intensityFovScale, 2.0f);

@@ -376,6 +376,37 @@
     </widget>
    </item>
    <item>
+    <widget class="QGroupBox" name="visibilityGroupBox">
+     <property name="title">
+      <string>Visibility Settings</string>
+     </property>
+     <layout class="QVBoxLayout" name="verticalLayout_visibility">
+      <property name="leftMargin">
+       <number>0</number>
+      </property>
+      <property name="topMargin">
+       <number>0</number>
+      </property>
+      <property name="rightMargin">
+       <number>0</number>
+      </property>
+      <property name="bottomMargin">
+       <number>0</number>
+      </property>
+      <item>
+       <widget class="QCheckBox" name="empiricalStellarVisibilityCheckBox">
+        <property name="toolTip">
+         <string>Use empirical naked-eye limits for star visibility in twilight, moonlight, and bright skies.</string>
+        </property>
+        <property name="text">
+         <string>Use empirical stellar visibility</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
     <widget class="QGroupBox" name="groupBox_experimental">
      <property name="title">
       <string>Experimental</string>
@@ -459,6 +490,7 @@
   <tabstop>temperatureDoubleSpinBox</tabstop>
   <tabstop>extinctionDoubleSpinBox</tabstop>
   <tabstop>standardAtmosphereButton</tabstop>
+  <tabstop>empiricalStellarVisibilityCheckBox</tabstop>
   <tabstop>checkBox_noScatter</tabstop>
   <tabstop>checkBox_TfromK</tabstop>
   <tabstop>doubleSpinBox_T</tabstop>
