@@ -148,8 +148,10 @@ public:
 	//! @return false if the object is too faint to be displayed
 	bool computeRCMag(float mag, RCMag*) const;
 
-	//! Return the least restrictive empirical limiting magnitude for the current Sun altitude and sky luminance.
-	float empiricalStellarVisibilityLimit(const Vec3d& sunAltAzPos, float skyLuminance) const;
+	//! Return the least restrictive empirical limiting magnitude for the current Sun altitude, eclipse state and sky luminance.
+	float empiricalStellarVisibilityLimit(const Vec3d& sunAltAzPos,
+										  float skyLuminance,
+										  float solarEclipseFactor) const;
 
 	//! Report that an object of luminance lum with an on-screen area of area pixels is currently displayed
 	//! This information is used to determine the world adaptation luminance
