@@ -16,6 +16,7 @@
  * Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA  02110-1335, USA.
  */
 
+#include <algorithm>
 #include <cmath>
 #include <QDebug>
 
@@ -24,6 +25,17 @@
 #include "StelApp.hpp"
 #include "StelModuleMgr.hpp"
 #include "SolarSystem.hpp"
+
+namespace
+{
+constexpr float moonlightBrightnessScale = 0.06f;
+
+float smoothStep(const float edge0, const float edge1, const float x)
+{
+	const float t = std::max(0.f, std::min(1.f, (x-edge0)/(edge1-edge0)));
+	return t*t*(3.f-2.f*t);
+}
+}
 
 Skybright::Skybright()
 {
@@ -78,12 +90,11 @@ void Skybright::setSunMoon(const float cosDistMoonZenith, const float cosDistSun
 	if (cosDistSunZenith<0) airMassSun = 40.f;
 	else airMassSun = 1.f / (cosDistSunZenith+0.025f*expf(-11.f*cosDistSunZenith));
 
-	bMoonTerm1 = stelpow10f(-0.4f * (magMoon + 54.32f));
+	bMoonTerm1 = stelpow10f(-0.4f * (magMoon + 54.32f)) * moonlightBrightnessScale;
 
-	// Moon should have no impact if below the horizon
-	// .05 is ad hoc fadeout range - Rob
-	if( cosDistMoonZenith < 0.f ) bMoonTerm1 *= 1.f + cosDistMoonZenith/0.05f;
-	if(cosDistMoonZenith < -0.05f) bMoonTerm1 = 0.f;
+	// Moonlight fades gradually around the horizon. The old narrow linear fade
+	// made moonrise produce small but visible sky-brightness jumps.
+	bMoonTerm1 *= smoothStep(-0.08f, 0.12f, cosDistMoonZenith);
 
 
 	C3 = stelpow10f(-0.4f*K*airMassMoon);	// Term for moon brightness computation
@@ -124,8 +135,8 @@ float Skybright::getLuminance( float cosDistMoon,
 	// Total sky brightness
 	float b_total = ((b_twilight<b_daylight) ? b_twilight : b_daylight);
 
-	// Moonlight brightness, don't compute if less than 1% daylight
-	if ((bMoonTerm1 * (1.f - bKX) * (28860205.1341274269f * C3 + 440000.f * (1.f - C3)))/b_total>0.01f)
+	// Moonlight brightness.
+	if (bMoonTerm1 > 0.f)
 	{
 		float dist_moon;
 		if (cosDistMoon >= 1.f) {cosDistMoon = 1.f;dist_moon = 0.f;}
@@ -151,4 +162,3 @@ float Skybright::getLuminance( float cosDistMoon,
 	//5;	// In cd/m^2 : the 32393895 is empirical term because the
 	// lambert -> cd/m^2 formula seems to be wrong...
 }
-
