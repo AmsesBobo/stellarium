@@ -433,6 +433,9 @@ SET(ENABLE_SHOWMYSKY 1 CACHE BOOL "Define whether to support ShowMySky atmospher
 SET(ENABLE_XLSX 1 CACHE BOOL "Define whether to support XLSX (Excel) files")
 IF(ENABLE_XLSX)
      ADD_DEFINITIONS(-DENABLE_XLSX)
+     IF(Qt6_VERSION VERSION_GREATER_EQUAL 6.10)
+          FIND_PACKAGE(Qt6 REQUIRED COMPONENTS Gui GuiPrivate)
+     ENDIF()
 ENDIF()
 
 # Activate support for INDI client in Telescope Control plugin
@@ -627,7 +630,7 @@ SET(USE_BUNDLED_QTCOMPRESS 1 CACHE BOOL "Use bundled version of qtcompress")
 # > ad7b94e163a: User projects must now call find_package(Qt6 COMPONENTS FooPrivate) to make use of the Qt6::FooPrivate target.
 # For the case of Qt5 this condition evaluates to false.
 IF(Qt6_VERSION VERSION_GREATER_EQUAL 6.10 AND NOT USE_BUNDLED_QTCOMPRESS)
-     FIND_PACKAGE(Qt6 REQUIRED COMPONENTS GuiPrivate)
+     FIND_PACKAGE(Qt6 REQUIRED COMPONENTS Gui GuiPrivate)
 ENDIF()
 IF(USE_PLUGIN_TELESCOPECONTROL OR ENABLE_GPS)
      FIND_PACKAGE(Qt${QT_VERSION_MAJOR} COMPONENTS SerialPort REQUIRED)
@@ -845,8 +848,8 @@ IF(ENABLE_XLSX)
           MESSAGE(STATUS "Using system-provided QXlsx ${QXlsx_VERSION}")
      ELSE()
           CPMAddPackage(NAME QXlsxQt${QT_VERSION_MAJOR}
-               URL https://github.com/QtExcel/QXlsx/archive/9f545935a1effa0144ba76598e95a7597210553a.zip
-               URL_HASH SHA256=27dad1aa0e477b43990f6cbbfb30988f417a6f3629c880c397574ae17bfb4b34
+               URL https://github.com/QtExcel/QXlsx/archive/refs/tags/v1.5.1.1.zip
+               URL_HASH SHA256=5358ec4605e0084ab99e79c993e83364c94cf42cce079db579ac29a6e5e07d5f
                EXCLUDE_FROM_ALL ON
                SOURCE_SUBDIR QXlsx)
      ENDIF()
