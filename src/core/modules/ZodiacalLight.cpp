@@ -27,6 +27,7 @@
 #include "StelTexture.hpp"
 #include "StelUtils.hpp"
 #include "StelFileMgr.hpp"
+#include "StelMainView.hpp"
 #include "StelModuleMgr.hpp"
 #include "LandscapeMgr.hpp"
 
@@ -387,6 +388,9 @@ void main(void)
 		atmFactor=20.0f*(0.05f-0.2f*atmLum); // The factor 0.2f was found empirically. Nominally it should be 0.667, but 0.2 or at least 0.4 looks better.
 	else
 		atmFactor=20.0f*(0.05f-atmLum);
+
+	if (StelMainView::getInstance().getGLInformation().isHighGraphicsMode)
+		atmFactor *= 1.1f;
 
 	//GETSTELMODULE(StelObjectMgr)->addToExtraInfoString(StelObject::DebugAid, QString("ZL AtmFactor: %1<br/>").arg(QString::number(atmFactor, 'f', 4)));
 	Q_ASSERT(atmFactor<=1.0f);
