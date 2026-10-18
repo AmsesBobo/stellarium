@@ -337,6 +337,7 @@ void NomenclatureMgr::setForceItems(bool b)
 
 void NomenclatureMgr::drawPointer(StelCore* core, StelPainter& painter)
 {
+	StelPainter::AnnotationScope annotationScope(painter);
 	const QList<StelObjectP> newSelected = sObjMgr->getSelectedObject("NomenclatureItem");
 	if (!newSelected.empty())
 	{

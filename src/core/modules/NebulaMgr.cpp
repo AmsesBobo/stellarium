@@ -879,6 +879,7 @@ void NebulaMgr::draw(StelCore* core)
 
 void NebulaMgr::drawPointer(const StelCore* core, StelPainter& sPainter)
 {
+	StelPainter::AnnotationScope annotationScope(sPainter);
 	const StelProjectorP prj = core->getProjection(StelCore::FrameJ2000);
 
 	const QList<StelObjectP> newSelected = GETSTELMODULE(StelObjectMgr)->getSelectedObject("Nebula");

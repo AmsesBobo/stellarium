@@ -22,6 +22,7 @@
 #include "StelApp.hpp"
 #include "StelSRGB.hpp"
 #include "StelCore.hpp"
+#include "StelSkyDrawer.hpp"
 #include "StelPainter.hpp"
 #include "StelFileMgr.hpp"
 #include "StelMainView.hpp"
@@ -733,6 +734,12 @@ void AtmosphereLightweight::applyToneReproducerParams(StelCore* core, const floa
 	GL(renderShaderProgram_->setUniformValue(renderUniformLocations_.doSRGB, true));
 	GL(renderShaderProgram_->setUniformValue(renderUniformLocations_.flagUseTmGamma, false));
 	GL(renderShaderProgram_->setUniformValue(renderUniformLocations_.brightnessScale, atmosphereIntensity));
+	// Photographic mode: record the sky luminance linearly with the camera settings
+	{
+		const StelSkyDrawer* skyDrawer = core->getSkyDrawer();
+		GL(renderShaderProgram_->setUniformValue("photoMode", skyDrawer->getFlagPhotographicModeActive()));
+		GL(renderShaderProgram_->setUniformValue("photoScale", skyDrawer->getPhotoSceneScale()));
+	}
 }
 
 void AtmosphereLightweight::draw(StelCore*const core)

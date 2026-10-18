@@ -420,6 +420,7 @@ void StarMgr::init()
 
 void StarMgr::drawPointer(StelPainter& sPainter, const StelCore* core)
 {
+	StelPainter::AnnotationScope annotationScope(sPainter);
 	const QList<StelObjectP> newSelected = objectMgr->getSelectedObject("Star");
 	if (!newSelected.empty())
 	{

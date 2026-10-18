@@ -902,7 +902,8 @@ namespace
 //! The function is continuous and has slope 1 at the knee, so nothing changes below it.
 QByteArray makeCameraResponseShader()
 {
-	return 1+R"(
+	return QByteArray("const highp float photoShoulderKnee = ") +
+	       QByteArray::number(StelSkyDrawer::PHOTO_SHOULDER_KNEE, 'f', 6) + ";\n" + R"(
 uniform bool photoMode;
 uniform highp float photoExposure;
 
@@ -910,7 +911,7 @@ highp vec3 cameraResponse(highp vec3 lin)
 {
 	if(!photoMode) return lin;
 	highp vec3 x = max(lin * photoExposure, vec3(0));
-	const highp float knee = 0.8;
+	const highp float knee = photoShoulderKnee;
 	highp vec3 over = max(x - vec3(knee), vec3(0));
 	highp vec3 shoulder = vec3(knee) + (1. - knee) * (vec3(1) - exp(-over / (1. - knee)));
 	return mix(x, shoulder, step(vec3(knee), x));
