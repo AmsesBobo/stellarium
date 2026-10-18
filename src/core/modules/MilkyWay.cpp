@@ -79,7 +79,19 @@ void MilkyWay::init()
 
 	auto& gl = *QOpenGLContext::currentContext()->functions();
 
-	mainTex = StelApp::getInstance().getTextureManager().createTexture(StelFileMgr::getInstallationDir()+"/textures/milkyway.png");
+	// The texture can be replaced (e.g. by a star-free one for the photographic mode).
+	// photoLuminanceScale must then be adapted to it: it is the luminance of a linear texture value of 1.0.
+	// The default calibrates Axel Mellinger's panorama: its 99.9th percentile (bright star clouds,
+	// linear value 0.21) is set to about 20.5 mag/arcsec^2 (V), i.e. 6.8e-4 cd/m^2.
+	const QString textureName = conf->value("astro/milky_way_texture", "milkyway.png").toString();
+	QString texturePath = StelFileMgr::findFile("textures/"+textureName);
+	if (texturePath.isEmpty())
+	{
+		qWarning() << "Milky Way texture" << textureName << "not found, using milkyway.png";
+		texturePath = StelFileMgr::getInstallationDir()+"/textures/milkyway.png";
+	}
+	photoLuminanceScale = conf->value("astro/milky_way_photo_luminance", 3.2e-3).toDouble();
+	mainTex = StelApp::getInstance().getTextureManager().createTexture(texturePath);
 	mainTex->bind(0);
 	gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
 	mainTex->release();
@@ -252,6 +264,7 @@ uniform vec3 brightness;
 uniform mat4 projectionMatrixInverse;
 uniform bool extinctionEnabled;
 uniform float bortleIntensity;
+uniform bool photoMode;  // photographic mode: texture is linear luminance, brightness holds the calibration
 void main(void)
 {
 	const float PI = 3.14159265;
@@ -275,7 +288,10 @@ void main(void)
 		vec3 worldPos = winPosToWorldPos(winPos.x, winPos.y, ok);
 		vec3 altAzViewDir = worldPosToAltAzPos(worldPos);
 		float mag = extinctionMagnitude(altAzViewDir);
-		extinctionFactor=pow(0.3, mag) * (1.1-bortleIntensity*0.1); // drop of one magnitude: should be factor 2.5 or 40%. We take 30%, it looks more realistic.
+		if (photoMode)
+			extinctionFactor = pow(10., -0.4*mag); // physical extinction; light pollution is part of the sky luminance
+		else
+			extinctionFactor=pow(0.3, mag) * (1.1-bortleIntensity*0.1); // drop of one magnitude: should be factor 2.5 or 40%. We take 30%, it looks more realistic.
 	}
 	else
 	{
@@ -306,6 +322,7 @@ void main(void)
 		shaderVars.bortleIntensity  = renderProgram->uniformLocation("bortleIntensity");
 		shaderVars.extinctionEnabled= renderProgram->uniformLocation("extinctionEnabled");
 		shaderVars.projectionMatrixInverse = renderProgram->uniformLocation("projectionMatrixInverse");
+		shaderVars.photoMode        = renderProgram->uniformLocation("photoMode");
 		renderProgram->release();
 	}
 	if(!renderProgram || !renderProgram->isLinked())
@@ -314,6 +331,36 @@ void main(void)
 	StelToneReproducer* eye = core->getToneReproducer();
 
 	Q_ASSERT(mainTex);	// A texture must be loaded before calling this
+
+	// Photographic mode: the texture (linear, thanks to sRGB decoding) times its calibrated
+	// luminance, recorded with the camera settings. No eye adaptation, no ad-hoc factors.
+	const bool photoMode = drawer->getFlagPhotographicModeActive();
+	if (photoMode)
+	{
+		const QVector4D lin = colorToShader(Vec4f(color[0], color[1], color[2], 1.f));
+		const float k = static_cast<float>(photoLuminanceScale * intensity) * drawer->getPhotoSceneScale() * fader->getInterstate();
+		renderProgram->bind();
+		renderProgram->setUniformValue(shaderVars.photoMode, true);
+		renderProgram->setUniformValue(shaderVars.extinctionEnabled, drawer->getFlagHasAtmosphere() && extinction.getExtinctionCoefficient()>=0.01f);
+		renderProgram->setUniformValue(shaderVars.bortleIntensity, 1.f);
+		const int mainTexSampler = 0;
+		mainTex->bind(mainTexSampler);
+		renderProgram->setUniformValue(shaderVars.mainTex, mainTexSampler);
+		renderProgram->setUniformValue(shaderVars.projectionMatrixInverse, projector->getProjectionMatrix().toQMatrix().inverted());
+		renderProgram->setUniformValue(shaderVars.brightness, QVector3D(lin.x()*k, lin.y()*k, lin.z()*k));
+		renderProgram->setUniformValue(shaderVars.saturation, GLfloat(saturation));
+		core->setAberrationUniforms(*renderProgram);
+		projector->setUnProjectUniforms(*renderProgram);
+		extinction.setForwardTransformUniforms(*renderProgram);
+		auto& glf = *QOpenGLContext::currentContext()->functions();
+		glf.glEnable(GL_BLEND);
+		glf.glBlendFunc(GL_ONE,GL_ONE);
+		bindVAO();
+		glf.glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+		releaseVAO();
+		glf.glDisable(GL_BLEND);
+		return;
+	}
 
 	// This RGB color corresponds to the night blue scotopic color = 0.25, 0.25 in xyY mode.
 	// since milky way is always seen white RGB value in the texture (1.0,1.0,1.0)
@@ -390,6 +437,7 @@ void main(void)
 
 	renderProgram->setUniformValue(shaderVars.extinctionEnabled, drawer->getFlagHasAtmosphere() && extinction.getExtinctionCoefficient()>=0.01f);
 	renderProgram->setUniformValue(shaderVars.bortleIntensity, bortleIntensity);
+	renderProgram->setUniformValue(shaderVars.photoMode, false);
 
 	const int mainTexSampler = 0;
 	mainTex->bind(mainTexSampler);

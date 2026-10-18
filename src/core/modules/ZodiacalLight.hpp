@@ -153,7 +153,14 @@ private:
 		int bortleIntensity;
 		int extinctionEnabled;
 		int projectionMatrixInverse;
+		int photoMode;
+		int photoTex;
 	} shaderVars;
+
+	//! Photographic mode: absolute brightness of the zodiacal light (Leinert et al. 1998, Table 16)
+	//! as a floating-point texture in S10 units, same layout as mainTex (sun in the centre).
+	unsigned int photoTex = 0;
+	void createPhotoTexture();
 	std::unique_ptr<QOpenGLVertexArrayObject> vao;
 	std::unique_ptr<QOpenGLBuffer> vbo;
 	StelProjectorP prevProjector;

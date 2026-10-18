@@ -19,6 +19,8 @@
  */
 
 #include "ZodiacalLight.hpp"
+#include <cmath>
+#include <vector>
 #include "SolarSystem.hpp"
 #include "StelFader.hpp"
 #include "StelSRGB.hpp"
@@ -55,6 +57,101 @@ constexpr int SKY_VERTEX_ATTRIB_INDEX = 0;
 }
 
 // Class which manages the displaying of the Zodiacal Light
+namespace
+{
+// Zodiacal light brightness seen from Earth, in S10 units (number of 10th magnitude stars per
+// square degree, V band), as a function of the difference in ecliptic longitude from the Sun
+// (rows) and the ecliptic latitude (columns).
+// Source: Leinert Ch. et al. (1998), "The 1997 reference of diffuse night sky brightness",
+// A&AS 127, 1-99, Table 16. https://doi.org/10.1051/aas:1998105
+// Zero marks the region near the Sun without data; the ecliptic pole (90 deg) has 60 S10.
+const float zlLongitudes[] = {0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 60, 75, 90, 105, 120, 135, 150, 165, 180};
+const float zlLatitudes[]  = {0, 5, 10, 15, 20, 25, 30, 45, 60, 75, 90};
+const float zlTable[19][11] = {
+	{   0,    0,    0, 2450, 1260, 770, 500, 215, 117, 78, 60},
+	{   0,    0,    0, 2300, 1200, 740, 490, 212, 117, 78, 60},
+	{   0,    0, 3700, 1930, 1070, 675, 460, 206, 116, 78, 60},
+	{9000, 5300, 2690, 1450,  870, 590, 410, 196, 114, 78, 60},
+	{5000, 3500, 1880, 1100,  710, 495, 355, 185, 110, 77, 60},
+	{3000, 2210, 1350,  860,  585, 425, 320, 174, 106, 76, 60},
+	{1940, 1460,  955,  660,  480, 365, 285, 162, 102, 74, 60},
+	{1290,  990,  710,  530,  400, 310, 250, 151,  98, 73, 60},
+	{ 925,  735,  545,  415,  325, 264, 220, 140,  94, 72, 60},
+	{ 710,  570,  435,  345,  278, 228, 195, 130,  91, 70, 60},
+	{ 395,  345,  275,  228,  190, 163, 143, 105,  81, 67, 60},
+	{ 264,  248,  210,  177,  153, 134, 118,  91,  73, 64, 60},
+	{ 202,  196,  176,  151,  130, 115, 103,  81,  67, 62, 60},
+	{ 166,  164,  154,  133,  117, 104,  93,  75,  64, 60, 60},
+	{ 147,  145,  138,  120,  108,  98,  88,  70,  60, 58, 60},
+	{ 140,  139,  130,  115,  105,  95,  86,  70,  60, 57, 60},
+	{ 140,  139,  129,  116,  107,  99,  91,  75,  62, 56, 60},
+	{ 153,  150,  140,  129,  118, 110, 102,  81,  64, 56, 60},
+	{ 180,  166,  152,  139,  127, 116, 105,  82,  65, 56, 60},
+};
+
+// Index and fraction of value x in an ascending grid
+void gridPosition(const float* grid, int n, float x, int& i, float& f)
+{
+	i = 0;
+	while (i < n-2 && x > grid[i+1])
+		++i;
+	f = qBound(0.f, (x-grid[i])/(grid[i+1]-grid[i]), 1.f);
+}
+
+// Zodiacal light in S10 for a longitude difference from the Sun and a latitude (degrees, >= 0).
+// Interpolated in log space between the table entries; inside 15 degrees elongation, where the
+// table has no data, it follows the inner power law of the zodiacal light (~ elongation^-2.3).
+float zodiacalLightS10(float dLambda, float beta)
+{
+	const float elongation = std::acos(std::cos(dLambda*M_PI_180f) * std::cos(beta*M_PI_180f)) * M_180_PIf;
+	int i, j;
+	float fi, fj;
+	gridPosition(zlLongitudes, 19, dLambda, i, fi);
+	gridPosition(zlLatitudes, 11, beta, j, fj);
+	const float v00 = zlTable[i][j], v01 = zlTable[i][j+1], v10 = zlTable[i+1][j], v11 = zlTable[i+1][j+1];
+	if (elongation >= 15.f && v00 > 0.f && v01 > 0.f && v10 > 0.f && v11 > 0.f)
+	{
+		const float l = (1.f-fi)*(1.f-fj)*std::log(v00) + (1.f-fi)*fj*std::log(v01)
+		              + fi*(1.f-fj)*std::log(v10) + fi*fj*std::log(v11);
+		return std::exp(l);
+	}
+	// Near the Sun: anchored at 15 degrees on the ecliptic (9000 S10)
+	return 9000.f * std::pow(qMax(elongation, 2.f)/15.f, -2.3f);
+}
+}
+
+void ZodiacalLight::createPhotoTexture()
+{
+	if (photoTex || !StelMainView::getInstance().getGLInformation().isHighGraphicsMode)
+		return;
+	// Same layout as the 2004 texture: x = longitude from anti-sun (0) through the Sun (0.5),
+	// y = angle from the south ecliptic pole (0) to the north ecliptic pole (1).
+	constexpr int W = 360, H = 180;
+	std::vector<float> data(W*H);
+	for (int y=0; y<H; ++y)
+	{
+		const float beta = std::fabs(90.f - (y+0.5f)*180.f/H);
+		for (int x=0; x<W; ++x)
+		{
+			const float dLambda = std::fabs((x+0.5f)*360.f/W - 180.f);
+			// Limit the value near the Sun to stay well inside the range of half floats (max 65504).
+			// There the Sun or the daylit sky outshines it anyway.
+			data[static_cast<size_t>(y*W+x)] = qMin(zodiacalLightS10(dLambda, beta), 30000.f);
+		}
+	}
+	auto& gl = *QOpenGLContext::currentContext()->functions();
+	GLuint tex = 0;
+	gl.glGenTextures(1, &tex);
+	gl.glBindTexture(GL_TEXTURE_2D, tex);
+	gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	gl.glTexImage2D(GL_TEXTURE_2D, 0, GL_R16F, W, H, 0, GL_RED, GL_FLOAT, data.data());
+	gl.glBindTexture(GL_TEXTURE_2D, 0);
+	photoTex = tex;
+}
+
 ZodiacalLight::ZodiacalLight()
 	: propMgr(Q_NULLPTR)
 	, color(1.f, 1.f, 1.f)
@@ -292,6 +389,8 @@ uniform mat4 projectionMatrixInverse;
 uniform bool extinctionEnabled;
 uniform float bortleIntensity;
 uniform float lambdaSun;
+uniform bool photoMode;      // photographic mode: absolute brightness from photoTex
+uniform sampler2D photoTex;  // zodiacal light in S10 units (Leinert et al. 1998)
 void main(void)
 {
 	const float PI = 3.14159265;
@@ -314,13 +413,21 @@ void main(void)
 		vec3 worldPos = winPosToWorldPos(winPos.x, winPos.y, ok);
 		vec3 altAzViewDir = worldPosToAltAzPos(worldPos);
 		float mag = extinctionMagnitude(altAzViewDir);
-		extinctionFactor=pow(0.4, mag) * (1.1-bortleIntensity*0.1); // Drop of one magnitude: factor 2.5 or 40%, and further reduced by light pollution.
+		if (photoMode)
+			extinctionFactor = pow(10., -0.4*mag); // physical extinction; light pollution is part of the sky luminance
+		else
+			extinctionFactor=pow(0.4, mag) * (1.1-bortleIntensity*0.1); // Drop of one magnitude: factor 2.5 or 40%, and further reduced by light pollution.
 	}
 	else
 	{
 		extinctionFactor = 1.;
 	}
 
+	if (photoMode)
+	{
+		FRAG_COLOR = vec4(texture2D(photoTex, texc).r * brightness * extinctionFactor, 1);
+		return;
+	}
     vec4 color = texture2D(mainTex, texc)*vec4(brightness,1)*extinctionFactor;
 	FRAG_COLOR = color;
 }
@@ -343,10 +450,52 @@ void main(void)
 		shaderVars.bortleIntensity  = renderProgram->uniformLocation("bortleIntensity");
 		shaderVars.extinctionEnabled= renderProgram->uniformLocation("extinctionEnabled");
 		shaderVars.projectionMatrixInverse = renderProgram->uniformLocation("projectionMatrixInverse");
+		shaderVars.photoMode        = renderProgram->uniformLocation("photoMode");
+		shaderVars.photoTex         = renderProgram->uniformLocation("photoTex");
 		renderProgram->release();
 	}
 	if(!renderProgram || !renderProgram->isLinked())
 		return;
+
+	// Photographic mode: the zodiacal light with its measured absolute brightness, recorded by
+	// the camera like the sky. It is simply added to the sky light, so it stays (realistically)
+	// invisible under a bright or light-polluted sky without any special rules.
+	if (drawer->getFlagPhotographicModeActive())
+	{
+		createPhotoTexture();
+		if (!photoTex)
+			return;
+		// 1 S10 = one 10th magnitude star (2.54e-10 lx) per square degree (3.0462e-4 sr)
+		constexpr float luminancePerS10 = 2.54e-10f / 3.0462e-4f; // cd/m^2
+		const Vec3f linearColor(colorToShader(color).x(), colorToShader(color).y(), colorToShader(color).z());
+		const Vec3f brightnessPhoto = linearColor * (luminancePerS10 * drawer->getPhotoSceneScale()
+		                                             * static_cast<float>(intensity) * fader->getInterstate());
+		renderProgram->bind();
+		const bool withExtinctionPhoto=(drawer->getFlagHasAtmosphere() && drawer->getExtinction().getExtinctionCoefficient()>=0.01f);
+		renderProgram->setUniformValue(shaderVars.extinctionEnabled, withExtinctionPhoto);
+		renderProgram->setUniformValue(shaderVars.bortleIntensity, 1.f);
+		renderProgram->setUniformValue(shaderVars.photoMode, true);
+		auto& glf = *QOpenGLContext::currentContext()->functions();
+		const int mainTexSampler = 0, photoTexSampler = 1;
+		mainTex->bind(mainTexSampler);
+		renderProgram->setUniformValue(shaderVars.mainTex, mainTexSampler);
+		glf.glActiveTexture(GL_TEXTURE0 + photoTexSampler);
+		glf.glBindTexture(GL_TEXTURE_2D, photoTex);
+		glf.glActiveTexture(GL_TEXTURE0);
+		renderProgram->setUniformValue(shaderVars.photoTex, photoTexSampler);
+		renderProgram->setUniformValue(shaderVars.projectionMatrixInverse, projector->getProjectionMatrix().toQMatrix().inverted());
+		renderProgram->setUniformValue(shaderVars.brightness, brightnessPhoto.toQVector());
+		renderProgram->setUniformValue(shaderVars.lambdaSun, GLfloat(lambdaSun));
+		projector->setUnProjectUniforms(*renderProgram);
+		extinction.setForwardTransformUniforms(*renderProgram);
+		glf.glEnable(GL_BLEND);
+		glf.glBlendFunc(GL_ONE,GL_ONE);
+		bindVAO();
+		glf.glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+		releaseVAO();
+		glf.glDisable(GL_BLEND);
+		return;
+	}
 
 	const float nelm = StelCore::luminanceToNELM(drawer->getLightPollutionLuminance());
 	// Test for light pollution, return if too bad.
@@ -407,6 +556,7 @@ void main(void)
 
 	renderProgram->setUniformValue(shaderVars.extinctionEnabled, withExtinction);
 	renderProgram->setUniformValue(shaderVars.bortleIntensity, bortleIntensity);
+	renderProgram->setUniformValue(shaderVars.photoMode, false);
 
 	const int mainTexSampler = 0;
 	mainTex->bind(mainTexSampler);
