@@ -1413,8 +1413,16 @@ void StarMgr::draw(StelCore* core)
 				}
 				break;
 			}
-			rcmag_table[i].radius *= starsFader.getInterstate() * starStreakScale;
-			rcmag_table[i].luminance *= starStreakScale;
+			if (skyDrawer->getFlagPhotographicModeActive())
+			{
+				// In the photographic mode the sprite size belongs to the PSF: fade the light instead
+				rcmag_table[i].luminance *= starsFader.getInterstate() * starStreakScale;
+			}
+			else
+			{
+				rcmag_table[i].radius *= starsFader.getInterstate() * starStreakScale;
+				rcmag_table[i].luminance *= starStreakScale;
+			}
 		}
 		lastMaxSearchLevel = z->level;
 

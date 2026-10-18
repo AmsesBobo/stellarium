@@ -106,6 +106,8 @@ StelSkyDrawer::StelSkyDrawer(StelCore* acore) :
 	photoExposureTime = qBound(1./8000., conf->value("viewing/photographic_exposure_time", 20.0).toDouble(), 3600.);
 	photoAperture = qBound(0.7, conf->value("viewing/photographic_aperture", 2.8).toDouble(), 64.);
 	photoISO = qBound(25., conf->value("viewing/photographic_iso", 1600.0).toDouble(), 409600.);
+	photoMinFwhmPixels = qBound(0.8f, conf->value("viewing/photographic_psf_min_fwhm", 2.0).toFloat(), 10.f);
+	photoSeeingArcsec = qBound(0.f, conf->value("viewing/photographic_seeing", 3.0).toFloat(), 60.f);
 	setFlagStarMagnitudeLimit(conf->value("astro/flag_star_magnitude_limit", false).toBool());
 	setCustomStarMagnitudeLimit(conf->value("astro/star_magnitude_limit", 6.5).toDouble());
 	setFlagPlanetMagnitudeLimit(conf->value("astro/flag_planet_magnitude_limit", false).toBool());
@@ -239,7 +241,146 @@ void StelSkyDrawer::init()
 
 	vbo->release();
 
+	initPhotoStarRendering();
+
 	update(0);
+}
+
+void StelSkyDrawer::initPhotoStarRendering()
+{
+	photoVertexArray.resize(maxPointSources*6);
+
+	// The profile is evaluated per pixel. Everything is in floats: a single star may record
+	// hundreds of times the saturation level, and faint stars need far finer steps than 8 bits.
+	const char* vsrc = R"(
+ATTRIBUTE highp vec2 pos;
+ATTRIBUTE highp vec2 offset;
+ATTRIBUTE highp vec3 color;
+ATTRIBUTE highp float radius;
+uniform highp mat4 projectionMatrix;
+VARYING highp vec2 vOffset;
+VARYING highp vec3 vColor;
+VARYING highp float vRadius;
+void main(void)
+{
+	gl_Position = projectionMatrix * vec4(pos.x, pos.y, 0, 1);
+	vOffset = offset;
+	vColor = color;
+	vRadius = radius;
+}
+)";
+	const char* fsrc = R"(
+VARYING highp vec2 vOffset;
+VARYING highp vec3 vColor;
+VARYING highp float vRadius;
+uniform highp float coreAlpha;
+uniform highp float coreBeta;
+uniform highp float haloAlpha;
+uniform highp float haloBeta;
+uniform highp float haloFraction;
+const highp float PI = 3.14159265358979;
+// Moffat profile normalized to unit integral over the plane
+highp float moffat(highp float r2, highp float alpha, highp float beta)
+{
+	return (beta - 1.) / (PI * alpha * alpha) * pow(1. + r2 / (alpha * alpha), -beta);
+}
+void main(void)
+{
+	highp float r2 = dot(vOffset, vOffset);
+	highp float profile = (1. - haloFraction) * moffat(r2, coreAlpha, coreBeta)
+	                    + haloFraction * moffat(r2, haloAlpha, haloBeta);
+	// Fade the outermost part of the sprite, so that its edge never shows
+	highp float r = sqrt(r2);
+	profile *= 1. - smoothstep(0.75 * vRadius, vRadius, r);
+	FRAG_COLOR = vec4(vColor * profile, 1.);
+}
+)";
+	photoStarShaderProgram.reset(new QOpenGLShaderProgram);
+	photoStarShaderProgram->addShaderFromSourceCode(QOpenGLShader::Vertex, StelOpenGL::globalShaderPrefix(StelOpenGL::VERTEX_SHADER) + vsrc);
+	photoStarShaderProgram->addShaderFromSourceCode(QOpenGLShader::Fragment, StelOpenGL::globalShaderPrefix(StelOpenGL::FRAGMENT_SHADER) + fsrc);
+	StelPainter::linkProg(photoStarShaderProgram.get(), "photographic star shader");
+	photoStarShaderVars.projectionMatrix = photoStarShaderProgram->uniformLocation("projectionMatrix");
+	photoStarShaderVars.pos = photoStarShaderProgram->attributeLocation("pos");
+	photoStarShaderVars.offset = photoStarShaderProgram->attributeLocation("offset");
+	photoStarShaderVars.color = photoStarShaderProgram->attributeLocation("color");
+	photoStarShaderVars.radius = photoStarShaderProgram->attributeLocation("radius");
+	photoStarShaderVars.coreAlpha = photoStarShaderProgram->uniformLocation("coreAlpha");
+	photoStarShaderVars.coreBeta = photoStarShaderProgram->uniformLocation("coreBeta");
+	photoStarShaderVars.haloAlpha = photoStarShaderProgram->uniformLocation("haloAlpha");
+	photoStarShaderVars.haloBeta = photoStarShaderProgram->uniformLocation("haloBeta");
+	photoStarShaderVars.haloFraction = photoStarShaderProgram->uniformLocation("haloFraction");
+
+	photoVbo.reset(new QOpenGLBuffer(QOpenGLBuffer::VertexBuffer));
+	photoVbo->create();
+	photoVbo->bind();
+	photoVbo->setUsagePattern(QOpenGLBuffer::StreamDraw);
+	photoVbo->allocate(static_cast<int>(maxPointSources*6*sizeof(PhotoStarVertex)));
+	photoVao.reset(new QOpenGLVertexArrayObject);
+	if (photoVao->create())
+	{
+		photoVao->bind();
+		auto& prog = *photoStarShaderProgram;
+		prog.setAttributeBuffer(photoStarShaderVars.pos,    GL_FLOAT, offsetof(PhotoStarVertex, pos),    2, sizeof(PhotoStarVertex));
+		prog.setAttributeBuffer(photoStarShaderVars.offset, GL_FLOAT, offsetof(PhotoStarVertex, offset), 2, sizeof(PhotoStarVertex));
+		prog.setAttributeBuffer(photoStarShaderVars.color,  GL_FLOAT, offsetof(PhotoStarVertex, color),  3, sizeof(PhotoStarVertex));
+		prog.setAttributeBuffer(photoStarShaderVars.radius, GL_FLOAT, offsetof(PhotoStarVertex, radius), 1, sizeof(PhotoStarVertex));
+		prog.enableAttributeArray(photoStarShaderVars.pos);
+		prog.enableAttributeArray(photoStarShaderVars.offset);
+		prog.enableAttributeArray(photoStarShaderVars.color);
+		prog.enableAttributeArray(photoStarShaderVars.radius);
+		photoVao->release();
+	}
+	photoVbo->release();
+}
+
+void StelSkyDrawer::flushPhotoPointSources(StelPainter* sPainter)
+{
+	if (nbPhotoPointSources==0)
+		return;
+
+	sPainter->setBlending(true, GL_ONE, GL_ONE);
+	const QMatrix4x4 qMat=sPainter->getProjector()->getProjectionMatrix().toQMatrix();
+
+	photoVbo->bind();
+	photoVbo->write(0, photoVertexArray.data(), static_cast<int>(nbPhotoPointSources*6*sizeof(PhotoStarVertex)));
+
+	auto& prog = *photoStarShaderProgram;
+	prog.bind();
+	prog.setUniformValue(photoStarShaderVars.projectionMatrix, qMat);
+	prog.setUniformValue(photoStarShaderVars.coreAlpha, photoCoreAlpha);
+	prog.setUniformValue(photoStarShaderVars.coreBeta, PHOTO_CORE_BETA);
+	prog.setUniformValue(photoStarShaderVars.haloAlpha, photoCoreAlpha*PHOTO_HALO_WIDTH_FACTOR);
+	prog.setUniformValue(photoStarShaderVars.haloBeta, PHOTO_HALO_BETA);
+	prog.setUniformValue(photoStarShaderVars.haloFraction, PHOTO_HALO_FRACTION);
+
+	const bool haveVao = photoVao->isCreated();
+	if (haveVao)
+		photoVao->bind();
+	else
+	{
+		prog.setAttributeBuffer(photoStarShaderVars.pos,    GL_FLOAT, offsetof(PhotoStarVertex, pos),    2, sizeof(PhotoStarVertex));
+		prog.setAttributeBuffer(photoStarShaderVars.offset, GL_FLOAT, offsetof(PhotoStarVertex, offset), 2, sizeof(PhotoStarVertex));
+		prog.setAttributeBuffer(photoStarShaderVars.color,  GL_FLOAT, offsetof(PhotoStarVertex, color),  3, sizeof(PhotoStarVertex));
+		prog.setAttributeBuffer(photoStarShaderVars.radius, GL_FLOAT, offsetof(PhotoStarVertex, radius), 1, sizeof(PhotoStarVertex));
+		prog.enableAttributeArray(photoStarShaderVars.pos);
+		prog.enableAttributeArray(photoStarShaderVars.offset);
+		prog.enableAttributeArray(photoStarShaderVars.color);
+		prog.enableAttributeArray(photoStarShaderVars.radius);
+	}
+	glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(nbPhotoPointSources)*6);
+	if (haveVao)
+		photoVao->release();
+	else
+	{
+		prog.disableAttributeArray(photoStarShaderVars.pos);
+		prog.disableAttributeArray(photoStarShaderVars.offset);
+		prog.disableAttributeArray(photoStarShaderVars.color);
+		prog.disableAttributeArray(photoStarShaderVars.radius);
+	}
+	prog.release();
+	photoVbo->release();
+
+	nbPhotoPointSources = 0;
 }
 
 void StelSkyDrawer::setupCurrentVAO()
@@ -314,6 +455,24 @@ void StelSkyDrawer::update(double)
 	// Precompute
 	starLinearScale = static_cast<float>(std::pow(35.*2.0*starAbsoluteScaleF, 1.40*0.5*starRelativeScale));
 
+	// Photographic mode: everything a star needs that depends on the frame, not on the star.
+	// With "screen pixel = sensor pixel", a star with illuminance E (lux) records as much light
+	// in total as an extended source of luminance E/omega records in one pixel, where omega is
+	// the solid angle of a pixel. Focal length and f-number cancel out.
+	{
+		const double pixPerRad = core->getProjection(StelCore::FrameJ2000)->getPixelPerRadAtCenter();
+		const double omegaPixel = 1.0/(pixPerRad*pixPerRad); // sr
+		constexpr double illuminanceMag0 = 2.54e-6; // lux, V band: 10^(-0.4*13.99)
+		photoFluxMag0 = static_cast<float>(getPhotoSceneScale() * illuminanceMag0 / omegaPixel);
+		// PSF width: the sensor/optics minimum combined with the seeing (which matters when zoomed in)
+		const double seeingPixels = photoSeeingArcsec * (M_PI/180./3600.) * pixPerRad;
+		const double fwhm = std::sqrt(static_cast<double>(photoMinFwhmPixels)*photoMinFwhmPixels + seeingPixels*seeingPixels);
+		photoCoreAlpha = static_cast<float>(fwhm / (2.0*std::sqrt(std::pow(2.0, 1.0/PHOTO_CORE_BETA) - 1.0)));
+		// About a third of one step of an 8-bit display in the darkest tones (where sRGB is linear),
+		// referred back through the exposure compensation of the camera pass
+		photoVisibleThreshold = (0.35f/255.f/12.92f) / getPhotoExposureFactor();
+	}
+
 	// update limit mag
 	limitMagnitude = computeLimitMagnitude();
 
@@ -331,7 +490,9 @@ float StelSkyDrawer::computeLimitMagnitude() const
 	int safety=0;
 	while (std::fabs(lim-a)>0.05f)
 	{
-		computeRCMag(lim, &rcmag);
+		// The limit magnitude decides which labels, hints and faint objects are shown. It keeps
+		// following the eye model in the photographic mode too, so that labels stay readable.
+		computeEyeRCMag(lim, &rcmag);
 		float tmp = lim;
 		if (rcmag.radius<=0.f)
 		{
@@ -409,7 +570,40 @@ float StelSkyDrawer::luminanceToSurfacebrightness(float lum)
 }
 
 // Compute RMag and CMag from magnitude for a point source.
+bool StelSkyDrawer::computePhotoRCMag(float mag, RCMag* rcMag) const
+{
+	// Total recorded light of the star (sum over all pixels, linear units, 1.0 = one saturated pixel)
+	const float flux = photoFluxMag0 * std::pow(10.f, -0.4f*mag);
+	// Radius where a Moffat component of the given total light drops to the visibility threshold
+	auto radiusAtThreshold = [this](float componentFlux, float alpha, float beta) -> float
+	{
+		const float peak = componentFlux * (beta-1.f) / (M_PIf*alpha*alpha);
+		if (!(peak > photoVisibleThreshold))
+			return 0.f;
+		return alpha * std::sqrt(std::pow(peak/photoVisibleThreshold, 1.f/beta) - 1.f);
+	};
+	const float rCore = radiusAtThreshold(flux*(1.f-PHOTO_HALO_FRACTION), photoCoreAlpha, PHOTO_CORE_BETA);
+	if (rCore <= 0.f)
+	{
+		rcMag->radius = 0.f;
+		rcMag->luminance = 0.f;
+		return false;
+	}
+	const float rHalo = radiusAtThreshold(flux*PHOTO_HALO_FRACTION, photoCoreAlpha*PHOTO_HALO_WIDTH_FACTOR, PHOTO_HALO_BETA);
+	// The sprite ends where the profile fades out; leave room for that fade (see the shader)
+	rcMag->radius = qMin(PHOTO_MAX_SPRITE_RADIUS, qMax(qMax(rCore, rHalo)/0.85f, 1.5f*photoCoreAlpha));
+	rcMag->luminance = flux;
+	return true;
+}
+
 bool StelSkyDrawer::computeRCMag(float mag, RCMag* rcMag) const
+{
+	if (getFlagPhotographicModeActive())
+		return computePhotoRCMag(mag, rcMag);
+	return computeEyeRCMag(mag, rcMag);
+}
+
+bool StelSkyDrawer::computeEyeRCMag(float mag, RCMag* rcMag) const
 {
 	rcMag->radius = eye->adaptLuminanceScaledLn(pointSourceMagToLnLuminance(mag), static_cast<float>(starRelativeScale)*1.40f*0.5f);
 	rcMag->radius *=starLinearScale;
@@ -461,6 +655,7 @@ void StelSkyDrawer::postDrawPointSource(StelPainter* sPainter, bool drawInCorona
 {
 	Q_ASSERT(sPainter);
 
+	flushPhotoPointSources(sPainter);
 	if (nbPointSources==0)
 		return;
 	if (drawInCorona)
@@ -504,6 +699,41 @@ bool StelSkyDrawer::drawPointSource(StelPainter* sPainter, const Vec3d& v, const
 	Vec3d win;
 	if (!(checkInScreen ? sPainter->getProjector()->projectCheck(v, win) : sPainter->getProjector()->project(v, win)))
 		return false;
+
+	if (getFlagPhotographicModeActive())
+	{
+		if (!(rcMag.luminance > 0.f))
+			return false;
+		// The color table holds display (sRGB) colors normalized to a maximum channel of 1.
+		// A smaller maximum means the caller dimmed the source (e.g. a fading satellite).
+		const float dim = qMax(color[0], qMax(color[1], color[2]));
+		if (!(dim > 0.f))
+			return false;
+		Vec3f linear = srgbToLinear(color/dim);
+		// The magnitude gives the V-band light, i.e. luminance: normalize the color to unit luminance
+		const float Y = 0.2126f*linear[0] + 0.7152f*linear[1] + 0.0722f*linear[2];
+		if (!(Y > 0.f))
+			return false;
+		linear *= rcMag.luminance * dim / Y; // no twinkling: a photo integrates over the exposure
+
+		const float r = rcMag.radius;
+		const float x = static_cast<float>(win[0]);
+		const float y = static_cast<float>(win[1]);
+		PhotoStarVertex* vx = &photoVertexArray[nbPhotoPointSources*6];
+		const Vec2f corners[6] = {Vec2f(-r,-r), Vec2f(r,-r), Vec2f(r,r), Vec2f(-r,-r), Vec2f(r,r), Vec2f(-r,r)};
+		for (const auto& c : corners)
+		{
+			vx->pos.set(x+c[0], y+c[1]);
+			vx->offset = c;
+			vx->color = linear;
+			vx->radius = r;
+			++vx;
+		}
+		++nbPhotoPointSources;
+		if (nbPhotoPointSources>=maxPointSources)
+			flushPhotoPointSources(sPainter);
+		return true;
+	}
 
 	const float radius = rcMag.radius;
 	const float frand=StelApp::getInstance().getRandF();
@@ -643,6 +873,27 @@ void StelSkyDrawer::postDrawSky3dModel(StelPainter* painter, const Vec3d& v, flo
 		painter->setColor(color*cmag);
 		painter->drawSprite2dModeNoDeviceScale(win[0], win[1], rmag);
 		noStarHalo = true;
+	}
+
+	// Photographic mode: a body whose disk is (nearly) unresolved records like a star, with the
+	// camera PSF. As its disk grows, the PSF fades out and the disk takes over.
+	if (getFlagPhotographicModeActive())
+	{
+		if (noStarHalo) // the Sun keeps its textured halo for now
+			return;
+		const float tStart = 3.f*scale;
+		const float tStop = 6.f*scale;
+		if (pixRadius >= tStop)
+			return;
+		RCMag rcm;
+		if (!computePhotoRCMag(mag, &rcm))
+			return;
+		if (pixRadius > tStart)
+			rcm.luminance *= (tStop-pixRadius)/(tStop-tStart);
+		preDrawPointSource(painter);
+		drawPointSource(painter, v, rcm, color);
+		postDrawPointSource(painter);
+		return;
 	}
 
 	// Now draw the halo according the object brightness
