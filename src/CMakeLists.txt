@@ -387,6 +387,8 @@ IF(STELLARIUM_GUI_MODE STREQUAL "Standard")
           gui/StelDialogSeparate.cpp
           gui/TonemappingDialog.hpp
           gui/TonemappingDialog.cpp
+          gui/PhotographicModeDialog.hpp
+          gui/PhotographicModeDialog.cpp
           gui/SkylightDialog.hpp
           gui/SkylightDialog.cpp
           gui/ContributorsList.hpp
@@ -420,6 +422,7 @@ IF(STELLARIUM_GUI_MODE STREQUAL "Standard")
           gui/dsoColorsDialog.ui
           gui/orbitColorsDialog.ui
           gui/tonemappingDialog.ui
+          gui/photographicModeDialog.ui
           gui/skylightDialog.ui
      )
 

@@ -37,6 +37,7 @@ class AddRemoveLandscapesDialog;
 class AtmosphereDialog;
 class SkylightDialog;
 class TonemappingDialog;
+class PhotographicModeDialog;
 class GreatRedSpotDialog;
 class ConfigureDSOColorsDialog;
 class ConfigureOrbitColorsDialog;
@@ -93,6 +94,7 @@ public slots:
 	void showAtmosphereDialog();
 	void showSkylightDialog();
 	void showTonemappingDialog();
+	void showPhotographicModeDialog();
 	void showGreatRedSpotDialog();
 	void showConfigureDSOColorsDialog();
 	void showConfigureOrbitColorsDialog();
@@ -145,6 +147,7 @@ private:
 	AtmosphereDialog * atmosphereDialog;
 	SkylightDialog * skylightDialog;
 	TonemappingDialog * tonemappingDialog;
+	PhotographicModeDialog * photographicModeDialog = nullptr;
 	GreatRedSpotDialog * greatRedSpotDialog;
 	ConfigureDSOColorsDialog * configureDSOColorsDialog;
 	ConfigureOrbitColorsDialog * configureOrbitColorsDialog;
