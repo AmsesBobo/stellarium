@@ -128,7 +128,12 @@ private:
 		int bortleIntensity;
 		int extinctionEnabled;
 		int projectionMatrixInverse;
+		int photoMode;
 	} shaderVars;
+
+	//! Photographic mode: luminance (cd/m^2) of a linear texture value of 1.0. It calibrates the
+	//! texture against measured surface brightness of the Milky Way (config: astro/milky_way_photo_luminance).
+	double photoLuminanceScale = 3.2e-3;
 
 	std::unique_ptr<QOpenGLVertexArrayObject> vao;
 	std::unique_ptr<QOpenGLBuffer> vbo;
