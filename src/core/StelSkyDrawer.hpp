@@ -27,6 +27,7 @@
 
 #include <memory>
 #include <QObject>
+#include <vector>
 #include <QImage>
 #include <QSettings>
 #include <QOpenGLFunctions>
@@ -606,6 +607,63 @@ private:
 	unsigned int nbPointSources;
 	//! Maximum number of sources which can be stored in the buffers
 	constexpr static unsigned int maxPointSources=1000;
+
+	// ---- Point sources in the photographic mode ----
+	// A star is drawn as the point spread function (PSF) of a camera: a Moffat profile with a
+	// fixed width (set by the sensor and the seeing), plus a faint, wide lens halo. Its integral
+	// is the total light the sensor records from the star, so brightness changes intensity,
+	// not size. Bright stars only look bigger because their wings and halo rise above the noise
+	// floor and their cores saturate in the final camera pass.
+
+	//! Vertex format for a point source in the photographic mode (all in floats, linear light).
+	struct PhotoStarVertex {
+		Vec2f pos;      //!< window position of this corner of the sprite
+		Vec2f offset;   //!< offset of this corner from the star centre, in pixels
+		Vec3f color;    //!< linear color times total recorded light (sum over all pixels)
+		float radius;   //!< sprite radius in pixels (the profile fades out smoothly towards it)
+	};
+	std::vector<PhotoStarVertex> photoVertexArray;
+	unsigned int nbPhotoPointSources = 0;
+	std::unique_ptr<class QOpenGLShaderProgram> photoStarShaderProgram;
+	std::unique_ptr<QOpenGLVertexArrayObject> photoVao;
+	std::unique_ptr<QOpenGLBuffer> photoVbo;
+	struct PhotoStarShaderVars {
+		int projectionMatrix;
+		int pos;
+		int offset;
+		int color;
+		int radius;
+		int coreAlpha;
+		int coreBeta;
+		int haloAlpha;
+		int haloBeta;
+		int haloFraction;
+	} photoStarShaderVars = {};
+	void initPhotoStarRendering();
+	void flushPhotoPointSources(StelPainter* sPainter);
+
+	//! Precomputed each frame in update(): total recorded light (linear units) of a magnitude-0 star
+	float photoFluxMag0 = 0.f;
+	//! Precomputed each frame in update(): Moffat parameter alpha of the core, in pixels
+	float photoCoreAlpha = 1.f;
+	//! Precomputed each frame in update(): the faintest pixel value that can still show on screen
+	float photoVisibleThreshold = 1e-4f;
+	//! Smallest PSF width (FWHM) in pixels, given by the sensor and the optics
+	float photoMinFwhmPixels = 2.f;
+	//! Seeing (FWHM) in arc seconds; it matters only when zoomed in
+	float photoSeeingArcsec = 3.f;
+	//! Moffat beta of the core (larger = closer to a Gaussian)
+	static constexpr float PHOTO_CORE_BETA = 3.f;
+	//! The lens halo: fraction of the light, width relative to the core, and Moffat beta
+	static constexpr float PHOTO_HALO_FRACTION = 0.05f;
+	static constexpr float PHOTO_HALO_WIDTH_FACTOR = 4.f;
+	static constexpr float PHOTO_HALO_BETA = 1.5f;
+	//! Largest sprite radius in pixels (only the Moon or Venus at very long exposures get near it)
+	static constexpr float PHOTO_MAX_SPRITE_RADIUS = 600.f;
+	//! Compute flux and sprite size of a point source in the photographic mode
+	bool computePhotoRCMag(float mag, RCMag* rcMag) const;
+	//! Compute radius and luminance of a point source with the eye model (the classic rendering)
+	bool computeEyeRCMag(float mag, RCMag* rcMag) const;
 
 	//! The maximum transformed luminance to apply at the next update
 	float maxLum;
