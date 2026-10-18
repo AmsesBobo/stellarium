@@ -30,10 +30,12 @@
 #include "StelMovementMgr.hpp"
 #include "StelPainter.hpp"
 #include "StelMainView.hpp"
+#include "StelTranslator.hpp"
 #include "precession.h"
 
 #include "StelModuleMgr.hpp"
 #include "LandscapeMgr.hpp"
+#include "LabelMgr.hpp"
 #include "Landscape.hpp"
 
 #include <QOpenGLContext>
@@ -99,6 +101,8 @@ StelSkyDrawer::StelSkyDrawer(StelCore* acore) :
 	setMinAdaptFov(conf->value("stars/mag_converter_min_fov",0.1).toFloat());
 	setFlagLuminanceAdaptation(conf->value("viewing/use_luminance_adaptation",true).toBool());
 	setDaylightLabelThreshold(conf->value("viewing/sky_brightness_label_threshold", 250.0).toDouble());
+	flagPhotographicMode = conf->value("viewing/flag_photographic_mode", false).toBool();
+	photoExposureEV = qBound(-12., conf->value("viewing/photographic_exposure_ev", 0.0).toDouble(), 12.);
 	setFlagStarMagnitudeLimit(conf->value("astro/flag_star_magnitude_limit", false).toBool());
 	setCustomStarMagnitudeLimit(conf->value("astro/star_magnitude_limit", 6.5).toDouble());
 	setFlagPlanetMagnitudeLimit(conf->value("astro/flag_planet_magnitude_limit", false).toBool());
@@ -1123,6 +1127,70 @@ void StelSkyDrawer::setDaylightLabelThreshold(double t)
 	daylightLabelThreshold=t;
 	StelApp::immediateSave("viewing/sky_brightness_label_threshold", t);
 	emit daylightLabelThresholdChanged(t);
+}
+
+void StelSkyDrawer::setFlagPhotographicMode(bool b)
+{
+	if (b==flagPhotographicMode)
+		return;
+	flagPhotographicMode=b;
+	StelApp::immediateSave("viewing/flag_photographic_mode", b);
+	emit flagPhotographicModeChanged(b);
+	if (b && !StelMainView::getInstance().getGLInformation().isHighGraphicsMode)
+		qWarning() << "Photographic mode needs high graphics mode (OpenGL 3 or later). It will have no effect.";
+}
+
+void StelSkyDrawer::setPhotoExposureEV(double ev)
+{
+	ev = qBound(-12., ev, 12.);
+	if (qFuzzyCompare(1.+ev, 1.+photoExposureEV))
+		return;
+	photoExposureEV=ev;
+	StelApp::immediateSave("viewing/photographic_exposure_ev", ev);
+	emit photoExposureEVChanged(ev);
+}
+
+void StelSkyDrawer::increasePhotoExposure()
+{
+	// Keep the value on the 1/3-stop grid, like the dial of a camera
+	setPhotoExposureEV((std::round(photoExposureEV*3.)+1.)/3.);
+	showPhotoExposureMessage();
+}
+
+void StelSkyDrawer::decreasePhotoExposure()
+{
+	setPhotoExposureEV((std::round(photoExposureEV*3.)-1.)/3.);
+	showPhotoExposureMessage();
+}
+
+void StelSkyDrawer::resetPhotoExposure()
+{
+	setPhotoExposureEV(0.);
+	showPhotoExposureMessage();
+}
+
+float StelSkyDrawer::getPhotoExposureFactor() const
+{
+	return static_cast<float>(std::exp2(photoExposureEV));
+}
+
+void StelSkyDrawer::showPhotoExposureMessage()
+{
+	LabelMgr* labelMgr = GETSTELMODULE(LabelMgr);
+	if (!labelMgr)
+		return;
+	if (photoExposureMessageID)
+		labelMgr->deleteLabel(photoExposureMessageID);
+
+	QString text = QString("%1 %2 EV").arg(q_("Exposure"), QString::asprintf("%+.1f", photoExposureEV));
+	if (!flagPhotographicMode)
+		text += QString(" (%1)").arg(q_("photographic mode is off"));
+
+	const StelProjector::StelProjectorParams params = core->getCurrentStelProjectorParams();
+	StelPainter painter(core->getProjection2d());
+	const int x = qRound(params.viewportCenter[0] - painter.getFontMetrics().boundingRect(text).width()/2);
+	const int y = qRound(params.viewportCenter[1] - params.viewportXywh[3]*params.viewportCenterOffset[1] - painter.getFontMetrics().height()/2);
+	photoExposureMessageID = labelMgr->labelScreen(text, x, y, true, StelApp::getInstance().getScreenFontSize() + 3, "#99FF99", true, 2000);
 }
 
 void StelSkyDrawer::setExtinctionCoefficient(double extCoeff)

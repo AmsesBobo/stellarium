@@ -74,6 +74,11 @@ class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 	Q_PROPERTY(bool flagLuminanceAdaptation READ getFlagLuminanceAdaptation WRITE setFlagLuminanceAdaptation NOTIFY flagLuminanceAdaptationChanged)
 	Q_PROPERTY(double daylightLabelThreshold READ getDaylightLabelThreshold WRITE setDaylightLabelThreshold NOTIFY daylightLabelThresholdChanged)
 
+	//! Photographic (camera-like) rendering mode. Only active in high graphics mode (OpenGL 3+).
+	Q_PROPERTY(bool flagPhotographicMode READ getFlagPhotographicMode WRITE setFlagPhotographicMode NOTIFY flagPhotographicModeChanged)
+	//! Exposure correction of the photographic mode, in photographic stops (EV). 0 is the neutral exposure.
+	Q_PROPERTY(double photoExposureEV READ getPhotoExposureEV WRITE setPhotoExposureEV NOTIFY photoExposureEVChanged)
+
 	Q_PROPERTY(double extinctionCoefficient READ getExtinctionCoefficient WRITE setExtinctionCoefficient NOTIFY extinctionCoefficientChanged)
 	Q_PROPERTY(double atmosphereTemperature READ getAtmosphereTemperature WRITE setAtmosphereTemperature NOTIFY atmosphereTemperatureChanged)
 	Q_PROPERTY(double atmospherePressure READ getAtmospherePressure WRITE setAtmospherePressure NOTIFY atmospherePressureChanged)
@@ -283,6 +288,29 @@ public slots:
 	//! Return a brightness value based on objects in view (sky, sun, moon, ...)
 	double getWorldAdaptationLuminance() const;
 
+	//! Switch the photographic (camera-like) rendering mode on or off.
+	//! In this mode the scene is rendered into a floating-point buffer and a final
+	//! "camera" pass applies the exposure and a soft saturation of the highlights.
+	//! The mode needs high graphics mode (OpenGL 3+); otherwise it has no effect.
+	void setFlagPhotographicMode(bool b);
+	//! Get whether the photographic rendering mode is switched on.
+	bool getFlagPhotographicMode() const {return flagPhotographicMode;}
+	//! Toggle the photographic rendering mode.
+	void toggleFlagPhotographicMode() {setFlagPhotographicMode(!flagPhotographicMode);}
+	//! Set the exposure correction of the photographic mode, in stops (EV).
+	//! +1 EV doubles the recorded light, -1 EV halves it. The value is limited to [-12, +12].
+	void setPhotoExposureEV(double ev);
+	//! Get the exposure correction of the photographic mode, in stops (EV).
+	double getPhotoExposureEV() const {return photoExposureEV;}
+	//! Increase the exposure by 1/3 stop, like one click on a camera dial.
+	void increasePhotoExposure();
+	//! Decrease the exposure by 1/3 stop, like one click on a camera dial.
+	void decreasePhotoExposure();
+	//! Reset the exposure correction to 0 EV.
+	void resetPhotoExposure();
+	//! Get the linear factor the scene light is multiplied with in the photographic mode, i.e. 2^EV.
+	float getPhotoExposureFactor() const;
+
 	//! Informing the drawer whether atmosphere is displayed.
 	//! This is used to avoid twinkling/simulate extinction/refraction.
 	//! Not required as property!
@@ -363,6 +391,10 @@ signals:
 	void flagLuminanceAdaptationChanged(bool b);
 	//! Emitted when threshold value to draw info text in black is changed
 	void daylightLabelThresholdChanged(double t);
+	//! Emitted when the photographic rendering mode is switched on or off
+	void flagPhotographicModeChanged(bool b);
+	//! Emitted when the exposure correction of the photographic mode is changed
+	void photoExposureEVChanged(double ev);
 
 	void extinctionCoefficientChanged(double coeff);
 	void atmosphereTemperatureChanged(double celsius);
@@ -555,6 +587,15 @@ private:
 	bool flagEarlySunHalo; // Used to select if solar halo is plotted before (true) or after (default, false) the 3D sphere.
 	bool flagTfromK; // true to compute T from extinction k
 	float turbidity; // atmospheric turbidity: Preetham sky usable for 2<T<6, best at T=5.
+
+	//! Render the sky like a camera (linear sensor, fixed exposure) instead of like the eye?
+	bool flagPhotographicMode = false;
+	//! Exposure correction of the photographic mode, in stops (EV)
+	double photoExposureEV = 0.;
+	//! ID of the on-screen message that shows the current exposure (0 = none)
+	int photoExposureMessageID = 0;
+	//! Show the current exposure briefly on screen
+	void showPhotoExposureMessage();
 };
 
 #endif // STELSKYDRAWER_HPP
