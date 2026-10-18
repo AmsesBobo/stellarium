@@ -21,6 +21,8 @@
 
 #include "StelApp.hpp"
 #include "StelSRGB.hpp"
+#include "StelSkyDrawer.hpp"
+#include "StelCore.hpp"
 #include "StelMainView.hpp"
 #include "StelLocaleMgr.hpp"
 #include "StelProjector.hpp"
@@ -256,6 +258,20 @@ void StelPainter::setColor(Vec3f rgb, float a)
 void StelPainter::setColor(Vec4f rgba)
 {
 	currentColor=rgba;
+}
+
+QVector4D StelPainter::shaderColor(bool annotationByDefault) const
+{
+	const QVector4D c = colorToShader(currentColor);
+	const bool annotation = annotationOverride < 0 ? annotationByDefault : annotationOverride == 1;
+	if (!annotation)
+		return c;
+	const StelCore* core = StelApp::getInstance().getCore();
+	const StelSkyDrawer* drawer = core ? core->getSkyDrawer() : nullptr;
+	if (!drawer || !drawer->getFlagPhotographicModeActive())
+		return c;
+	const Vec3f comp = drawer->photoAnnotationCompensation(Vec3f(c.x(), c.y(), c.z()));
+	return QVector4D(comp[0], comp[1], comp[2], c.w());
 }
 
 Vec4f StelPainter::getColor() const
@@ -894,7 +910,7 @@ void StelPainter::drawText(float x, float y, const QString& str, float angleDeg,
 		pr.setAttributeBuffer(textShaderVars.vertex, vertexArray.type, 0, vertexArray.size);
 		pr.enableAttributeArray(textShaderVars.vertex);
 		pr.setUniformValue(textShaderVars.projectionMatrix, qMat);
-		pr.setUniformValue(textShaderVars.textColor, colorToShader(currentColor));
+		pr.setUniformValue(textShaderVars.textColor, shaderColor(true));
 		pr.setAttributeBuffer(textShaderVars.texCoord, texCoordArray.type,
 		                      texCoordDataOffset, texCoordArray.size);
 		pr.enableAttributeArray(textShaderVars.texCoord);
@@ -2888,7 +2904,7 @@ void StelPainter::drawFixedColorWideLinesAsQuads(const ArrayDesc& vertexArray, i
 	pr->setAttributeBuffer(basicShaderVars.vertex, vertexArray.type, 0, 4);
 	pr->enableAttributeArray(basicShaderVars.vertex);
 	pr->setUniformValue(basicShaderVars.projectionMatrix, QMatrix4x4{});
-	pr->setUniformValue(basicShaderVars.color, colorToShader(currentColor));
+	pr->setUniformValue(basicShaderVars.color, shaderColor(true));
 
 #ifdef GL_MULTISAMPLE
 	const bool multisampleWasOn = multisamplingEnabled && glIsEnabled(GL_MULTISAMPLE);
@@ -2977,7 +2993,7 @@ void StelPainter::drawFromArray(DrawingMode mode, int count, int offset, bool do
 			pr->setAttributeBuffer(wideLineShaderVars.vertex, projectedVertexArray.type, 0, projectedVertexArray.size);
 			pr->enableAttributeArray(wideLineShaderVars.vertex);
 			pr->setUniformValue(wideLineShaderVars.projectionMatrix, qMat);
-			pr->setUniformValue(wideLineShaderVars.color, colorToShader(currentColor));
+			pr->setUniformValue(wideLineShaderVars.color, shaderColor(true));
 			pr->setUniformValue(wideLineShaderVars.lineWidth, glState.lineWidth);
 			GLint viewport[4] = {};
 			glGetIntegerv(GL_VIEWPORT, viewport);
@@ -2988,7 +3004,7 @@ void StelPainter::drawFromArray(DrawingMode mode, int count, int offset, bool do
 			pr->setAttributeBuffer(basicShaderVars.vertex, projectedVertexArray.type, 0, projectedVertexArray.size);
 			pr->enableAttributeArray(basicShaderVars.vertex);
 			pr->setUniformValue(basicShaderVars.projectionMatrix, qMat);
-			pr->setUniformValue(basicShaderVars.color, colorToShader(currentColor));
+			pr->setUniformValue(basicShaderVars.color, shaderColor(true));
 		}
 	}
 	else if (texCoordArray.enabled && !colorArray.enabled && !normalArray.enabled && !wideLineMode)
@@ -3010,7 +3026,7 @@ void StelPainter::drawFromArray(DrawingMode mode, int count, int offset, bool do
 		pr->setAttributeBuffer(shaderVars.vertex, projectedVertexArray.type, 0, projectedVertexArray.size);
 		pr->enableAttributeArray(shaderVars.vertex);
 		pr->setUniformValue(shaderVars.projectionMatrix, qMat);
-		pr->setUniformValue(shaderVars.texColor, colorToShader(currentColor));
+		pr->setUniformValue(shaderVars.texColor, shaderColor(false));
 		if (useAdjustedTextureShader)
 		{
 			pr->setUniformValue(shaderVars.gamma, textureGamma);

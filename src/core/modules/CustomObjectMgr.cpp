@@ -399,6 +399,7 @@ void CustomObjectMgr::draw(StelCore* core)
 
 void CustomObjectMgr::drawPointer(StelCore* core, StelPainter& painter)
 {
+	StelPainter::AnnotationScope annotationScope(painter);
 	const StelProjectorP prj = core->getProjection(StelCore::FrameJ2000);
 
 	static StelObjectMgr *sObjMgr=GETSTELMODULE(StelObjectMgr);

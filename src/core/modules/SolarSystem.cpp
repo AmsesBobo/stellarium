@@ -614,6 +614,7 @@ void SolarSystem::drawPointer(const StelCore* core)
 
 		StelPainter sPainter(prj);
 		sPainter.setColor(getPointerColor());
+		StelPainter::AnnotationScope annotationScope(sPainter);
 
 		float screenSize = static_cast<float>(obj->getAngularRadius(core))*prj->getPixelPerRadAtCenter()*M_PI_180f*2.f;
 		

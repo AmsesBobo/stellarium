@@ -27,6 +27,12 @@ uniform highp float term2TimesOneOverMaxdL;
 uniform highp float brightnessScale; // Only the atmosphere fader value [0...1], i.e. drawn or not, or in transition.
 uniform bool doSRGB;
 uniform bool flagUseTmGamma;
+// Photographic (camera-like) mode: the sky luminance is recorded linearly, like a camera sensor.
+// photoScale converts luminance in cd/m^2 to the linear value of the scene buffer (1.0 = saturation),
+// computed from the camera settings (exposure time, f-number, ISO). The exposure compensation
+// is applied later, in the final camera pass.
+uniform bool photoMode;
+uniform highp float photoScale;
 
 float applyTMAndGamma(highp float Y)
 {
@@ -45,6 +51,18 @@ float applyTMAndGamma(highp float Y)
 
 vec3 xyYToRGB(highp float x, highp float y, highp float Y)
 {
+	if (photoMode)
+	{
+		// A camera has no scotopic (night) vision and no adaptation: just linear light.
+		highp float Ycam = Y * photoScale;
+		highp vec3 XYZcam = (y > 0.) ? vec3(x * Ycam / y, Ycam, (1. - x - y) * Ycam / y) : vec3(0);
+		// The scene buffer holds linear sRGB, so the sRGB (D65) matrix is always the right one here.
+		highp mat3 XYZ2sRGB = mat3(vec3( 3.2404542, -0.9692660,  0.0556434),
+		                           vec3(-1.5371385,  1.8760108, -0.2040259),
+		                           vec3(-0.4985314,  0.0415560,  1.0572252));
+		return linearColorToFramebuffer(max(XYZ2sRGB * XYZcam, vec3(0)) * brightnessScale);
+	}
+
 	///////////////////////////////////////////////////////////////////////////
 	// Now we have the xyY components, need to convert to RGB
 

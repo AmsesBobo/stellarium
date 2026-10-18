@@ -255,6 +255,31 @@ public:
 	//! Get the color currently used for drawing.
 	Vec4f getColor() const;
 
+	//! Mark what this painter draws as annotation (true) or as part of the sky (false).
+	//! In the photographic mode annotations (lines, labels, markers, art) are not affected by the
+	//! exposure, while the sky is. By default text and plain lines/polygons without texture are
+	//! annotations, and everything with a texture or per-vertex colors is sky.
+	void setAnnotation(bool b) {annotationOverride = b ? 1 : 0;}
+	//! Go back to the default classification of annotation vs. sky (see setAnnotation()).
+	void resetAnnotation() {annotationOverride = -1;}
+
+	//! Marks everything a painter draws as annotation (or as sky) while this object exists,
+	//! and restores the previous classification when it goes out of scope.
+	class AnnotationScope
+	{
+	public:
+		explicit AnnotationScope(StelPainter& p, bool annotation=true) : painter(p), saved(p.annotationOverride)
+		{
+			painter.annotationOverride = annotation ? 1 : 0;
+		}
+		~AnnotationScope() { painter.annotationOverride = saved; }
+		AnnotationScope(const AnnotationScope&) = delete;
+		AnnotationScope& operator=(const AnnotationScope&) = delete;
+	private:
+		StelPainter& painter;
+		int saved;
+	};
+
 	//! Get the font metrics for the current font.
 	QFontMetrics getFontMetrics() const;
 
@@ -442,6 +467,11 @@ private:
 	QFont currentFont;
 
 	Vec4f currentColor;
+	//! -1: default classification, 0: sky, 1: annotation (see setAnnotation())
+	int annotationOverride = -1;
+	//! The current color as it has to be passed to the shaders, with the compensation for the
+	//! photographic mode applied if the drawing is an annotation.
+	QVector4D shaderColor(bool annotationByDefault) const;
 	//! Saturation effect adjustment.
 	float saturation = 1.f;
 	float textureGamma = 1.f;

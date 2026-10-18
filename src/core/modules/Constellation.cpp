@@ -450,6 +450,7 @@ void Constellation::drawName(const Vec3d &xyName, StelPainter& sPainter) const
 
 void Constellation::drawArtOptim(StelPainter& sPainter, const SphericalRegion& region, const Vec3d& obsVelocity) const
 {
+	StelPainter::AnnotationScope annotationScope(sPainter);
 	if (isSeasonallyVisible())
 	{
 		const float intensity = artFader.getInterstate() * artOpacity * artIntensityFovScale;

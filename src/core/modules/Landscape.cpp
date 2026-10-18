@@ -1530,6 +1530,8 @@ void LandscapePolygonal::draw(StelCore* core, bool onlyPolygon)
 			gl->glEnable(GL_MULTISAMPLE);
 #endif
 
+		// The ground is part of the scene, not an annotation
+		StelPainter::AnnotationScope groundScope(sPainter, false);
 		sPainter.drawSphericalRegion(horizonPolygon.data(), StelPainter::SphericalPolygonDrawModeFill);
 
 #ifdef GL_MULTISAMPLE

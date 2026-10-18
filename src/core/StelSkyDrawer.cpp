@@ -103,6 +103,9 @@ StelSkyDrawer::StelSkyDrawer(StelCore* acore) :
 	setDaylightLabelThreshold(conf->value("viewing/sky_brightness_label_threshold", 250.0).toDouble());
 	flagPhotographicMode = conf->value("viewing/flag_photographic_mode", false).toBool();
 	photoExposureEV = qBound(-12., conf->value("viewing/photographic_exposure_ev", 0.0).toDouble(), 12.);
+	photoExposureTime = qBound(1./8000., conf->value("viewing/photographic_exposure_time", 20.0).toDouble(), 3600.);
+	photoAperture = qBound(0.7, conf->value("viewing/photographic_aperture", 2.8).toDouble(), 64.);
+	photoISO = qBound(25., conf->value("viewing/photographic_iso", 1600.0).toDouble(), 409600.);
 	setFlagStarMagnitudeLimit(conf->value("astro/flag_star_magnitude_limit", false).toBool());
 	setCustomStarMagnitudeLimit(conf->value("astro/star_magnitude_limit", 6.5).toDouble());
 	setFlagPlanetMagnitudeLimit(conf->value("astro/flag_planet_magnitude_limit", false).toBool());
@@ -1172,6 +1175,67 @@ void StelSkyDrawer::resetPhotoExposure()
 float StelSkyDrawer::getPhotoExposureFactor() const
 {
 	return static_cast<float>(std::exp2(photoExposureEV));
+}
+
+bool StelSkyDrawer::getFlagPhotographicModeActive() const
+{
+	return flagPhotographicMode && StelMainView::getInstance().getGLInformation().isHighGraphicsMode;
+}
+
+void StelSkyDrawer::setPhotoExposureTime(double seconds)
+{
+	seconds = qBound(1./8000., seconds, 3600.);
+	if (qFuzzyCompare(seconds, photoExposureTime))
+		return;
+	photoExposureTime=seconds;
+	StelApp::immediateSave("viewing/photographic_exposure_time", seconds);
+	emit photoExposureTimeChanged(seconds);
+}
+
+void StelSkyDrawer::setPhotoAperture(double fNumber)
+{
+	fNumber = qBound(0.7, fNumber, 64.);
+	if (qFuzzyCompare(fNumber, photoAperture))
+		return;
+	photoAperture=fNumber;
+	StelApp::immediateSave("viewing/photographic_aperture", fNumber);
+	emit photoApertureChanged(fNumber);
+}
+
+void StelSkyDrawer::setPhotoISO(double iso)
+{
+	iso = qBound(25., iso, 409600.);
+	if (qFuzzyCompare(iso, photoISO))
+		return;
+	photoISO=iso;
+	StelApp::immediateSave("viewing/photographic_iso", iso);
+	emit photoISOChanged(iso);
+}
+
+float StelSkyDrawer::invertPhotoShoulder(float y)
+{
+	constexpr float knee = PHOTO_SHOULDER_KNEE;
+	if (y <= knee)
+		return y;
+	// The shoulder never quite reaches 1.0, so limit the target value a little below it
+	y = qMin(y, 0.995f);
+	return knee - (1.f-knee) * std::log(1.f - (y-knee)/(1.f-knee));
+}
+
+Vec3f StelSkyDrawer::photoAnnotationCompensation(const Vec3f& linearColor) const
+{
+	const float invExposure = 1.f / getPhotoExposureFactor();
+	return Vec3f(invertPhotoShoulder(qMax(0.f, linearColor[0])) * invExposure,
+	             invertPhotoShoulder(qMax(0.f, linearColor[1])) * invExposure,
+	             invertPhotoShoulder(qMax(0.f, linearColor[2])) * invExposure);
+}
+
+float StelSkyDrawer::getPhotoSceneScale() const
+{
+	// Reflected-light meter calibration constant K (ISO 2720), and middle grey
+	constexpr double K = 12.5;
+	constexpr double middleGrey = 0.18;
+	return static_cast<float>(middleGrey * photoExposureTime * photoISO / (K * photoAperture * photoAperture));
 }
 
 void StelSkyDrawer::showPhotoExposureMessage()

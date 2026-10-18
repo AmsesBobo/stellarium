@@ -25,6 +25,7 @@
 #include "StelProjector.hpp"
 #include "StelToneReproducer.hpp"
 #include "StelCore.hpp"
+#include "StelSkyDrawer.hpp"
 #include "StelPainter.hpp"
 #include "Skylight.hpp"
 
@@ -417,6 +418,12 @@ void AtmospherePreetham::draw(StelCore* core)
 	GL(atmoShaderProgram->setUniformValue(shaderAttribLocations.flagUseTmGamma, useTmGamma));
 
 	GL(atmoShaderProgram->setUniformValue(shaderAttribLocations.brightnessScale, atm_intensity));
+	// Photographic mode: record the sky luminance linearly with the camera settings
+	{
+		const StelSkyDrawer* skyDrawer = core->getSkyDrawer();
+		GL(atmoShaderProgram->setUniformValue("photoMode", skyDrawer->getFlagPhotographicModeActive()));
+		GL(atmoShaderProgram->setUniformValue("photoScale", skyDrawer->getPhotoSceneScale()));
+	}
 	Vec3f sunPos;
 	float term_x, Ax, Bx, Cx, Dx, Ex, term_y, Ay, By, Cy, Dy, Ey;
 	sky.getShadersParams(sunPos, term_x, Ax, Bx, Cx, Dx, Ex, term_y, Ay, By, Cy, Dy, Ey);

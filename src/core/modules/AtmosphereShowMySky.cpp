@@ -30,6 +30,7 @@
 #include "StelToneReproducer.hpp"
 #include "StelTextureMgr.hpp"
 #include "StelCore.hpp"
+#include "StelSkyDrawer.hpp"
 #include "StelPainter.hpp"
 #include "StelTranslator.hpp"
 #include "TextureAverageComputer.hpp"
@@ -786,6 +787,12 @@ void AtmosphereShowMySky::draw(StelCore* core)
 	GL(luminanceToScreenProgram_->setUniformValue(shaderAttribLocations.doSRGB, true));
 	GL(luminanceToScreenProgram_->setUniformValue(shaderAttribLocations.flagUseTmGamma, false));
 	GL(luminanceToScreenProgram_->setUniformValue(shaderAttribLocations.brightnessScale, atm_intensity));
+	// Photographic mode: record the sky luminance linearly with the camera settings
+	{
+		const StelSkyDrawer* skyDrawer = core->getSkyDrawer();
+		GL(luminanceToScreenProgram_->setUniformValue("photoMode", skyDrawer->getFlagPhotographicModeActive()));
+		GL(luminanceToScreenProgram_->setUniformValue("photoScale", skyDrawer->getPhotoSceneScale()));
+	}
 
 	StelPainter sPainter(core->getProjection2d());
 	sPainter.setBlending(true, GL_ONE, GL_ONE);

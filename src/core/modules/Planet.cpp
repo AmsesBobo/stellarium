@@ -5936,6 +5936,7 @@ bool Planet::drawObjShadowMap(const Vec3d& lightPosition, StelPainter *painter, 
 
 void Planet::drawHints(const StelCore* core, StelPainter &sPainter, const QFont& planetNameFont)
 {
+	StelPainter::AnnotationScope annotationScope(sPainter);
 	if (labelsFader.getInterstate()<=0.f)
 		return;
 

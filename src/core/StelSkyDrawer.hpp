@@ -78,6 +78,12 @@ class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 	Q_PROPERTY(bool flagPhotographicMode READ getFlagPhotographicMode WRITE setFlagPhotographicMode NOTIFY flagPhotographicModeChanged)
 	//! Exposure correction of the photographic mode, in photographic stops (EV). 0 is the neutral exposure.
 	Q_PROPERTY(double photoExposureEV READ getPhotoExposureEV WRITE setPhotoExposureEV NOTIFY photoExposureEVChanged)
+	//! Exposure time of the virtual camera in the photographic mode, in seconds.
+	Q_PROPERTY(double photoExposureTime READ getPhotoExposureTime WRITE setPhotoExposureTime NOTIFY photoExposureTimeChanged)
+	//! Aperture (f-number) of the virtual camera in the photographic mode, e.g. 2.8 for f/2.8.
+	Q_PROPERTY(double photoAperture READ getPhotoAperture WRITE setPhotoAperture NOTIFY photoApertureChanged)
+	//! ISO sensitivity of the virtual camera in the photographic mode.
+	Q_PROPERTY(double photoISO READ getPhotoISO WRITE setPhotoISO NOTIFY photoISOChanged)
 
 	Q_PROPERTY(double extinctionCoefficient READ getExtinctionCoefficient WRITE setExtinctionCoefficient NOTIFY extinctionCoefficientChanged)
 	Q_PROPERTY(double atmosphereTemperature READ getAtmosphereTemperature WRITE setAtmosphereTemperature NOTIFY atmosphereTemperatureChanged)
@@ -89,6 +95,15 @@ class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 	Q_PROPERTY(double turbidity READ getT WRITE setT NOTIFY turbidityChanged)
 
 public:
+	//! The camera pass of the photographic mode is linear up to this value, then rolls off smoothly towards 1.0.
+	static constexpr float PHOTO_SHOULDER_KNEE = 0.8f;
+	//! The inverse of the highlight shoulder of the camera pass (for values below 1.0).
+	static float invertPhotoShoulder(float y);
+	//! For annotations (lines, labels, markers) in the photographic mode: the linear color that has
+	//! to be written into the scene buffer so that the camera pass reproduces the given linear color
+	//! exactly, independently of the exposure.
+	Vec3f photoAnnotationCompensation(const Vec3f& linearColor) const;
+
 	//! Constructor
 	StelSkyDrawer(StelCore* core);
 	//! Destructor
@@ -308,8 +323,30 @@ public slots:
 	void decreasePhotoExposure();
 	//! Reset the exposure correction to 0 EV.
 	void resetPhotoExposure();
-	//! Get the linear factor the scene light is multiplied with in the photographic mode, i.e. 2^EV.
+	//! Get the linear factor of the exposure compensation, i.e. 2^EV. It is applied in the final camera pass.
 	float getPhotoExposureFactor() const;
+	//! Whether the photographic mode is switched on AND can work (high graphics mode).
+	//! Modules should use this one to decide how to render.
+	bool getFlagPhotographicModeActive() const;
+
+	//! Set the exposure time of the virtual camera, in seconds (limited to 1/8000 s ... 3600 s).
+	void setPhotoExposureTime(double seconds);
+	//! Get the exposure time of the virtual camera, in seconds.
+	double getPhotoExposureTime() const {return photoExposureTime;}
+	//! Set the aperture (f-number) of the virtual camera (limited to f/0.7 ... f/64).
+	void setPhotoAperture(double fNumber);
+	//! Get the aperture (f-number) of the virtual camera.
+	double getPhotoAperture() const {return photoAperture;}
+	//! Set the ISO sensitivity of the virtual camera (limited to 25 ... 409600).
+	void setPhotoISO(double iso);
+	//! Get the ISO sensitivity of the virtual camera.
+	double getPhotoISO() const {return photoISO;}
+	//! Get the factor that converts a scene luminance in cd/m^2 into the linear value of the
+	//! scene buffer in the photographic mode, before the exposure compensation.
+	//! It follows the standard exposure equation for a reflected-light meter (calibration K = 12.5):
+	//! a luminance L that the meter would expose "correctly" for t, N and ISO ends up at
+	//! middle grey (0.18), i.e. value = 0.18 * L * t * ISO / (12.5 * N^2). 1.0 means saturation.
+	float getPhotoSceneScale() const;
 
 	//! Informing the drawer whether atmosphere is displayed.
 	//! This is used to avoid twinkling/simulate extinction/refraction.
@@ -395,6 +432,12 @@ signals:
 	void flagPhotographicModeChanged(bool b);
 	//! Emitted when the exposure correction of the photographic mode is changed
 	void photoExposureEVChanged(double ev);
+	//! Emitted when the exposure time of the virtual camera is changed
+	void photoExposureTimeChanged(double seconds);
+	//! Emitted when the aperture of the virtual camera is changed
+	void photoApertureChanged(double fNumber);
+	//! Emitted when the ISO sensitivity of the virtual camera is changed
+	void photoISOChanged(double iso);
 
 	void extinctionCoefficientChanged(double coeff);
 	void atmosphereTemperatureChanged(double celsius);
@@ -592,6 +635,10 @@ private:
 	bool flagPhotographicMode = false;
 	//! Exposure correction of the photographic mode, in stops (EV)
 	double photoExposureEV = 0.;
+	//! Camera settings of the photographic mode: exposure time [s], f-number, ISO
+	double photoExposureTime = 20.;
+	double photoAperture = 2.8;
+	double photoISO = 1600.;
 	//! ID of the on-screen message that shows the current exposure (0 = none)
 	int photoExposureMessageID = 0;
 	//! Show the current exposure briefly on screen
