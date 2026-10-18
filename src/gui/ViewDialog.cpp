@@ -29,6 +29,7 @@
 #include "AtmosphereDialog.hpp"
 #include "SkylightDialog.hpp"
 #include "TonemappingDialog.hpp"
+#include "PhotographicModeDialog.hpp"
 #include "GreatRedSpotDialog.hpp"
 #include "ConfigureDSOColorsDialog.hpp"
 #include "ConfigureOrbitColorsDialog.hpp"
@@ -131,6 +132,8 @@ ViewDialog::~ViewDialog()
 	skylightDialog = nullptr;
 	delete tonemappingDialog;
 	tonemappingDialog = nullptr;
+	delete photographicModeDialog;
+	photographicModeDialog = nullptr;
 	delete greatRedSpotDialog;
 	greatRedSpotDialog = nullptr;
 	delete configureDSOColorsDialog;
@@ -246,6 +249,8 @@ void ViewDialog::createDialogContent()
 	connectBoolProperty(ui->starLimitMagnitudeCheckBox,"StelSkyDrawer.flagStarMagnitudeLimit");
 	connectDoubleProperty(ui->starLimitMagnitudeDoubleSpinBox, "StelSkyDrawer.customStarMagLimit");
 	connectBoolProperty(ui->spikyStarsCheckBox, "StelSkyDrawer.flagStarSpiky");
+	connectBoolProperty(ui->photographicModeCheckBox, "StelSkyDrawer.flagPhotographicMode");
+	connect(ui->photographicModePushButton, &QToolButton::clicked, this, &ViewDialog::showPhotographicModeDialog);
 	connectCheckBox(ui->starLabelCheckBox, "actionShow_Stars_Labels");
 	connectDoubleProperty(ui->starsLabelsHorizontalSlider,"StarMgr.labelsAmount",0.0,10.0);
 	connectBoolProperty(ui->checkBoxAdditionalNamesStars, "StarMgr.flagAdditionalNamesDisplayed");
@@ -1978,6 +1983,13 @@ void ViewDialog::showSkylightDialog()
 	skylightDialog = new SkylightDialog();
 
     skylightDialog->setVisible(true);
+}
+
+void ViewDialog::showPhotographicModeDialog()
+{
+	if (photographicModeDialog == nullptr)
+		photographicModeDialog = new PhotographicModeDialog();
+	photographicModeDialog->setVisible(true);
 }
 
 void ViewDialog::showTonemappingDialog()

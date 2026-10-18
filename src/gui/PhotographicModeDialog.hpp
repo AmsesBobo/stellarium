@@ -1,0 +1,69 @@
+/*
+ * Stellarium
+ * Copyright (C) 2026 Stellarium contributors
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License
+ * as published by the Free Software Foundation; either version 2
+ * of the License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA  02110-1335, USA.
+ */
+
+#ifndef PHOTOGRAPHICMODEDIALOG_HPP
+#define PHOTOGRAPHICMODEDIALOG_HPP
+
+#include "StelDialog.hpp"
+
+#include <QVector>
+
+class Ui_PhotographicModeDialogForm;
+class QComboBox;
+
+//! Settings of the photographic (camera-like) rendering mode:
+//! camera settings (exposure time, aperture, ISO, exposure compensation)
+//! and the look of star images (PSF width, seeing, lens halo, diffraction spikes).
+class PhotographicModeDialog : public StelDialog
+{
+	Q_OBJECT
+
+public:
+	PhotographicModeDialog();
+	~PhotographicModeDialog() override;
+
+public slots:
+	void retranslate() override;
+
+protected:
+	void createDialogContent() override;
+
+private slots:
+	//! Show the current camera settings in the combo boxes and the EV readout
+	void updateCameraWidgets();
+	//! Show the current star image settings in the widgets
+	void updateStarWidgets();
+
+private:
+	Ui_PhotographicModeDialogForm *ui;
+
+	//! Standard camera values offered in the combo boxes
+	static const QVector<double> exposureTimes;
+	static const QVector<double> apertures;
+	static const QVector<double> isoValues;
+
+	//! Fill the combo boxes (also after a change of language)
+	void fillComboBoxes();
+	//! Select the entry closest to value (on a logarithmic scale) without emitting signals
+	static void selectNearest(QComboBox* comboBox, const QVector<double>& values, double value);
+	//! Human-readable exposure time, e.g. "1/250 s", "0.5 s", "30 s", "2 min"
+	static QString exposureTimeText(double seconds);
+};
+
+#endif // PHOTOGRAPHICMODEDIALOG_HPP

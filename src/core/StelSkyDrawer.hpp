@@ -85,6 +85,16 @@ class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 	Q_PROPERTY(double photoAperture READ getPhotoAperture WRITE setPhotoAperture NOTIFY photoApertureChanged)
 	//! ISO sensitivity of the virtual camera in the photographic mode.
 	Q_PROPERTY(double photoISO READ getPhotoISO WRITE setPhotoISO NOTIFY photoISOChanged)
+	//! Smallest width (FWHM) of a star image in pixels, set by sensor and optics.
+	Q_PROPERTY(double photoPsfMinFwhm READ getPhotoPsfMinFwhm WRITE setPhotoPsfMinFwhm NOTIFY photoPsfMinFwhmChanged)
+	//! Atmospheric seeing (FWHM) in arc seconds. It matters only at small fields of view.
+	Q_PROPERTY(double photoSeeing READ getPhotoSeeing WRITE setPhotoSeeing NOTIFY photoSeeingChanged)
+	//! Fraction of a star's light that the lens scatters into a wide, faint halo (0 ... 0.3).
+	Q_PROPERTY(double photoHaloStrength READ getPhotoHaloStrength WRITE setPhotoHaloStrength NOTIFY photoHaloStrengthChanged)
+	//! Number of diffraction spikes on stars (0 = none, 4, 6 or 8).
+	Q_PROPERTY(int photoSpikeCount READ getPhotoSpikeCount WRITE setPhotoSpikeCount NOTIFY photoSpikeCountChanged)
+	//! Fraction of a star's light that goes into the diffraction spikes (0 ... 0.1).
+	Q_PROPERTY(double photoSpikeStrength READ getPhotoSpikeStrength WRITE setPhotoSpikeStrength NOTIFY photoSpikeStrengthChanged)
 
 	Q_PROPERTY(double extinctionCoefficient READ getExtinctionCoefficient WRITE setExtinctionCoefficient NOTIFY extinctionCoefficientChanged)
 	Q_PROPERTY(double atmosphereTemperature READ getAtmosphereTemperature WRITE setAtmosphereTemperature NOTIFY atmosphereTemperatureChanged)
@@ -135,6 +145,8 @@ public:
 	//! @return true if the source was actually visible and drawn
 	bool drawPointSource(StelPainter* sPainter, const Vec3d& v, const RCMag &rcMag, int bVindex, bool checkInScreen=false, float twinkleFactor=1.0f)
 	{
+		if (getFlagPhotographicModeActive())
+			return drawPhotoPointSource(sPainter, v, rcMag, photoColorTable[bVindex], 1.f, checkInScreen);
 		return drawPointSource(sPainter, v, rcMag, colorTable[bVindex], checkInScreen, twinkleFactor);
 	}
 
@@ -342,6 +354,23 @@ public slots:
 	void setPhotoISO(double iso);
 	//! Get the ISO sensitivity of the virtual camera.
 	double getPhotoISO() const {return photoISO;}
+	//! Set the smallest star image width (FWHM) in pixels (0.8 ... 10).
+	void setPhotoPsfMinFwhm(double pixels);
+	double getPhotoPsfMinFwhm() const {return static_cast<double>(photoMinFwhmPixels);}
+	//! Set the atmospheric seeing (FWHM) in arc seconds (0 ... 60).
+	void setPhotoSeeing(double arcsec);
+	double getPhotoSeeing() const {return static_cast<double>(photoSeeingArcsec);}
+	//! Set the fraction of a star's light in the lens halo (0 ... 0.3).
+	void setPhotoHaloStrength(double fraction);
+	double getPhotoHaloStrength() const {return static_cast<double>(photoHaloFraction);}
+	//! Set the number of diffraction spikes (0, 4, 6 or 8; other values are rounded to these).
+	void setPhotoSpikeCount(int count);
+	int getPhotoSpikeCount() const {return photoSpikeCount;}
+	//! Set the fraction of a star's light in the diffraction spikes (0 ... 0.1).
+	void setPhotoSpikeStrength(double fraction);
+	double getPhotoSpikeStrength() const {return static_cast<double>(photoSpikeFraction);}
+	//! Restore the default camera and star image settings of the photographic mode.
+	void resetPhotographicSettings();
 	//! Get the factor that converts a scene luminance in cd/m^2 into the linear value of the
 	//! scene buffer in the photographic mode, before the exposure compensation.
 	//! It follows the standard exposure equation for a reflected-light meter (calibration K = 12.5):
@@ -439,6 +468,11 @@ signals:
 	void photoApertureChanged(double fNumber);
 	//! Emitted when the ISO sensitivity of the virtual camera is changed
 	void photoISOChanged(double iso);
+	void photoPsfMinFwhmChanged(double pixels);
+	void photoSeeingChanged(double arcsec);
+	void photoHaloStrengthChanged(double fraction);
+	void photoSpikeCountChanged(int count);
+	void photoSpikeStrengthChanged(double fraction);
 
 	void extinctionCoefficientChanged(double coeff);
 	void atmosphereTemperatureChanged(double celsius);
@@ -615,22 +649,33 @@ private:
 	// not size. Bright stars only look bigger because their wings and halo rise above the noise
 	// floor and their cores saturate in the final camera pass.
 
-	//! Vertex format for a point source in the photographic mode (all in floats, linear light).
-	struct PhotoStarVertex {
-		Vec2f pos;      //!< window position of this corner of the sprite
-		Vec2f offset;   //!< offset of this corner from the star centre, in pixels
+	//! One point source in the photographic mode (drawn with instancing: one record per star,
+	//! the sprite corners come from a small shared buffer). All in floats, linear light.
+	struct PhotoStarInstance {
+		Vec2f center;   //!< window position of the star
 		Vec3f color;    //!< linear color times total recorded light (sum over all pixels)
 		float radius;   //!< sprite radius in pixels (the profile fades out smoothly towards it)
 	};
-	std::vector<PhotoStarVertex> photoVertexArray;
+	static_assert(sizeof(PhotoStarInstance) == 24, "PhotoStarInstance must be tightly packed");
+	//! Point sources per batch in the photographic mode. Far more stars are visible on a photo
+	//! than to the eye, so batches are large to keep the number of draw calls low.
+	constexpr static unsigned int maxPhotoPointSources=16384;
+	std::vector<PhotoStarInstance> photoInstances;
+	//! The B-V color table in linear light, normalized to unit luminance
+	static Vec3f photoColorTable[128];
+	//! Draw a point source in the photographic mode.
+	//! @param linearUnitColor linear color with unit luminance
+	//! @param dim extra linear factor on the light (e.g. a fading object)
+	bool drawPhotoPointSource(StelPainter* sPainter, const Vec3d& v, const RCMag& rcMag, const Vec3f& linearUnitColor, float dim, bool checkInScreen);
 	unsigned int nbPhotoPointSources = 0;
 	std::unique_ptr<class QOpenGLShaderProgram> photoStarShaderProgram;
 	std::unique_ptr<QOpenGLVertexArrayObject> photoVao;
-	std::unique_ptr<QOpenGLBuffer> photoVbo;
+	std::unique_ptr<QOpenGLBuffer> photoVbo;       //!< per-star records, refilled for every batch
+	std::unique_ptr<QOpenGLBuffer> photoCornerVbo; //!< the 6 corners of a sprite (two triangles)
 	struct PhotoStarShaderVars {
 		int projectionMatrix;
-		int pos;
-		int offset;
+		int corner;
+		int center;
 		int color;
 		int radius;
 		int coreAlpha;
@@ -638,6 +683,12 @@ private:
 		int haloAlpha;
 		int haloBeta;
 		int haloFraction;
+		int spikeLines;
+		int spikeFraction;
+		int spikeSigma;
+		int spikeLength;
+		int spikeDirs;
+		int visibleThreshold;
 	} photoStarShaderVars = {};
 	void initPhotoStarRendering();
 	void flushPhotoPointSources(StelPainter* sPainter);
@@ -648,6 +699,8 @@ private:
 	float photoCoreAlpha = 1.f;
 	//! Precomputed each frame in update(): the faintest pixel value that can still show on screen
 	float photoVisibleThreshold = 1e-4f;
+	//! Estimated linear value of the sky background in the scene buffer (used for the visibility threshold)
+	float photoSkyBackground = 0.f;
 	//! Smallest PSF width (FWHM) in pixels, given by the sensor and the optics
 	float photoMinFwhmPixels = 2.f;
 	//! Seeing (FWHM) in arc seconds; it matters only when zoomed in
@@ -655,8 +708,16 @@ private:
 	//! Moffat beta of the core (larger = closer to a Gaussian)
 	static constexpr float PHOTO_CORE_BETA = 3.f;
 	//! The lens halo: fraction of the light, width relative to the core, and Moffat beta
-	static constexpr float PHOTO_HALO_FRACTION = 0.05f;
+	float photoHaloFraction = 0.05f;
 	static constexpr float PHOTO_HALO_WIDTH_FACTOR = 4.f;
+	//! Diffraction spikes: number of spikes (0 = none), fraction of the light in them
+	int photoSpikeCount = 6;
+	float photoSpikeFraction = 0.02f;
+	//! Spike profile: width (sigma) and core length of the 1/r^2 falloff, relative to the core alpha
+	static constexpr float PHOTO_SPIKE_WIDTH_FACTOR = 0.5f;
+	static constexpr float PHOTO_SPIKE_LENGTH_FACTOR = 2.f;
+	//! Orientation of the spikes on the sensor (one spike points straight up)
+	static constexpr float PHOTO_SPIKE_ANGLE = static_cast<float>(M_PI/2.);
 	static constexpr float PHOTO_HALO_BETA = 1.5f;
 	//! Largest sprite radius in pixels (only the Moon or Venus at very long exposures get near it)
 	static constexpr float PHOTO_MAX_SPRITE_RADIUS = 600.f;

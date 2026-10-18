@@ -1,0 +1,312 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>PhotographicModeDialogForm</class>
+ <widget class="QWidget" name="PhotographicModeDialogForm">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>360</width>
+    <height>420</height>
+   </rect>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <property name="spacing">
+    <number>0</number>
+   </property>
+   <property name="leftMargin">
+    <number>0</number>
+   </property>
+   <property name="topMargin">
+    <number>0</number>
+   </property>
+   <property name="rightMargin">
+    <number>0</number>
+   </property>
+   <property name="bottomMargin">
+    <number>0</number>
+   </property>
+   <item>
+    <widget class="TitleBar" name="titleBar">
+     <property name="title">
+      <string>Photographic Mode</string>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="cameraGroupBox">
+     <property name="title">
+      <string>Camera</string>
+     </property>
+     <layout class="QGridLayout" name="cameraGridLayout">
+      <item row="0" column="0" colspan="2">
+       <widget class="QCheckBox" name="photographicModeCheckBox">
+        <property name="toolTip">
+         <string>Render the sky like a camera: linear sensor, fixed exposure, no eye adaptation. Needs OpenGL 3 or later.</string>
+        </property>
+        <property name="text">
+         <string>Photographic (camera-like) rendering</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="exposureTimeLabel">
+        <property name="text">
+         <string>Exposure time:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QComboBox" name="exposureTimeComboBox">
+        <property name="toolTip">
+         <string>Shutter speed of the virtual camera</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0">
+       <widget class="QLabel" name="apertureLabel">
+        <property name="text">
+         <string>Aperture:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="QComboBox" name="apertureComboBox">
+        <property name="toolTip">
+         <string>f-number of the lens. The field of view of the screen acts as the focal length.</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="0">
+       <widget class="QLabel" name="isoLabel">
+        <property name="text">
+         <string>ISO:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="1">
+       <widget class="QComboBox" name="isoComboBox">
+        <property name="toolTip">
+         <string>Sensitivity of the sensor</string>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="0">
+       <widget class="QLabel" name="evLabel">
+        <property name="text">
+         <string>Exposure compensation:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="1">
+       <widget class="QDoubleSpinBox" name="evDoubleSpinBox">
+        <property name="toolTip">
+         <string>Brighten (+) or darken (-) the picture in photographic stops. Keyboard: Alt+X / Alt+Shift+X</string>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+        </property>
+        <property name="suffix">
+         <string> EV</string>
+        </property>
+        <property name="decimals">
+         <number>1</number>
+        </property>
+        <property name="minimum">
+         <double>-12.000000000000000</double>
+        </property>
+        <property name="maximum">
+         <double>12.000000000000000</double>
+        </property>
+        <property name="singleStep">
+         <double>0.333333333333333</double>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="0" colspan="2">
+       <widget class="QLabel" name="exposureValueLabel">
+        <property name="toolTip">
+         <string>Exposure value at ISO 100, including the compensation. Bright daylight is about 15, a moonless night sky about -6.</string>
+        </property>
+        <property name="text">
+         <string notr="true">EV100</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="starsGroupBox">
+     <property name="title">
+      <string>Star images</string>
+     </property>
+     <layout class="QGridLayout" name="starsGridLayout">
+      <item row="0" column="0">
+       <widget class="QLabel" name="fwhmLabel">
+        <property name="text">
+         <string>Sharpest star image:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QDoubleSpinBox" name="fwhmDoubleSpinBox">
+        <property name="toolTip">
+         <string>Smallest width (FWHM) of a star image in pixels, given by sensor and optics</string>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+        </property>
+        <property name="suffix">
+         <string> px</string>
+        </property>
+        <property name="decimals">
+         <number>1</number>
+        </property>
+        <property name="minimum">
+         <double>0.800000000000000</double>
+        </property>
+        <property name="maximum">
+         <double>10.000000000000000</double>
+        </property>
+        <property name="singleStep">
+         <double>0.100000000000000</double>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="seeingLabel">
+        <property name="text">
+         <string>Seeing:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QDoubleSpinBox" name="seeingDoubleSpinBox">
+        <property name="toolTip">
+         <string>Blurring by the atmosphere (FWHM). It matters only at small fields of view.</string>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+        </property>
+        <property name="suffix">
+         <string notr="true">″</string>
+        </property>
+        <property name="decimals">
+         <number>1</number>
+        </property>
+        <property name="minimum">
+         <double>0.000000000000000</double>
+        </property>
+        <property name="maximum">
+         <double>60.000000000000000</double>
+        </property>
+        <property name="singleStep">
+         <double>0.500000000000000</double>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0">
+       <widget class="QLabel" name="haloLabel">
+        <property name="text">
+         <string>Lens halo:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="QDoubleSpinBox" name="haloDoubleSpinBox">
+        <property name="toolTip">
+         <string>Share of a star's light that the lens scatters into a wide, faint glow</string>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+        </property>
+        <property name="suffix">
+         <string notr="true"> %</string>
+        </property>
+        <property name="decimals">
+         <number>1</number>
+        </property>
+        <property name="minimum">
+         <double>0.000000000000000</double>
+        </property>
+        <property name="maximum">
+         <double>30.000000000000000</double>
+        </property>
+        <property name="singleStep">
+         <double>0.500000000000000</double>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="0">
+       <widget class="QLabel" name="spikesLabel">
+        <property name="text">
+         <string>Diffraction spikes:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="1">
+       <widget class="QComboBox" name="spikesComboBox">
+        <property name="toolTip">
+         <string>Spikes from straight edges in the aperture (diaphragm blades, secondary mirror vanes)</string>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="0">
+       <widget class="QLabel" name="spikeStrengthLabel">
+        <property name="text">
+         <string>Spike strength:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="1">
+       <widget class="QDoubleSpinBox" name="spikeStrengthDoubleSpinBox">
+        <property name="toolTip">
+         <string>Share of a star's light that goes into the diffraction spikes</string>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+        </property>
+        <property name="suffix">
+         <string notr="true"> %</string>
+        </property>
+        <property name="decimals">
+         <number>1</number>
+        </property>
+        <property name="minimum">
+         <double>0.000000000000000</double>
+        </property>
+        <property name="maximum">
+         <double>10.000000000000000</double>
+        </property>
+        <property name="singleStep">
+         <double>0.100000000000000</double>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QPushButton" name="resetPushButton">
+     <property name="toolTip">
+      <string>Restore the default camera and star image settings</string>
+     </property>
+     <property name="text">
+      <string>Reset to defaults</string>
+     </property>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>TitleBar</class>
+   <extends>QFrame</extends>
+   <header>Dialog.hpp</header>
+   <container>1</container>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections/>
+</ui>
