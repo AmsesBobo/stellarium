@@ -388,6 +388,11 @@ void StelCore::init()
 	actionsMgr->addAction("actionVertical_Flip", displayGroup, N_("Flip scene vertically"), this, "flipVert", "Ctrl+Shift+V", "", true);
 
 	actionsMgr->addAction("actionClear_Background", displayGroup, N_("Toggle star trails"), this, "flagClearSky", "", "", true);
+
+	actionsMgr->addAction("actionShow_Photographic_Mode", displayGroup, N_("Photographic (camera-like) rendering"), skyDrawer, "flagPhotographicMode", "Ctrl+Alt+X");
+	actionsMgr->addAction("actionIncrease_Photo_Exposure", displayGroup, N_("Increase exposure by 1/3 stop"), skyDrawer, "increasePhotoExposure()", "Alt+X");
+	actionsMgr->addAction("actionDecrease_Photo_Exposure", displayGroup, N_("Decrease exposure by 1/3 stop"), skyDrawer, "decreasePhotoExposure()", "Alt+Shift+X");
+	actionsMgr->addAction("actionReset_Photo_Exposure", displayGroup, N_("Reset exposure to 0 EV"), skyDrawer, "resetPhotoExposure()");
 }
 
 QString StelCore::getDefaultProjectionTypeKey() const

@@ -21,6 +21,7 @@
 #include "StelSRGB.hpp"
 #include "Dithering.hpp"
 #include "StelCore.hpp"
+#include "StelSkyDrawer.hpp"
 #include "StelMainView.hpp"
 #include "StelSplashScreen.hpp"
 #include "StelUtils.hpp"
@@ -892,6 +893,32 @@ void StelApp::applyRenderBuffer(GLuint drawFbo)
 	viewportEffect->paintViewportBuffer(renderBuffer);
 }
 
+namespace
+{
+//! GLSL code of the "camera" stage of the photographic mode.
+//! The scene buffer holds linear light. A camera sensor records that light linearly,
+//! scaled by the exposure, until it saturates. To avoid hard clipping edges we use a
+//! soft shoulder: fully linear up to the knee, then a smooth roll-off towards 1.0.
+//! The function is continuous and has slope 1 at the knee, so nothing changes below it.
+QByteArray makeCameraResponseShader()
+{
+	return 1+R"(
+uniform bool photoMode;
+uniform highp float photoExposure;
+
+highp vec3 cameraResponse(highp vec3 lin)
+{
+	if(!photoMode) return lin;
+	highp vec3 x = max(lin * photoExposure, vec3(0));
+	const highp float knee = 0.8;
+	highp vec3 over = max(x - vec3(knee), vec3(0));
+	highp vec3 shoulder = vec3(knee) + (1. - knee) * (vec3(1) - exp(-over / (1. - knee)));
+	return mix(x, shoulder, step(vec3(knee), x));
+}
+)";
+}
+}
+
 void StelApp::setupPostProcessor()
 {
 	postProcessorVBO.reset(new QOpenGLBuffer(QOpenGLBuffer::VertexBuffer));
@@ -929,14 +956,15 @@ void main()
 	postProcessorProgram->addShaderFromSourceCode(QOpenGLShader::Fragment,
 		StelOpenGL::globalShaderPrefix(StelOpenGL::FRAGMENT_SHADER) +
 		makeSRGBUtilsShader() +
-		makeDitheringShader() + R"(
+		makeDitheringShader() +
+		makeCameraResponseShader() + R"(
 VARYING vec2 texcoord;
 uniform sampler2D tex;
 
 void main()
 {
 	vec4 rgba = texture2D(tex, texcoord);
-	FRAG_COLOR = vec4(dither(linearToSRGB(rgba.rgb)), rgba.a);
+	FRAG_COLOR = vec4(dither(linearToSRGB(cameraResponse(rgba.rgb))), rgba.a);
 }
 )");
 	StelPainter::linkProg(postProcessorProgram.get(), "Post-processing program");
@@ -944,6 +972,8 @@ void main()
 	postProcessorUniformLocations.tex           = postProcessorProgram->uniformLocation("tex");
 	postProcessorUniformLocations.rgbMaxValue   = postProcessorProgram->uniformLocation("rgbMaxValue");
 	postProcessorUniformLocations.ditherPattern = postProcessorProgram->uniformLocation("ditherPattern");
+	postProcessorUniformLocations.photoMode     = postProcessorProgram->uniformLocation("photoMode");
+	postProcessorUniformLocations.photoExposure = postProcessorProgram->uniformLocation("photoExposure");
 	postProcessorProgram->release();
 
 #if !QT_CONFIG(opengles2)
@@ -961,7 +991,8 @@ void main()
 		postProcessorProgramMS->addShaderFromSourceCode(QOpenGLShader::Fragment,
 			StelOpenGL::globalShaderPrefix(StelOpenGL::FRAGMENT_SHADER) +
 			makeSRGBUtilsShader() +
-			makeDitheringShader() + R"(
+			makeDitheringShader() +
+			makeCameraResponseShader() + R"(
 uniform sampler2DMS tex;
 uniform int numMultiSamples;
 
@@ -971,7 +1002,7 @@ void main()
 	for(int n = 0; n < numMultiSamples; ++n)
 		rgba += texelFetch(tex, ivec2(gl_FragCoord.xy), n);
 	rgba /= float(numMultiSamples);
-	FRAG_COLOR = vec4(dither(linearToSRGB(rgba.rgb)), rgba.a);
+	FRAG_COLOR = vec4(dither(linearToSRGB(cameraResponse(rgba.rgb))), rgba.a);
 }
 )");
 		StelPainter::linkProg(postProcessorProgramMS.get(), "Multisampled post-processing program");
@@ -980,6 +1011,8 @@ void main()
 		postProcessorUniformLocationsMS.rgbMaxValue       = postProcessorProgramMS->uniformLocation("rgbMaxValue");
 		postProcessorUniformLocationsMS.ditherPattern     = postProcessorProgramMS->uniformLocation("ditherPattern");
 		postProcessorUniformLocationsMS.numMultiSamples   = postProcessorProgramMS->uniformLocation("numMultiSamples");
+		postProcessorUniformLocationsMS.photoMode         = postProcessorProgramMS->uniformLocation("photoMode");
+		postProcessorUniformLocationsMS.photoExposure     = postProcessorProgramMS->uniformLocation("photoExposure");
 		postProcessorProgramMS->release();
 	}
 #endif
@@ -992,7 +1025,20 @@ void StelApp::highGraphicsModeDraw()
 	const auto w = params.viewportXywh[2] * params.devicePixelsPerPixel;
 	const auto h = params.viewportXywh[3] * params.devicePixelsPerPixel;
 	StelOpenGL::checkGLErrors(__FILE__, __LINE__);
-	if(!sceneFBO || sceneFBO->size() != QSize(w,h))
+
+	// The photographic mode needs room above 1.0 in the scene buffer, so that the
+	// camera pass can apply the exposure before saturation. Otherwise we keep the
+	// integer format that has always been used on desktop OpenGL.
+	const StelSkyDrawer* skyDrawer = core->getSkyDrawer();
+	const bool photoMode = skyDrawer->getFlagPhotographicMode();
+#if QT_CONFIG(opengles2)
+	const bool wantFloatScene = true;
+#else
+	const bool wantFloatScene = photoMode;
+#endif
+	const float photoExposure = photoMode ? skyDrawer->getPhotoExposureFactor() : 1.f;
+
+	if(!sceneFBO || sceneFBO->size() != QSize(w,h) || sceneFBOIsFloat != wantFloatScene)
 	{
 		GLint viewport[4] = {};
 		GL(gl->glGetIntegerv(GL_VIEWPORT, viewport));
@@ -1000,11 +1046,8 @@ void StelApp::highGraphicsModeDraw()
 
 		qInfo().nospace() << "Creating scene FBO with size " << w << "x" << h;
 
-#if QT_CONFIG(opengles2)
-		const auto internalFormat = GL_RGBA16F;
-#else
-		const auto internalFormat = GL_RGBA16;
-#endif
+		const auto internalFormat = wantFloatScene ? GL_RGBA16F : GL_RGBA16;
+		sceneFBOIsFloat = wantFloatScene;
 		QOpenGLFramebufferObjectFormat format;
 		format.setAttachment(QOpenGLFramebufferObject::CombinedDepthStencil);
 		format.setInternalTextureFormat(internalFormat);
@@ -1089,6 +1132,8 @@ void StelApp::highGraphicsModeDraw()
 		postProcessorProgramMS->setUniformValue(postProcessorUniformLocationsMS.rgbMaxValue,
 		                                        rgbMaxValue[0], rgbMaxValue[1], rgbMaxValue[2]);
 		postProcessorProgramMS->setUniformValue(postProcessorUniformLocationsMS.numMultiSamples, numMultiSamples);
+		postProcessorProgramMS->setUniformValue(postProcessorUniformLocationsMS.photoMode, photoMode);
+		postProcessorProgramMS->setUniformValue(postProcessorUniformLocationsMS.photoExposure, photoExposure);
 	}
 	else
 	{
@@ -1106,6 +1151,8 @@ void StelApp::highGraphicsModeDraw()
 		const auto rgbMaxValue=calcRGBMaxValue(core->getDitheringMode());
 		postProcessorProgram->setUniformValue(postProcessorUniformLocations.rgbMaxValue,
 		                                      rgbMaxValue[0], rgbMaxValue[1], rgbMaxValue[2]);
+		postProcessorProgram->setUniformValue(postProcessorUniformLocations.photoMode, photoMode);
+		postProcessorProgram->setUniformValue(postProcessorUniformLocations.photoExposure, photoExposure);
 	}
 
 	postProcessorVAO->bind();

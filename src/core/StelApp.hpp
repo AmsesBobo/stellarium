@@ -558,6 +558,8 @@ private:
 	std::unique_ptr<QOpenGLShaderProgram> postProcessorProgram;
 	std::unique_ptr<QOpenGLShaderProgram> postProcessorProgramMS; // multisampled
 	std::unique_ptr<QOpenGLFramebufferObject> sceneFBO;
+	//! Whether the scene buffers have a floating-point format (needed for the photographic mode)
+	bool sceneFBOIsFloat = false;
 	GLuint sceneMultisampledFBO = 0;
 	GLuint sceneMultisampledTex = 0;
 	GLuint sceneMultisampledRenderbuffer = 0;
@@ -567,6 +569,8 @@ private:
 		int tex;
 		int ditherPattern;
 		int rgbMaxValue;
+		int photoMode;
+		int photoExposure;
 	} postProcessorUniformLocations;
 	struct PostProcessorUniformLocationsMS
 	{
@@ -574,6 +578,8 @@ private:
 		int ditherPattern;
 		int rgbMaxValue;
 		int numMultiSamples;
+		int photoMode;
+		int photoExposure;
 	} postProcessorUniformLocationsMS;
 	StelViewportEffect* viewportEffect;
 	QOpenGLFunctions* gl;

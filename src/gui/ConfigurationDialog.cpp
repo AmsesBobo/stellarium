@@ -1133,6 +1133,8 @@ void ConfigurationDialog::saveAllSettings()
         conf->setValue("astro/flag_nebula_magnitude_limit",             propMgr->getStelPropertyValue("StelSkyDrawer.flagNebulaMagnitudeLimit").toBool());
         conf->setValue("astro/nebula_magnitude_limit",                  QString::number(propMgr->getStelPropertyValue("StelSkyDrawer.customNebulaMagLimit").toDouble(), 'f', 2));
         conf->setValue("viewing/use_luminance_adaptation",              propMgr->getStelPropertyValue("StelSkyDrawer.flagLuminanceAdaptation").toBool());
+        conf->setValue("viewing/flag_photographic_mode",                propMgr->getStelPropertyValue("StelSkyDrawer.flagPhotographicMode").toBool());
+        conf->setValue("viewing/photographic_exposure_ev",              propMgr->getStelPropertyValue("StelSkyDrawer.photoExposureEV").toDouble());
         conf->setValue("astro/flag_planets",                            propMgr->getStelPropertyValue("SolarSystem.planetsDisplayed").toBool());
         conf->setValue("astro/flag_planets_hints",                      propMgr->getStelPropertyValue("SolarSystem.flagHints").toBool());
         conf->setValue("astro/flag_planets_markers",                    propMgr->getStelPropertyValue("SolarSystem.flagMarkers").toBool());
