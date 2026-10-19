@@ -284,6 +284,16 @@
         </property>
        </widget>
       </item>
+      <item row="5" column="0" colspan="2">
+       <widget class="QCheckBox" name="bloomCheckBox">
+        <property name="toolTip">
+         <string>Compute the lens halo and the inner part of the spikes from the whole image (bloom). This gives the right shape for bright extended objects such as a lunar crescent or the Sun behind branches.</string>
+        </property>
+        <property name="text">
+         <string>Halo and spikes from the whole image (bloom)</string>
+        </property>
+       </widget>
+      </item>
      </layout>
     </widget>
    </item>

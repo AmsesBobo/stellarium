@@ -21,6 +21,7 @@
 #include "ConstellationMgr.hpp"
 #include "StelApp.hpp"
 #include "StelSRGB.hpp"
+#include <QImage>
 #include "StelCore.hpp"
 #include "StelFileMgr.hpp"
 #include "StelTexture.hpp"
@@ -3405,23 +3406,9 @@ float Planet::getVMagnitude(const StelCore* core, double eclipseFactor) const
 		const auto observerHelioVelocity = core->getObserverHeliocentricEclipticVelocity();
 		const double signedPhaseAngle = isWaning(observerHelioPos, observerHelioVelocity) ? phaseAngle : -phaseAngle;
 
-		const double p = signedPhaseAngle*M_180_PI;
-		// main magnitude term from Russell 1916. Polynomes from Excel fitting with mag(signedPhaseAngle=180)=0.
-		// Measurements support only signedPhaseAngle -150...150, and the New Moon area is mere guesswork.
-		double magIll=(p<0 ?
-				(((((4.208547E-12*p + 1.754857E-09)*p + 2.749700E-07)*p + 1.860811E-05)*p + 5.590310E-04)*p - 1.628691E-02)*p + 4.807056E-03 :
-				(((((4.609790E-12*p - 1.977692E-09)*p + 3.305454E-07)*p - 2.582825E-05)*p + 9.593360E-04)*p + 1.213761E-02)*p + 7.710015E-03);
-		magIll-=12.73;
 		static const double rf=2.56e-6; // Reference flux [lx] from Agrawal (14)
-		double fluxIll=rf*pow(10., -0.4*magIll);
-
-		// apply opposition surge where needed
-		const double surge=qMax(1., 1.35-2.865*abs(phaseAngle));
-		fluxIll *= surge; // This is now shape of Russell's magnitude curve with peak brightness matched with Krisciunas-Schaefer
-		// apply distance factor
-		static const double lunarMeanDist=384399./AU;
-		static const double lunarMeanDistSq=lunarMeanDist*lunarMeanDist;
-		fluxIll *= (lunarMeanDistSq/observerPlanetRq);
+		// Russell 1916 with opposition surge (Krisciunas-Schaefer) and distance factor
+		const double fluxIll=moonSunlitFlux(signedPhaseAngle, observerPlanetRq);
 
 		// compute flux of earthshine: Agrawal 2016.
 		const double beta=parent->equatorialRadius*parent->equatorialRadius/eclipticPos.normSquared();
@@ -3903,7 +3890,8 @@ void Planet::draw(StelCore* core, float maxMagLabels, const QFont& planetNameFon
 	// Compute the 2D position and check if in the screen
 	const StelProjectorP prj = core->getProjection(transfo);
 	const double screenRd = (getAngularRadius(core))*M_PI_180*static_cast<double>(prj->getPixelPerRadAtCenter());
-	const double viewportBufferSz = englishName==L1S("Sun") ? screenRd+125. : screenRd;	// enlarge if this is sun with its huge halo.
+	// enlarge if this is sun with its huge halo (in the photographic mode, its diffraction spikes can cross the screen)
+	const double viewportBufferSz = englishName==L1S("Sun") ? screenRd+(core->getSkyDrawer()->getFlagPhotographicModeActive() ? 2000. : 125.) : screenRd;
 	const double viewport_left = prj->getViewportPosX();
 	const double viewport_bottom = prj->getViewportPosY();
 	const double viewport_width = prj->getViewportWidth();
@@ -3983,6 +3971,8 @@ void Planet::PlanetShaderVars::initLocations(QOpenGLShaderProgram* p)
 	GL(shadowData = p->uniformLocation("shadowData"));
 	GL(sunInfo = p->uniformLocation("sunInfo"));
 	GL(skyBrightness = p->uniformLocation("skyBrightness"));
+	GL(photoMode = p->uniformLocation("photoMode"));
+	GL(photoSunScale = p->uniformLocation("photoSunScale"));
 	GL(orenNayarParameters = p->uniformLocation("orenNayarParameters"));
 	GL(outgasParameters = p->uniformLocation("outgasParameters"));
 	GL(hasAtmosphere = p->uniformLocation("hasAtmosphere"));
@@ -4452,6 +4442,19 @@ void Planet::draw3dModel(StelCore* core, StelProjector::ModelViewTranformP trans
 	const bool currentLocationIsEarth = core->getCurrentLocation().planetName == L1S("Earth");
 	const float eclipseFactor = (screenRd>1.f || (isSun && currentLocationIsEarth)) ? static_cast<float>(solarEclipseFactor) : 1.;
 
+	// Photographic mode: the disk gets its physical luminance, and the camera's PSF (core, lens halo,
+	// diffraction spikes) replaces the classic halo. Part of the light goes into the PSF, the disk keeps the rest.
+	StelSkyDrawer* skyDrawer = core->getSkyDrawer();
+	const bool photoMode = skyDrawer->getFlagPhotographicModeActive() && !drawOnlyRing;
+	float photoDiskPixRadius = 0.f;
+	float photoDiskFraction = 1.f;
+	if (photoMode)
+	{
+		const double pixPerRad = static_cast<double>(core->getProjection(StelCore::FrameJ2000)->getPixelPerRadAtCenter());
+		photoDiskPixRadius = static_cast<float>(getSpheroidAngularRadius(core)*M_PI_180*pixPerRad);
+		photoDiskFraction = skyDrawer->getPhotoDiskFraction(photoDiskPixRadius);
+	}
+
 	if (isSun && currentLocationIsEarth)
 	{
 		static LandscapeMgr* lmgr = GETSTELMODULE(LandscapeMgr);
@@ -4470,7 +4473,7 @@ void Planet::draw3dModel(StelCore* core, StelProjector::ModelViewTranformP trans
 	}
 
 	// Draw the halo if it enabled in the ssystem.ini file (+ special case for backward compatible for the Sun)
-	if (isSun && drawSunHalo && core->getSkyDrawer()->getFlagEarlySunHalo() && core->getFlagClearSky())
+	if (isSun && drawSunHalo && core->getSkyDrawer()->getFlagEarlySunHalo() && core->getFlagClearSky() && !photoMode)
 	{
 		// Prepare openGL lighting parameters according to luminance
 		float surfArcMin2 = static_cast<float>(getSpheroidAngularRadius(core))*60.f;
@@ -4487,8 +4490,8 @@ void Planet::draw3dModel(StelCore* core, StelProjector::ModelViewTranformP trans
 		core->getSkyDrawer()->postDrawSky3dModel(&sPainter, tmp, surfArcMin2, haloMag, haloColorToDraw, isSun);
 	}
 
-	// Draw the real 3D object.
-	if (screenRd>1.f)
+	// Draw the real 3D object. (In the photographic mode, a body too small to show its disk is only drawn as PSF.)
+	if (screenRd>1.f && photoDiskFraction>0.f)
 	{
 		//make better use of depth buffer by adjusting clipping planes
 		//must be done before creating StelPainter
@@ -4576,6 +4579,58 @@ void Planet::draw3dModel(StelCore* core, StelProjector::ModelViewTranformP trans
 			sPainter.setColor(overbright, powf(0.75f, extinctedMag)*overbright, powf(0.42f, 0.9f*extinctedMag)*overbright);
 		}
 
+		if (photoMode)
+		{
+			// Mean luminance of the disk = illuminance / solid angle. The shader multiplies shading x texture
+			// x diffuse light, so diffuse light = mean luminance / (mean shading x mean texture).
+			// Solid angle of the true disk: a scaled-up body keeps its surface brightness.
+			const double angRad = std::atan2(equatorialRadius, getJ2000EquatorialPos(core).norm());
+			const double omega = M_PI*angRad*angRad*static_cast<double>(oneMinusOblateness);
+			const double extinctionFactor = std::pow(10., -0.4*static_cast<double>(extinctedMag));
+			const double sceneScale = static_cast<double>(skyDrawer->getPhotoSceneScale());
+			// Extinction reddening as in the classic rendering, but at unit luminance (the extinction
+			// itself comes from the magnitude)
+			auto unitTint = [](const Vec3f& srgbTint) -> Vec3f {
+				const Vec3f lin = srgbToLinear(srgbTint);
+				const float Y = 0.2126f*lin[0] + 0.7152f*lin[1] + 0.0722f*lin[2];
+				return Y > 0.f ? lin/Y : Vec3f(1.f);
+			};
+			if (isSun)
+			{
+				// Without the eclipse factor: during an eclipse the Moon covers the disk.
+				// 0.806: mean of the limb darkening of planet.frag over the disk, a0 + 2/3 a1 + 1/2 a2, luminance weighted.
+				const double E = 2.54e-6*std::pow(10., -0.4*static_cast<double>(getVMagnitude(core)));
+				const double S = E/(omega*0.806*static_cast<double>(getPhotoTextureMean()));
+				const Vec3f tint = unitTint(Vec3f(1.f, powf(0.75f, extinctedMag), powf(0.42f, 0.9f*extinctedMag)));
+				photoSunScale = tint * static_cast<float>(S*extinctionFactor*sceneScale*static_cast<double>(photoDiskFraction));
+				sPainter.setColor(1.f, 1.f, 1.f);
+			}
+			else
+			{
+				const double phaseAngle = getPhaseAngle(core->getObserverHeliocentricEclipticPos());
+				const QVector4D on = getOrenNayarParameters();
+				// planet.frag uses Oren-Nayar for the Moon and OBJ models, Lambert otherwise; squared with atmosphere
+				const bool orenNayar = isMoon || (ssm->getFlagUseObjModels() && !objModelPath.isEmpty());
+				const double shading = static_cast<double>(photoShadingMean(static_cast<float>(phaseAngle), orenNayar, on, atmosphere));
+				const double E = 2.54e-6*std::pow(10., -0.4*static_cast<double>(getPhotoSunlitMagnitude(core)));
+				const double denominator = omega*shading*static_cast<double>(getPhotoTextureMean());
+				const double S = denominator > 0. ? E/denominator : 0.;
+				const Vec3f tint = unitTint(Vec3f(1.f, magFactorGreen, magFactorBlue));
+				photoDiffuse = tint * static_cast<float>(S*extinctionFactor*sceneScale*static_cast<double>(photoDiskFraction));
+				photoAmbient = Vec3f(0.f);
+				if (isMoon && currentLocationIsEarth)
+				{
+					// Earthshine, as in getVMagnitude() (Agrawal 2016): illuminance from the sunlit Earth relative
+					// to direct sunlight. A surface lit at normal incidence gets about A x scale from the shader.
+					const double beta = parent->equatorialRadius*parent->equatorialRadius/eclipticPos.normSquared();
+					const double earthAlbedo = static_cast<double>(core->getCurrentObserver()->getHomePlanet()->albedo);
+					const double pfac = 0.5*(1.-std::cos(phaseAngle));
+					photoAmbient = photoDiffuse * static_cast<float>(earthAlbedo*beta*pfac*static_cast<double>(on.x()*on.z()));
+				}
+			}
+			photoDraw = true;
+		}
+
 		if (!survey || survey.colors->getInterstate() < 1.0f)
 		{
 			bool drawingModel = ssm->getFlagUseObjModels() && (!objModelPath.isEmpty() || isMoon);
@@ -4590,6 +4645,7 @@ void Planet::draw3dModel(StelCore* core, StelProjector::ModelViewTranformP trans
 			drawSurvey(light, core, &sPainter);
 			drawSphere(light, &sPainter, screenRd, true);
 		}
+		photoDraw = false;
 
 
 		core->setClippingPlanes(n,f);  // Restore old clipping planes
@@ -4605,6 +4661,43 @@ void Planet::draw3dModel(StelCore* core, StelProjector::ModelViewTranformP trans
 			}
 		}
 		#endif
+	}
+
+	if (photoMode)
+	{
+		// The camera's image of the body around its disk: PSF core (for small disks), lens halo, spikes
+		bool allowPhotoPSF = core->getFlagClearSky();
+		if (!isSun && !isMoon && currentLocationIsEarth)
+		{
+			// as below: no halo while a body is in front of its parent
+			const Vec3d obj = getJ2000EquatorialPos(core);
+			const Vec3d par = getParent()->getJ2000EquatorialPos(core);
+			if (obj.angle(par)*M_180_PI <= getParent()->getSpheroidAngularRadius(core))
+				allowPhotoPSF = false;
+		}
+		if (allowPhotoPSF)
+		{
+			StelPainter sPainter(core->getProjection(StelCore::FrameJ2000));
+			Vec3f color;
+			if (isSun)
+				color.set(haloColor[0], powf(0.75f, extinctedMag) * haloColor[1], powf(0.42f, 0.9f*extinctedMag) * haloColor[2]);
+			else
+				color.set(haloColor[0], magFactorGreen * haloColor[1], magFactorBlue * haloColor[2]);
+			const Vec3d pos = getJ2000EquatorialPos(core);
+			if (isSun)
+				skyDrawer->drawPhotoBody(&sPainter, pos, photoDiskPixRadius, vMagnitudeWithExtinction, color);
+			else
+			{
+				// The light comes from the lit part: direction towards the Sun in the sky, and the illuminated fraction
+				const Vec3d p = pos/pos.norm();
+				Vec3d s = ssm->getSun()->getJ2000EquatorialPos(core);
+				s.normalize();
+				const Vec3d sunDirection = s - p*(s*p);
+				const float k = static_cast<float>(getPhase(core->getObserverHeliocentricEclipticPos()));
+				skyDrawer->drawPhotoBody(&sPainter, pos, photoDiskPixRadius, vMagnitudeWithExtinction, color, k, sunDirection);
+			}
+		}
+		return;
 	}
 
 	bool allowDrawHalo = core->getFlagClearSky() && ( !isSun || !core->getSkyDrawer()->getFlagEarlySunHalo()); // We had drawn the sun already before the sphere.
@@ -4868,6 +4961,145 @@ void Planet::computeModelMatrix(Mat4d &result, bool solarEclipseCase) const
 	}
 }
 
+QVector4D Planet::getOrenNayarParameters() const
+{
+	//calculate oren-nayar parameters. The 75 in the scaling computation is arbitrary, to make the terminator visible.
+	const float roughnessSq = roughness * roughness;
+	return QVector4D(
+	              1.0f - 0.5f * roughnessSq / (roughnessSq + 0.33f), // 0.57f), //x = A. If interreflection term is removed from shader, use 0.57 instead of 0.33.
+	              0.45f * roughnessSq / (roughnessSq + 0.09f),	//y = B
+	              50.0f * albedo/M_PIf, // was: 1.85f, but unclear why. //z = scale factor=rho/pi*Eo. rho=albedo=0.12, Eo~50? Higher Eo looks better!
+	              roughnessSq);
+}
+
+// Mean over the full disk (dark parts count as 0) of the shading that planet.frag computes:
+// Lambert, or Oren-Nayar for the Moon and OBJ models, squared for planets with atmosphere.
+// The disk is seen along +z, the Sun is in the x-z plane at the given phase angle.
+float Planet::photoShadingMean(float phaseAngle, bool orenNayar, const QVector4D& on, bool squared)
+{
+	const Vec3d eye(0., 0., 1.);
+	const Vec3d light(std::sin(static_cast<double>(phaseAngle)), 0., std::cos(static_cast<double>(phaseAngle)));
+	const double A = static_cast<double>(on.x());
+	const double B = static_cast<double>(on.y());
+	const double scale = static_cast<double>(on.z());
+	const double roughSq = static_cast<double>(on.w());
+	constexpr int N = 64;
+	double sum = 0.;
+	int count = 0;
+	for (int j=0; j<N; ++j)
+	{
+		const double y = (j+0.5)/N*2.-1.;
+		for (int i=0; i<N; ++i)
+		{
+			const double x = (i+0.5)/N*2.-1.;
+			const double r2 = x*x+y*y;
+			if (r2 >= 1.)
+				continue;
+			++count;
+			const Vec3d n(x, y, std::sqrt(1.-r2));
+			const double cosLight = n*light;
+			if (cosLight <= 0.)
+				continue;
+			double lum;
+			if (orenNayar)
+			{
+				// Same as orenNayar() in planet.frag
+				const double cosEye = qMax(0., n*eye);
+				const double angleLight = std::acos(qMin(1., cosLight));
+				const double angleEye = std::acos(qMin(1., cosEye));
+				const double alpha = qMax(angleEye, angleLight);
+				const double beta = qMin(angleEye, angleLight);
+				const double gamma = (eye - n*cosEye) * (light - n*cosLight);
+				const double C = std::sin(alpha) * std::tan(beta);
+				double ON = A + B * qMax(0., gamma) * C;
+				const double C3_2 = (4.*alpha*beta)/(M_PI*M_PI);
+				const double C3 = 0.125*roughSq/(roughSq+0.09)*C3_2*C3_2;
+				ON += (1.-std::fabs(gamma))*C3*std::tan(0.5*(alpha+beta));
+				const double betaterm = 2.*beta/M_PI;
+				ON += (1.-gamma*betaterm*betaterm)*0.17*roughSq/(roughSq+0.13);
+				lum = ON * cosLight * scale;
+			}
+			else
+				lum = qMin(1., cosLight);
+			if (squared)
+				lum *= lum;
+			sum += lum;
+		}
+	}
+	return count>0 ? static_cast<float>(sum/count) : 0.f;
+}
+
+float Planet::getPhotoTextureMean()
+{
+	if (photoTextureMean >= 0.f)
+		return photoTextureMean;
+	photoTextureMean = 0.5f; // if the texture cannot be read
+	if (texMapFileOrig.isEmpty())
+		return photoTextureMean;
+	QImage img(texMapFileOrig);
+	if (img.isNull())
+		return photoTextureMean;
+	// The texture is a cylindrical map: weight the rows with the cosine of the latitude
+	img = img.scaled(512, 256, Qt::IgnoreAspectRatio, Qt::SmoothTransformation).convertToFormat(QImage::Format_RGB32);
+	double sum = 0., weightSum = 0.;
+	for (int y=0; y<img.height(); ++y)
+	{
+		const double w = std::cos(((y+0.5)/img.height()-0.5)*M_PI);
+		const QRgb* line = reinterpret_cast<const QRgb*>(img.constScanLine(y));
+		for (int x=0; x<img.width(); ++x)
+		{
+			const Vec3f lin = srgbToLinear(Vec3f(qRed(line[x]), qGreen(line[x]), qBlue(line[x]))/255.f);
+			sum += w*(0.2126*lin[0] + 0.7152*lin[1] + 0.0722*lin[2]);
+			weightSum += w;
+		}
+	}
+	if (sum > 0. && weightSum > 0.)
+		photoTextureMean = static_cast<float>(sum/weightSum);
+	qDebug() << "Photographic mode: mean texture luminance of" << englishName << "is" << photoTextureMean;
+	return photoTextureMean;
+}
+
+double Planet::moonSunlitFlux(double signedPhaseAngle, double observerPlanetRq) const
+{
+	const double p = signedPhaseAngle*M_180_PI;
+	// main magnitude term from Russell 1916. Polynomes from Excel fitting with mag(signedPhaseAngle=180)=0.
+	// Measurements support only signedPhaseAngle -150...150, and the New Moon area is mere guesswork.
+	double magIll=(p<0 ?
+			(((((4.208547E-12*p + 1.754857E-09)*p + 2.749700E-07)*p + 1.860811E-05)*p + 5.590310E-04)*p - 1.628691E-02)*p + 4.807056E-03 :
+			(((((4.609790E-12*p - 1.977692E-09)*p + 3.305454E-07)*p - 2.582825E-05)*p + 9.593360E-04)*p + 1.213761E-02)*p + 7.710015E-03);
+	magIll-=12.73;
+	static const double rf=2.56e-6; // Reference flux [lx] from Agrawal (14)
+	double fluxIll=rf*pow(10., -0.4*magIll);
+
+	// apply opposition surge where needed
+	const double surge=qMax(1., 1.35-2.865*std::fabs(signedPhaseAngle));
+	fluxIll *= surge; // This is now shape of Russell's magnitude curve with peak brightness matched with Krisciunas-Schaefer
+	// apply distance factor
+	static const double lunarMeanDist=384399./AU;
+	static const double lunarMeanDistSq=lunarMeanDist*lunarMeanDist;
+	fluxIll *= (lunarMeanDistSq/observerPlanetRq);
+	return fluxIll;
+}
+
+float Planet::getPhotoSunlitMagnitude(const StelCore* core) const
+{
+	if (core->getCurrentLocation().planetName==L1S("Earth") && englishName==L1S("Moon"))
+	{
+		const Vec3d& observerHelioPos = core->getObserverHeliocentricEclipticPos();
+		const double observerRq = observerHelioPos.normSquared();
+		const Vec3d& planetHelioPos = getHeliocentricEclipticPos();
+		const double planetRq = planetHelioPos.normSquared();
+		const double observerPlanetRq = (observerHelioPos - planetHelioPos).normSquared();
+		const double cos_chi = (observerPlanetRq + planetRq - observerRq)/(2.0*std::sqrt(observerPlanetRq*planetRq));
+		const double phaseAngle = std::acos(qBound(-1., cos_chi, 1.));
+		const auto observerHelioVelocity = core->getObserverHeliocentricEclipticVelocity();
+		const double signedPhaseAngle = isWaning(observerHelioPos, observerHelioVelocity) ? phaseAngle : -phaseAngle;
+		static const double rf=2.56e-6;
+		return -2.5f*static_cast<float>(std::log10(moonSunlitFlux(signedPhaseAngle, observerPlanetRq)/rf));
+	}
+	return getVMagnitude(core);
+}
+
 Planet::RenderData Planet::setCommonShaderUniforms(const StelPainter& painter, QOpenGLShaderProgram* shader,
                                                    const PlanetShaderVars& shaderVars, const StelPainterLight& light, 
                                                    const bool hasNormalMap, const bool hasHorizonMap, const bool texCoordsFromFragment)
@@ -4928,8 +5160,19 @@ Planet::RenderData Planet::setCommonShaderUniforms(const StelPainter& painter, Q
 	GL(shader->setUniformValue(shaderVars.eyeDirection, static_cast<GLfloat>(data.eyePos[0]),
 	                                                    static_cast<GLfloat>(data.eyePos[1]),
 	                                                    static_cast<GLfloat>(data.eyePos[2])));
-	GL(shader->setUniformValue(shaderVars.diffuseLight, srgbToLinear(light.diffuse).toQVector()));
-	GL(shader->setUniformValue(shaderVars.ambientLight, srgbToLinear(light.ambient).toQVector()));
+	if (photoDraw)
+	{
+		// Photographic mode: already linear and in scene buffer units (see draw3dModel())
+		GL(shader->setUniformValue(shaderVars.diffuseLight, photoDiffuse.toQVector()));
+		GL(shader->setUniformValue(shaderVars.ambientLight, photoAmbient.toQVector()));
+	}
+	else
+	{
+		GL(shader->setUniformValue(shaderVars.diffuseLight, srgbToLinear(light.diffuse).toQVector()));
+		GL(shader->setUniformValue(shaderVars.ambientLight, srgbToLinear(light.ambient).toQVector()));
+	}
+	GL(shader->setUniformValue(shaderVars.photoMode, GLint(photoDraw)));
+	GL(shader->setUniformValue(shaderVars.photoSunScale, photoSunScale.toQVector()));
 	GL(shader->setUniformValue(shaderVars.tex, 0));
 	GL(shader->setUniformValue(shaderVars.shadowCount, static_cast<GLint>(data.shadowCandidates.size())));
 	GL(shader->setUniformValue(shaderVars.shadowData, data.shadowCandidatesData));
@@ -4945,14 +5188,7 @@ Planet::RenderData Planet::setCommonShaderUniforms(const StelPainter& painter, Q
 
 	if(shaderVars.orenNayarParameters>=0)
 	{
-		//calculate and set oren-nayar parameters. The 75 in the scaling computation is arbitrary, to make the terminator visible.
-		const float roughnessSq = roughness * roughness;
-		QVector4D vec(
-		              1.0f - 0.5f * roughnessSq / (roughnessSq + 0.33f), // 0.57f), //x = A. If interreflection term is removed from shader, use 0.57 instead of 0.33.
-		              0.45f * roughnessSq / (roughnessSq + 0.09f),	//y = B
-		              50.0f * albedo/M_PIf, // was: 1.85f, but unclear why. //z = scale factor=rho/pi*Eo. rho=albedo=0.12, Eo~50? Higher Eo looks better!
-		              roughnessSq);
-		GL(shader->setUniformValue(shaderVars.orenNayarParameters, vec));
+		GL(shader->setUniformValue(shaderVars.orenNayarParameters, getOrenNayarParameters()));
 	}
 
 	float outgas_intensity_distanceScaled=static_cast<float>(static_cast<double>(outgas_intensity)/getHeliocentricEclipticPos().normSquared()); // ad-hoc function: assume square falloff by distance.

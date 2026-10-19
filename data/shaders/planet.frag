@@ -32,6 +32,10 @@ uniform mediump vec3 ambientLight; // Must be in linear sRGB, without OETF appli
 uniform mediump vec3 diffuseLight; // Must be in linear sRGB, without OETF application
 uniform highp vec4 sunInfo;
 uniform mediump float skyBrightness;
+// Photographic mode: diffuseLight and ambientLight carry the physical scale (scene buffer units),
+// so there is no clamping and no dimming in bright skies. For the Sun, photoSunScale does that.
+uniform bool photoMode;
+uniform highp vec3 photoSunScale;
 uniform bool hasAtmosphere;
 uniform bool hasNormalMap;
 uniform bool hasHorizonMap;
@@ -204,6 +208,8 @@ void main()
         float cosTheta2 = cosTheta*cosTheta;
         vec3 limbDarkeningCoef = a0 + a1*cosTheta + a2*cosTheta2;
         vec3 color = texColor.rgb * limbDarkeningCoef;
+        if (photoMode)
+            color = min(color * photoSunScale, vec3(1e30)); // guard against overflow (the scene buffer is 32-bit float)
         FRAG_COLOR = vec4(linearColorToFramebuffer(color), texColor.a);
         return;
     }
@@ -401,7 +407,8 @@ void main()
     }
     //Reduce lum if sky is bright, to avoid burnt-out look in daylight sky.
     //lum *= (1.0-0.4*skyBrightness);
-    lum *= clamp((0.9-0.05*log(skyBrightness)), 0.1, 0.9);
+    if (!photoMode)
+        lum *= clamp((0.9-0.05*log(skyBrightness)), 0.1, 0.9);
 #ifdef SHADOWMAP
     //use shadowmapping
     //z-bias is modified using the angle between the surface and the light
@@ -470,6 +477,10 @@ void main()
 #ifdef IS_MOON
     if(final_illumination < 0.9999)
     {
+        // In the photographic mode the colors are far above 1: do the (legacy, display-referred)
+        // mixing on colors scaled to the usual range, and scale back afterwards.
+        highp float photoK = photoMode ? max(max(diffuseLight.r, max(diffuseLight.g, diffuseLight.b)), 1e-30) : 1.0;
+        finalColor.rgb /= photoK;
         lowp vec4 shadowColor = texture2D(earthShadow, vec2(final_illumination, 0.5));
         // FIXME: this should be calculated properly in linear space as
         // extinction of sunlight, and with subsequent tone mapping.
@@ -479,11 +490,15 @@ void main()
         lowp float alpha = clamp(shadowColor.a, 0.0, 0.7); // clamp alpha to allow some maria detail
         finalColor = eclipsePush * (1.0-0.75*shadowColor.a) * mix(color, shadowColor, alpha);
         finalColor.rgb = srgbToLinear(finalColor.rgb);
+        finalColor.rgb *= photoK;
     }
 #endif
 
     //apply white rimlight
-    finalColor.xyz = clamp( finalColor.xyz + vec3(outgas), 0.0, 1.0);
+    if (photoMode)
+        finalColor.xyz = clamp(finalColor.xyz + vec3(outgas)*max(diffuseLight.r, max(diffuseLight.g, diffuseLight.b)), 0.0, 1e30);
+    else
+        finalColor.xyz = clamp( finalColor.xyz + vec3(outgas), 0.0, 1.0);
 
     FRAG_COLOR = vec4(linearColorToFramebuffer(finalColor.rgb), finalColor.a);
     //to debug texture issues, uncomment and reload shader

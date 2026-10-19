@@ -35,6 +35,7 @@
 
 #include <QCache>
 #include <QString>
+#include <QVector4D>
 
 // The callback type for the external position computation function
 // arguments are JDE, position[3], velocity[3].
@@ -928,6 +929,26 @@ private:
 	void bindMoonVAO();
 	void releaseMoonVAO();
 
+	// ---- Photographic mode ----
+	// The disk gets its physical luminance: the light given by the magnitude, spread over the disk
+	// with the same shading as the shader uses, and with the texture as albedo pattern.
+	//! Mean linear luminance of the texture map (area weighted). Computed on first use.
+	float getPhotoTextureMean();
+	float photoTextureMean = -1.f;
+	//! Magnitude of the sunlit part only: no earthshine, no eclipse (these are rendered by the shader)
+	float getPhotoSunlitMagnitude(const StelCore* core) const;
+	//! Sunlit lunar flux (lux) after Russell (1916) with opposition surge and distance factor
+	double moonSunlitFlux(double signedPhaseAngle, double observerPlanetRq) const;
+	//! Mean of the shader's shading over the full disk (unlit parts count as 0), for a phase angle in radians
+	static float photoShadingMean(float phaseAngle, bool orenNayar, const QVector4D& orenNayarParams, bool squared);
+	//! The Oren-Nayar parameters as given to the shader
+	QVector4D getOrenNayarParameters() const;
+	//! While true, setCommonShaderUniforms() passes the photographic values below
+	bool photoDraw = false;
+	Vec3f photoDiffuse;  //!< linear, in scene buffer units
+	Vec3f photoAmbient;  //!< linear, in scene buffer units
+	Vec3f photoSunScale; //!< linear, in scene buffer units (the Sun only)
+
 	const QString getContextString() const;
 	QPair<double, double> getLunarEclipseMagnitudes() const;
 
@@ -951,6 +972,8 @@ private:
 		int shadowData;
 		int sunInfo;
 		int skyBrightness;
+		int photoMode;
+		int photoSunScale;
 		int orenNayarParameters;
 		int outgasParameters;
 		int sphereScale;
