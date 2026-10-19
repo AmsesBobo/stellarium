@@ -171,7 +171,50 @@
         </property>
        </widget>
       </item>
-      <item row="9" column="0" colspan="2">
+      <item row="9" column="0">
+       <widget class="QLabel" name="whiteBalanceLabel">
+        <property name="text">
+         <string>White balance:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="9" column="1">
+       <widget class="QComboBox" name="whiteBalanceComboBox">
+        <property name="toolTip">
+         <string>The color of light that the camera turns into neutral white, as on a camera. Daylight keeps sunsets orange and the sky blue; automatic follows the mean color of the picture; neutral shows the colors as rendered.</string>
+        </property>
+       </widget>
+      </item>
+      <item row="10" column="0">
+       <widget class="QLabel" name="whiteBalanceKelvinLabel">
+        <property name="text">
+         <string>Color temperature:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="10" column="1">
+       <widget class="QSpinBox" name="whiteBalanceKelvinSpinBox">
+        <property name="toolTip">
+         <string>Color temperature of the custom white balance. Lower values make the picture bluer, higher values warmer.</string>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+        </property>
+        <property name="suffix">
+         <string> K</string>
+        </property>
+        <property name="minimum">
+         <number>2000</number>
+        </property>
+        <property name="maximum">
+         <number>12000</number>
+        </property>
+        <property name="singleStep">
+         <number>100</number>
+        </property>
+       </widget>
+      </item>
+      <item row="11" column="0" colspan="2">
        <widget class="QCheckBox" name="extinctionColorCheckBox">
         <property name="toolTip">
          <string>Near the horizon the atmosphere takes the blue light first, so stars, planets, the Sun, the Moon, the Milky Way and the zodiacal light turn yellow, orange or red. The color comes from the spectral transmission of the atmosphere model; the amount of extinction follows the extinction coefficient.</string>
@@ -181,7 +224,7 @@
         </property>
        </widget>
       </item>
-      <item row="10" column="0" colspan="2">
+      <item row="12" column="0" colspan="2">
        <widget class="QCheckBox" name="infoLineCheckBox">
         <property name="toolTip">
          <string>Show the exposure time, aperture, ISO and exposure value in use at the top of the screen</string>

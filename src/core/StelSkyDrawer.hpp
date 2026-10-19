@@ -114,6 +114,11 @@ class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 	//! spectral transmission of the atmosphere model (atmosphere/lightweight-extinction.dat). The amount of the
 	//! extinction still follows the extinction coefficient.
 	Q_PROPERTY(bool flagPhotoExtinctionColor READ getFlagPhotoExtinctionColor WRITE setFlagPhotoExtinctionColor NOTIFY flagPhotoExtinctionColorChanged)
+	//! White balance of the camera (see PhotoWhiteBalance): 0 = automatic, 1 = daylight, 2 = cloudy, 3 = shade,
+	//! 4 = tungsten, 5 = fluorescent, 6 = flash, 7 = custom color temperature, 8 = neutral (D65, the rendering as it is)
+	Q_PROPERTY(int photoWhiteBalance READ getPhotoWhiteBalance WRITE setPhotoWhiteBalance NOTIFY photoWhiteBalanceChanged)
+	//! Color temperature (K) of the custom white balance
+	Q_PROPERTY(double photoWhiteBalanceKelvin READ getPhotoWhiteBalanceKelvin WRITE setPhotoWhiteBalanceKelvin NOTIFY photoWhiteBalanceKelvinChanged)
 	//! The exposure time in use (seconds): the set one, or the one chosen by the automatic exposure.
 	//! The change signal is only emitted when the value shown by a camera (1/3-stop steps) changes.
 	Q_PROPERTY(double photoEffectiveExposureTime READ getPhotoEffectiveExposureTime NOTIFY photoEffectiveExposureTimeChanged)
@@ -139,6 +144,25 @@ public:
 	static constexpr double PHOTO_AUTO_TIME_CONSTANT = 0.3;
 	//! Font size (pixels) of the line with the camera settings
 	static constexpr int PHOTO_INFO_FONT_SIZE = 18;
+	//! White balance settings, with the color temperatures that cameras use for them
+	enum PhotoWhiteBalance {
+		PhotoWBAuto = 0,        //!< automatic (grey world from the exposure meter, 3000 ... 8000 K)
+		PhotoWBDaylight = 1,    //!< 5200 K
+		PhotoWBCloudy = 2,      //!< 6000 K
+		PhotoWBShade = 3,       //!< 7000 K
+		PhotoWBTungsten = 4,    //!< 3200 K
+		PhotoWBFluorescent = 5, //!< 4000 K
+		PhotoWBFlash = 6,       //!< 5500 K
+		PhotoWBCustom = 7,      //!< photoWhiteBalanceKelvin
+		PhotoWBNeutral = 8      //!< D65: no correction, the colors as rendered (display white)
+	};
+	//! Time constant of the smooth adaptation of the automatic white balance (seconds)
+	static constexpr double PHOTO_AWB_TIME_CONSTANT = 0.7;
+	//! The color temperature (K) whose white light has the given blue/red ratio (linear sRGB), within the AWB range
+	static double photoKelvinForBlueRedRatio(double ratio);
+	//! Range of the automatic white balance (K), like in cameras
+	static constexpr double PHOTO_AWB_MIN_KELVIN = 3000.;
+	static constexpr double PHOTO_AWB_MAX_KELVIN = 8000.;
 	//! Metering modes of the automatic exposure
 	enum PhotoMeteringMode {
 		PhotoMeteringCenterWeighted = 0, //!< 75% in a central circle, 25% over the whole image
@@ -455,6 +479,23 @@ public slots:
 	//! Set the tone curve of the camera (see PhotoToneCurve).
 	void setPhotoToneCurve(int curve);
 	int getPhotoToneCurve() const {return photoToneCurve;}
+	//! Set the white balance (see PhotoWhiteBalance).
+	void setPhotoWhiteBalance(int wb);
+	int getPhotoWhiteBalance() const {return photoWhiteBalance;}
+	//! Set the color temperature (K, 2000 ... 12000) of the custom white balance.
+	void setPhotoWhiteBalanceKelvin(double kelvin);
+	double getPhotoWhiteBalanceKelvin() const {return photoWhiteBalanceKelvin;}
+	//! The color temperature (K) the camera neutralizes now (for the automatic white balance: its current choice)
+	double getPhotoWhiteBalanceTemperature() const;
+	//! Color temperature (K) of a white balance preset (0 for automatic)
+	static double photoWhiteBalancePresetKelvin(int wb);
+	//! Whether the automatic white balance is in use (photographic mode active)
+	bool getFlagPhotoAutoWhiteBalanceActive() const;
+	//! The white balance as a matrix on linear sRGB (light of the chosen color temperature -> display white)
+	const float* getPhotoWhiteBalanceMatrix() const {return photoWBMatrix;}
+	//! Scene value where the sensor saturates (for the exposure meter): the clipping point of the tone curve
+	//! before the exposure compensation
+	double getPhotoMeterClipLevel() const;
 	//! Switch the extinction colors of the photographic mode on or off.
 	void setFlagPhotoExtinctionColor(bool b);
 	bool getFlagPhotoExtinctionColor() const {return flagPhotoExtinctionColor;}
@@ -626,6 +667,8 @@ signals:
 	void flagPhotoInfoLineChanged(bool b);
 	void photoToneCurveChanged(int curve);
 	void flagPhotoExtinctionColorChanged(bool b);
+	void photoWhiteBalanceChanged(int wb);
+	void photoWhiteBalanceKelvinChanged(double kelvin);
 	void photoEffectiveExposureTimeChanged(double seconds);
 
 	void extinctionCoefficientChanged(double coeff);
@@ -943,6 +986,15 @@ private:
 	unsigned int photoExtinctionTexture = 0;
 	bool photoExtinctionTextureDirty = true;
 	void updatePhotoExtinction();
+	//! White balance
+	int photoWhiteBalance = PhotoWBDaylight;
+	double photoWhiteBalanceKelvin = 5200.;
+	double photoAutoWhiteBalanceKelvin = 5200.; //!< current choice of the automatic white balance
+	bool photoAutoWhiteBalanceFresh = true;
+	double photoWBMatrixKelvin = -1.;           //!< the temperature the matrices were made for
+	float photoWBMatrix[9] = {1,0,0, 0,1,0, 0,0,1};    //!< row-major
+	float photoWBInverse[9] = {1,0,0, 0,1,0, 0,0,1};   //!< row-major
+	void updatePhotoWhiteBalanceMatrix();
 	//! Exposure time chosen by the automatic exposure (seconds)
 	double photoAutoExposureTime = 1./60.;
 	//! The automatic exposure jumps to the metered value at its first reading

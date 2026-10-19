@@ -101,6 +101,7 @@
 #include <QGuiApplication>
 #include <QScreen>
 #include <QDateTime>
+#include <QGenericMatrix>
 #include <QRegularExpression>
 #include <QRandomGenerator>
 #include <QFontDatabase>
@@ -913,13 +914,15 @@ uniform highp float photoExposure;
 uniform int photoToneCurve;
 uniform highp vec4 photoTone;
 uniform highp float photoToneClip;
+// White balance: light of the chosen color temperature -> display white (linear sRGB)
+uniform highp mat3 photoWhiteBalance;
 
 highp vec3 cameraResponse(highp vec3 lin)
 {
 	if(!photoMode) return lin;
 	// min(): guard against an overflow to infinity (possible with half floats, as on OpenGL ES);
 	// keep it finite so that mix() below cannot produce NaN (inf*0)
-	highp vec3 x = min(max(lin * photoExposure, vec3(0)), vec3(1e30));
+	highp vec3 x = min(max((photoWhiteBalance * lin) * photoExposure, vec3(0)), vec3(1e30));
 	if (photoToneCurve != 0)
 	{
 		// Each channel separately, as in a camera: bright colored light turns white when it saturates
@@ -945,6 +948,7 @@ void setPhotoToneUniforms(QOpenGLShaderProgram& program, const StelSkyDrawer& dr
 	program.setUniformValue("photoToneCurve", drawer.getPhotoToneCurve());
 	program.setUniformValue("photoTone", p.a, p.ad, p.b, p.c);
 	program.setUniformValue("photoToneClip", p.clip);
+	program.setUniformValue("photoWhiteBalance", QMatrix3x3(drawer.getPhotoWhiteBalanceMatrix()));
 }
 }
 
@@ -1199,8 +1203,8 @@ void StelApp::highGraphicsModeDraw()
 		                                postProcessorVAO.get());
 	}
 
-	// Photographic mode: the exposure meter of the automatic exposure
-	if (photoMode && skyDrawer->getFlagPhotoAutoExposureActive())
+	// Photographic mode: the exposure meter of the automatic exposure and white balance
+	if (photoMode && (skyDrawer->getFlagPhotoAutoExposureActive() || skyDrawer->getFlagPhotoAutoWhiteBalanceActive()))
 	{
 #if !QT_CONFIG(opengles2)
 		if (sceneMultisampledFBO && !bloomDone)
@@ -1217,7 +1221,7 @@ void StelApp::highGraphicsModeDraw()
 			photoMeter.reset(new StelPhotoMeter);
 		// First the reading of the previous frame (its transfer is finished by now), then this frame
 		StelPhotoMeter::Reading reading;
-		if (photoMeter->takeReading(reading))
+		if (photoMeter->takeReading(reading, skyDrawer->getPhotoMeterClipLevel()))
 		{
 			const qint64 now = QDateTime::currentMSecsSinceEpoch();
 			const double dt = photoMeterLastMs < 0 ? 0. : 0.001*static_cast<double>(now - photoMeterLastMs);

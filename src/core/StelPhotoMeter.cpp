@@ -53,6 +53,7 @@ void main()
 // One output texel per segment: the mean luminance of the segment (red), from 12x12 samples spread
 // evenly over it, and the brightest of its 4x4 sub-segments (green), for the highlights: a small
 // bright object (the Moon in a wide field) fills a sub-segment, but only a part of a segment.
+// Blue and alpha hold the mean red and blue (linear), for the automatic white balance.
 // Infinities and NaN (overflows of extreme sources) must not spoil the mean.
 const char* meterSource = R"(
 uniform sampler2D scene;
@@ -68,6 +69,8 @@ void main()
 	highp vec2 origin = vec2(cell) * cellSize;
 	highp vec2 step = cellSize / float(SUB*SUBSAMPLES);
 	highp float sum = 0.;
+	highp float sumR = 0.;
+	highp float sumB = 0.;
 	highp float brightest = 0.;
 	for (int sj = 0; sj < SUB; ++sj)
 		for (int si = 0; si < SUB; ++si)
@@ -79,12 +82,16 @@ void main()
 					highp vec2 k = vec2(float(si*SUBSAMPLES + i), float(sj*SUBSAMPLES + j)) + 0.5;
 					ivec2 texel = clamp(ivec2(origin + k*step), ivec2(0), sceneSize - ivec2(1));
 					highp vec3 c = texelFetch(scene, texel, 0).rgb;
-					subSum += sane(dot(vec3(sane(c.r), sane(c.g), sane(c.b)), vec3(0.2126, 0.7152, 0.0722)));
+					c = vec3(sane(c.r), sane(c.g), sane(c.b));
+					subSum += sane(dot(c, vec3(0.2126, 0.7152, 0.0722)));
+					sumR += c.r;
+					sumB += c.b;
 				}
 			sum += subSum;
 			brightest = max(brightest, subSum / float(SUBSAMPLES*SUBSAMPLES));
 		}
-	FRAG_COLOR = vec4(sum / float(SUB*SUB*SUBSAMPLES*SUBSAMPLES), brightest, 0., 1.);
+	highp float n = float(SUB*SUB*SUBSAMPLES*SUBSAMPLES);
+	FRAG_COLOR = vec4(sum / n, brightest, min(sumR / n, 1e30), min(sumB / n, 1e30));
 }
 )";
 static_assert(StelPhotoMeter::GRID == 48, "update the GRID constant in the meter shader");
@@ -191,7 +198,7 @@ void StelPhotoMeter::measure(GLuint sceneTexture, int w, int h, double sceneScal
 		gl.glEnable(GL_BLEND);
 }
 
-bool StelPhotoMeter::takeReading(Reading& reading)
+bool StelPhotoMeter::takeReading(Reading& reading, double clipLevel)
 {
 	// The buffer filled by the last measure() (in the previous frame, so the transfer is done)
 	const int slot = 1 - current;
@@ -203,7 +210,7 @@ bool StelPhotoMeter::takeReading(Reading& reading)
 	bool result = false;
 	if (data)
 	{
-		reading = evaluate(static_cast<const float*>(data), pendingW[slot], pendingH[slot]);
+		reading = evaluate(static_cast<const float*>(data), pendingW[slot], pendingH[slot], clipLevel);
 		reading.sceneScale = pendingInfo[slot].sceneScale;
 		reading.exposureTime = pendingInfo[slot].exposureTime;
 		gl.glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
@@ -214,7 +221,7 @@ bool StelPhotoMeter::takeReading(Reading& reading)
 	return result;
 }
 
-StelPhotoMeter::Reading StelPhotoMeter::evaluate(const float* cells, int w, int h) const
+StelPhotoMeter::Reading StelPhotoMeter::evaluate(const float* cells, int w, int h, double clipLevel) const
 {
 	Reading r;
 	const double cw = static_cast<double>(w)/GRID;
@@ -226,6 +233,8 @@ StelPhotoMeter::Reading StelPhotoMeter::evaluate(const float* cells, int w, int 
 	const double spotRadius = std::sqrt(0.025*w*h/M_PI);
 
 	double sumAll = 0., sumCenter = 0., weightCenter = 0., sumSpot = 0., weightSpot = 0., maxCell = 0.;
+	double grey[3] = {0., 0., 0.};
+	const auto sane = [](double x) { return (x >= 0. && std::isfinite(x)) ? x : 0.; };
 	for (int j=0; j<GRID; ++j)
 	{
 		for (int i=0; i<GRID; ++i)
@@ -247,11 +256,24 @@ StelPhotoMeter::Reading StelPhotoMeter::evaluate(const float* cells, int w, int 
 			sumSpot += inSpot*m;
 			weightSpot += inSpot;
 			maxCell = std::max(maxCell, peak);
+			// Grey world for the white balance: like a camera, leave out what saturates the sensor
+			const double red = sane(static_cast<double>(cells[4*(j*GRID+i)+2]));
+			const double blue = sane(static_cast<double>(cells[4*(j*GRID+i)+3]));
+			const double green = std::max(0., (m - 0.2126*red - 0.0722*blue)/0.7152);
+			if (red < clipLevel && green < clipLevel && blue < clipLevel)
+			{
+				grey[0] += red;
+				grey[1] += green;
+				grey[2] += blue;
+			}
 		}
 	}
 	const double meanAll = sumAll/(GRID*GRID);
 	r.centerWeighted = weightCenter > 0. ? 0.25*meanAll + 0.75*sumCenter/weightCenter : meanAll;
 	r.spot = weightSpot > 0. ? sumSpot/weightSpot : meanAll;
 	r.highlight = maxCell;
+	r.greyRed = grey[0];
+	r.greyGreen = grey[1];
+	r.greyBlue = grey[2];
 	return r;
 }

@@ -53,6 +53,7 @@
 #include <QFontMetrics>
 #include <QLocale>
 #include <QDir>
+#include <array>
 
 #ifndef GL_RGBA16F
 #define GL_RGBA16F 0x881A
@@ -139,6 +140,9 @@ StelSkyDrawer::StelSkyDrawer(StelCore* acore) :
 	photoToneCurve = qBound(0, conf->value("viewing/photographic_tone_curve", static_cast<int>(PhotoToneStandard)).toInt(), 2);
 	updatePhotoToneCurve();
 	flagPhotoExtinctionColor = conf->value("viewing/flag_photographic_extinction_color", true).toBool();
+	photoWhiteBalance = qBound(0, conf->value("viewing/photographic_white_balance", static_cast<int>(PhotoWBDaylight)).toInt(), 8);
+	photoWhiteBalanceKelvin = qBound(2000., conf->value("viewing/photographic_white_balance_kelvin", 5200.).toDouble(), 12000.);
+	updatePhotoWhiteBalanceMatrix();
 	{
 		const QString path = StelFileMgr::findFile("atmosphere/lightweight-extinction.dat");
 		if (!path.isEmpty() && atmosphereTransmission.load(path))
@@ -1905,6 +1909,178 @@ float StelSkyDrawer::photoToneCurveInverse(float y) const
 	return 0.5f*(lo+hi);
 }
 
+// ---- White balance ----
+
+namespace
+{
+typedef std::array<double, 9> M3; // row-major 3x3
+M3 mul(const M3& a, const M3& b)
+{
+	M3 r{};
+	for (int i=0; i<3; ++i)
+		for (int j=0; j<3; ++j)
+			r[3*i+j] = a[3*i]*b[j] + a[3*i+1]*b[3+j] + a[3*i+2]*b[6+j];
+	return r;
+}
+Vec3d mul(const M3& a, const Vec3d& v)
+{
+	return Vec3d(a[0]*v[0]+a[1]*v[1]+a[2]*v[2], a[3]*v[0]+a[4]*v[1]+a[5]*v[2], a[6]*v[0]+a[7]*v[1]+a[8]*v[2]);
+}
+M3 inverse(const M3& m)
+{
+	const double c00 = m[4]*m[8]-m[5]*m[7], c01 = m[5]*m[6]-m[3]*m[8], c02 = m[3]*m[7]-m[4]*m[6];
+	const double det = m[0]*c00 + m[1]*c01 + m[2]*c02;
+	if (std::fabs(det) < 1e-12)
+		return M3{1,0,0, 0,1,0, 0,0,1};
+	const double d = 1./det;
+	return M3{c00*d, (m[2]*m[7]-m[1]*m[8])*d, (m[1]*m[5]-m[2]*m[4])*d,
+	          c01*d, (m[0]*m[8]-m[2]*m[6])*d, (m[2]*m[3]-m[0]*m[5])*d,
+	          c02*d, (m[1]*m[6]-m[0]*m[7])*d, (m[0]*m[4]-m[1]*m[3])*d};
+}
+// Linear sRGB <-> CIE XYZ (D65), and the Bradford cone response
+const M3 RGB_TO_XYZ{0.4124564, 0.3575761, 0.1804375, 0.2126729, 0.7151522, 0.0721750, 0.0193339, 0.1191920, 0.9503041};
+const M3 XYZ_TO_RGB{3.2404542, -1.5371385, -0.4985314, -0.9692660, 1.8760108, 0.0415560, 0.0556434, -0.2040259, 1.0572252};
+const M3 BRADFORD{0.8951, 0.2664, -0.1614, -0.7502, 1.7135, 0.0367, 0.0389, -0.0685, 1.0296};
+const Vec3d D65_XYZ(0.95047, 1., 1.08883);
+
+//! Chromaticity of light of a color temperature: the Planckian locus (Kim et al. 2002) for warm light,
+//! the CIE daylight locus from 5000 K on (so that 6504 K is D65, like the daylight presets of cameras),
+//! blended between 4000 and 5000 K.
+Vec3d kelvinToXYZ(double T)
+{
+	T = std::clamp(T, 1667., 25000.);
+	const double t1 = 1e3/T, t2 = t1*t1, t3 = t2*t1;
+	// Planckian locus
+	double xp = (T < 4000.) ? -0.2661239*t3 - 0.2343589*t2 + 0.8776956*t1 + 0.179910
+	                        : -3.0258469*t3 + 2.1070379*t2 + 0.2226347*t1 + 0.240390;
+	double yp;
+	if (T < 2222.)
+		yp = -1.1063814*xp*xp*xp - 1.34811020*xp*xp + 2.18555832*xp - 0.20219683;
+	else if (T < 4000.)
+		yp = -0.9549476*xp*xp*xp - 1.37418593*xp*xp + 2.09137015*xp - 0.16748867;
+	else
+		yp = 3.0817580*xp*xp*xp - 5.87338670*xp*xp + 3.75112997*xp - 0.37001483;
+	double x = xp, y = yp;
+	if (T > 4000.)
+	{
+		// CIE daylight locus
+		const double xd = (T <= 7000.) ? -4.6070*t3 + 2.9678*t2 + 0.09911*t1 + 0.244063
+		                               : -2.0064*t3 + 1.9018*t2 + 0.24748*t1 + 0.237040;
+		const double yd = -3.000*xd*xd + 2.870*xd - 0.275;
+		const double w = std::clamp((T - 4000.)/1000., 0., 1.);
+		x = (1.-w)*xp + w*xd;
+		y = (1.-w)*yp + w*yd;
+	}
+	return Vec3d(x/y, 1., (1.-x-y)/y);
+}
+}
+
+double StelSkyDrawer::photoWhiteBalancePresetKelvin(int wb)
+{
+	switch (wb)
+	{
+		case PhotoWBDaylight:    return 5200.;
+		case PhotoWBCloudy:      return 6000.;
+		case PhotoWBShade:       return 7000.;
+		case PhotoWBTungsten:    return 3200.;
+		case PhotoWBFluorescent: return 4000.;
+		case PhotoWBFlash:       return 5500.;
+		case PhotoWBNeutral:     return 6504.;
+		default:                 return 0.;
+	}
+}
+
+double StelSkyDrawer::getPhotoWhiteBalanceTemperature() const
+{
+	if (photoWhiteBalance == PhotoWBAuto)
+		return photoAutoWhiteBalanceKelvin;
+	if (photoWhiteBalance == PhotoWBCustom)
+		return photoWhiteBalanceKelvin;
+	return photoWhiteBalancePresetKelvin(photoWhiteBalance);
+}
+
+bool StelSkyDrawer::getFlagPhotoAutoWhiteBalanceActive() const
+{
+	return photoWhiteBalance == PhotoWBAuto && getFlagPhotographicModeActive();
+}
+
+double StelSkyDrawer::getPhotoMeterClipLevel() const
+{
+	const double clip = (photoToneCurve == PhotoToneLinear) ? 1. : static_cast<double>(photoToneParams.clip);
+	return clip / static_cast<double>(getPhotoExposureFactor());
+}
+
+double StelSkyDrawer::photoKelvinForBlueRedRatio(double ratio)
+{
+	// The blue/red ratio of white light rises with the color temperature: bisection in log(T)
+	const auto whiteRatio = [](double T) {
+		const Vec3d rgb = mul(XYZ_TO_RGB, kelvinToXYZ(T));
+		return rgb[2]/rgb[0];
+	};
+	double lo = std::log(PHOTO_AWB_MIN_KELVIN), hi = std::log(PHOTO_AWB_MAX_KELVIN);
+	if (!(ratio > whiteRatio(PHOTO_AWB_MIN_KELVIN)))
+		return PHOTO_AWB_MIN_KELVIN;
+	if (!(ratio < whiteRatio(PHOTO_AWB_MAX_KELVIN)))
+		return PHOTO_AWB_MAX_KELVIN;
+	for (int i=0; i<40; ++i)
+	{
+		const double mid = 0.5*(lo+hi);
+		if (whiteRatio(std::exp(mid)) < ratio)
+			lo = mid;
+		else
+			hi = mid;
+	}
+	return std::exp(0.5*(lo+hi));
+}
+
+void StelSkyDrawer::updatePhotoWhiteBalanceMatrix()
+{
+	const double T = getPhotoWhiteBalanceTemperature();
+	if (std::fabs(T - photoWBMatrixKelvin) < 0.5)
+		return;
+	photoWBMatrixKelvin = T;
+	M3 m{1,0,0, 0,1,0, 0,0,1};
+	if (photoWhiteBalance != PhotoWBNeutral)
+	{
+		// Von Kries adaptation in Bradford cone space: light of temperature T becomes the display white (D65).
+		// The light of temperature T at luminance 1 stays at luminance 1.
+		const Vec3d src = mul(BRADFORD, kelvinToXYZ(T));
+		const Vec3d dst = mul(BRADFORD, D65_XYZ);
+		const M3 gains{dst[0]/src[0], 0, 0, 0, dst[1]/src[1], 0, 0, 0, dst[2]/src[2]};
+		m = mul(XYZ_TO_RGB, mul(inverse(BRADFORD), mul(gains, mul(BRADFORD, RGB_TO_XYZ))));
+	}
+	const M3 inv = inverse(m);
+	for (int i=0; i<9; ++i)
+	{
+		photoWBMatrix[i] = static_cast<float>(m[static_cast<size_t>(i)]);
+		photoWBInverse[i] = static_cast<float>(inv[static_cast<size_t>(i)]);
+	}
+}
+
+void StelSkyDrawer::setPhotoWhiteBalance(int wb)
+{
+	wb = qBound(0, wb, 8);
+	if (wb == photoWhiteBalance)
+		return;
+	photoWhiteBalance = wb;
+	photoAutoWhiteBalanceFresh = true;
+	photoWBMatrixKelvin = -1.; // e.g. neutral and 6504 K differ slightly
+	updatePhotoWhiteBalanceMatrix();
+	StelApp::immediateSave("viewing/photographic_white_balance", wb);
+	emit photoWhiteBalanceChanged(wb);
+}
+
+void StelSkyDrawer::setPhotoWhiteBalanceKelvin(double kelvin)
+{
+	kelvin = qBound(2000., kelvin, 12000.);
+	if (qFuzzyCompare(kelvin, photoWhiteBalanceKelvin))
+		return;
+	photoWhiteBalanceKelvin = kelvin;
+	updatePhotoWhiteBalanceMatrix();
+	StelApp::immediateSave("viewing/photographic_white_balance_kelvin", kelvin);
+	emit photoWhiteBalanceKelvinChanged(kelvin);
+}
+
 // ---- Extinction colors ----
 
 void StelSkyDrawer::updatePhotoExtinction()
@@ -2051,10 +2227,17 @@ void StelSkyDrawer::setPhotoToneCurve(int curve)
 Vec3f StelSkyDrawer::photoAnnotationCompensation(const Vec3f& linearColor) const
 {
 	const float invExposure = 1.f / getPhotoExposureFactor();
+	// Undo the white balance as well (the camera stage applies it before the tone curve)
+	const auto unbalance = [this](const Vec3f& v) {
+		const float* m = photoWBInverse;
+		return Vec3f(qMax(0.f, m[0]*v[0] + m[1]*v[1] + m[2]*v[2]),
+		             qMax(0.f, m[3]*v[0] + m[4]*v[1] + m[5]*v[2]),
+		             qMax(0.f, m[6]*v[0] + m[7]*v[1] + m[8]*v[2]));
+	};
 	if (photoToneCurve == PhotoToneLinear || photoToneInverseTable.size() < 2)
-		return Vec3f(invertPhotoShoulder(qMax(0.f, linearColor[0])) * invExposure,
-		             invertPhotoShoulder(qMax(0.f, linearColor[1])) * invExposure,
-		             invertPhotoShoulder(qMax(0.f, linearColor[2])) * invExposure);
+		return unbalance(Vec3f(invertPhotoShoulder(qMax(0.f, linearColor[0])) * invExposure,
+		                       invertPhotoShoulder(qMax(0.f, linearColor[1])) * invExposure,
+		                       invertPhotoShoulder(qMax(0.f, linearColor[2])) * invExposure));
 	// Interpolate the table of the inverse curve. Keep white a little below the clipping point,
 	// so that it does not depend on rounding at the edge.
 	const auto lookup = [this](float y) {
@@ -2064,9 +2247,9 @@ Vec3f StelSkyDrawer::photoAnnotationCompensation(const Vec3f& linearColor) const
 		const float t = f - static_cast<float>(i);
 		return photoToneInverseTable[i] + t*(photoToneInverseTable[qMin(i+1, photoToneInverseTable.size()-1)] - photoToneInverseTable[i]);
 	};
-	return Vec3f(lookup(linearColor[0]) * invExposure,
-	             lookup(linearColor[1]) * invExposure,
-	             lookup(linearColor[2]) * invExposure);
+	return unbalance(Vec3f(lookup(linearColor[0]) * invExposure,
+	                       lookup(linearColor[1]) * invExposure,
+	                       lookup(linearColor[2]) * invExposure));
 }
 
 void StelSkyDrawer::setPhotoPsfMinFwhm(double pixels)
@@ -2155,6 +2338,8 @@ void StelSkyDrawer::resetPhotographicSettings()
 	setPhotoMeteringMode(0);
 	setPhotoToneCurve(PhotoToneStandard);
 	setFlagPhotoExtinctionColor(true);
+	setPhotoWhiteBalance(PhotoWBDaylight);
+	setPhotoWhiteBalanceKelvin(5200.);
 }
 
 float StelSkyDrawer::getPhotoSceneScale() const
@@ -2269,6 +2454,27 @@ void StelSkyDrawer::announcePhotoExposureTime()
 
 void StelSkyDrawer::applyPhotoMeterReading(const StelPhotoMeter::Reading& reading, double deltaTime)
 {
+	// Automatic white balance: grey world. The mean color of the picture (without what saturates)
+	// is taken as the color of the light, and the color temperature with the same blue/red ratio is
+	// neutralized, within the range of a camera's automatic white balance.
+	if (!getFlagPhotoAutoWhiteBalanceActive())
+		photoAutoWhiteBalanceFresh = true;
+	else if (reading.greyRed > 0. && reading.greyBlue > 0. && reading.greyGreen > 0.)
+	{
+		const double wanted = photoKelvinForBlueRedRatio(reading.greyBlue/reading.greyRed);
+		if (photoAutoWhiteBalanceFresh)
+		{
+			photoAutoWhiteBalanceKelvin = wanted;
+			photoAutoWhiteBalanceFresh = false;
+		}
+		else
+		{
+			const double f = 1. - std::exp(-qBound(0., deltaTime, 1.)/PHOTO_AWB_TIME_CONSTANT);
+			photoAutoWhiteBalanceKelvin = std::exp(std::log(photoAutoWhiteBalanceKelvin) + f*(std::log(wanted) - std::log(photoAutoWhiteBalanceKelvin)));
+		}
+		updatePhotoWhiteBalanceMatrix();
+	}
+
 	if (!getFlagPhotoAutoExposureActive())
 	{
 		photoAutoExposureFresh = true;
@@ -2335,6 +2541,10 @@ void StelSkyDrawer::drawPhotoInfoLine(StelCore* core) const
 	parts << QString("EV100 %1").arg(QLocale().toString(ev100, 'f', 1));
 	if (std::fabs(photoExposureEV) > 0.01)
 		parts << QString("%1 EV").arg(QString::asprintf("%+.1f", photoExposureEV));
+	{
+		const int kelvin = 50*qRound(getPhotoWhiteBalanceTemperature()/50.);
+		parts << QString("%1 %2 K").arg(photoWhiteBalance == PhotoWBAuto ? qc_("AWB", "camera: automatic white balance") : qc_("WB", "camera: white balance")).arg(kelvin);
+	}
 	if (autoExposure)
 	{
 		static const char* modeNames[] = {
