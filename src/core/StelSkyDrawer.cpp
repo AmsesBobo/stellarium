@@ -142,6 +142,9 @@ StelSkyDrawer::StelSkyDrawer(StelCore* acore) :
 	flagPhotoExtinctionColor = conf->value("viewing/flag_photographic_extinction_color", true).toBool();
 	photoWhiteBalance = qBound(0, conf->value("viewing/photographic_white_balance", static_cast<int>(PhotoWBDaylight)).toInt(), 8);
 	photoWhiteBalanceKelvin = qBound(2000., conf->value("viewing/photographic_white_balance_kelvin", 5200.).toDouble(), 12000.);
+	flagPhotoVignetting = conf->value("viewing/flag_photographic_vignetting", true).toBool();
+	flagPhotoAberrations = conf->value("viewing/flag_photographic_aberrations", true).toBool();
+	photoAberrationStrength = qBound(0.f, conf->value("viewing/photographic_aberration_strength", 1.0).toFloat(), 3.f);
 	updatePhotoWhiteBalanceMatrix();
 	{
 		const QString path = StelFileMgr::findFile("atmosphere/lightweight-extinction.dat");
@@ -344,10 +347,16 @@ VARYING highp float vRadius;
 VARYING highp vec4 vNorm;  // x: core weight x norm, y: halo norm, z: spike norm, w: core weight
 VARYING highp vec4 vShape;
 VARYING highp vec2 vSunDir;
+VARYING highp vec3 vLens;  // lens model: x = distance from the image center / half diagonal, yz = radial direction
+uniform highp vec2 lensCenter;
+uniform highp float lensCorner;
 const highp float PI_V = 3.14159265358979;
 void main(void)
 {
 	vOffset = corner * radius;
+	highp vec2 fromCenter = center - lensCenter;
+	highp float dist = length(fromCenter);
+	vLens = vec3(dist / lensCorner, dist > 0. ? fromCenter / dist : vec2(1., 0.));
 	gl_Position = projectionMatrix * vec4(center + vOffset, 0, 1);
 	vColor = color;
 	vRadius = radius;
@@ -377,6 +386,9 @@ VARYING highp float vRadius;
 VARYING highp vec4 vNorm;
 VARYING highp vec4 vShape;
 VARYING highp vec2 vSunDir;
+VARYING highp vec3 vLens;
+uniform highp float comaLength;   // lens: length of the coma in the corner (pixels), 0 = none
+uniform highp float astigLength;  // lens: length of the astigmatic line in the corner (pixels), 0 = none
 uniform highp float coreAlpha;
 uniform highp float coreBeta;
 uniform highp float haloAlpha;
@@ -395,6 +407,38 @@ const highp float PI = 3.14159265358979;
 highp float moffat(highp float r2, highp float alpha, highp float beta)
 {
 	return (beta - 1.) / (PI * alpha * alpha) * pow(1. + r2 / (alpha * alpha), -beta);
+}
+// Anisotropic Moffat profile, unit integral: widths au along the radial direction, av across
+highp float moffat2(highp float u, highp float v, highp float au, highp float av, highp float beta)
+{
+	return (beta - 1.) / (PI * au * av) * pow(1. + u*u/(au*au) + v*v/(av*av), -beta);
+}
+// The PSF core of a star away from the image center, with the off-axis aberrations of the lens.
+// Coma: the image of a point is a family of circles whose radius grows like t^2 and whose centers move
+// outwards by twice that (a comet with its tail away from the center); here a few blurred blobs along it.
+// Astigmatism: the image is drawn out into a short line, across the radial direction (tangential focus).
+highp float aberratedCore(highp vec2 offset)
+{
+	highp float rho = vLens.x;
+	highp vec2 er = vLens.yz;
+	highp float u = dot(offset, er);
+	highp float v = dot(offset, vec2(-er.y, er.x));
+	highp float coma = comaLength * rho;
+	highp float astig = astigLength * rho * rho;
+	highp float a2 = coreAlpha * coreAlpha;
+	// a line of length L convolved with the core: about the width of a uniform segment, L^2/12, added in quadrature
+	highp float av2 = a2 + astig * astig / 3.;
+	const int K = 6;
+	highp float sum = 0.;
+	for (int k = 0; k < K; ++k)
+	{
+		highp float t = (float(k) + 0.5) / float(K);
+		highp float ring = coma * t * t;       // radius of this comatic circle
+		highp float au = sqrt(a2 + ring*ring);
+		highp float av = sqrt(av2 + ring*ring);
+		sum += moffat2(u - 2.*ring, v, au, av, coreBeta);
+	}
+	return sum / float(K);
 }
 void main(void)
 {
@@ -425,7 +469,11 @@ void main(void)
 	}
 	highp float r2 = d * d;
 	highp float brightness = max(vColor.r, max(vColor.g, vColor.b));
-	highp float profile = coreFraction * vNorm.x * moffat(r2, coreAlpha, coreBeta);
+	highp float profile;
+	if (Rd <= 0. && (comaLength > 0. || astigLength > 0.) && vLens.x > 0.05)
+		profile = coreFraction * vNorm.x * aberratedCore(vOffset);
+	else
+		profile = coreFraction * vNorm.x * moffat(r2, coreAlpha, coreBeta);
 	// The halo and the spikes matter only for bright stars: skip them where even their
 	// peak would stay below what can show on the screen (most stars)
 	if (brightness * haloFraction * vNorm.y * (haloBeta - 1.) / (PI * haloAlpha * haloAlpha) > visibleThreshold)
@@ -494,6 +542,10 @@ void main(void)
 	photoStarShaderVars.spikeDirs = prog.uniformLocation("spikeDirs");
 	photoStarShaderVars.visibleThreshold = prog.uniformLocation("visibleThreshold");
 	photoStarShaderVars.spikeStart = prog.uniformLocation("spikeStart");
+	photoStarShaderVars.lensCenter = prog.uniformLocation("lensCenter");
+	photoStarShaderVars.lensCorner = prog.uniformLocation("lensCorner");
+	photoStarShaderVars.comaLength = prog.uniformLocation("comaLength");
+	photoStarShaderVars.astigLength = prog.uniformLocation("astigLength");
 
 	const GLfloat corners[] = {-1,-1,  1,-1,  1,1,  -1,-1,  1,1,  -1,1};
 	photoCornerVbo.reset(new QOpenGLBuffer(QOpenGLBuffer::VertexBuffer));
@@ -582,6 +634,15 @@ void StelSkyDrawer::flushPhotoPointSources(StelPainter* sPainter)
 	prog.setUniformValueArray(photoStarShaderVars.spikeDirs, spikeDirs, 4);
 	prog.setUniformValue(photoStarShaderVars.visibleThreshold, photoVisibleThreshold);
 	prog.setUniformValue(photoStarShaderVars.spikeStart, getFlagPhotoBloomActive() ? StelPhotoBloom::NEAR_SPIKE_LENGTH : 0.f);
+	{
+		const PhotoLens lens = getPhotoLens(*sPainter->getProjector());
+		// The sprites are positioned in window coordinates (with the viewport offset)
+		prog.setUniformValue(photoStarShaderVars.lensCenter, QVector2D(lens.center[0] + static_cast<float>(sPainter->getProjector()->getViewportPosX()),
+		                                                                lens.center[1] + static_cast<float>(sPainter->getProjector()->getViewportPosY())));
+		prog.setUniformValue(photoStarShaderVars.lensCorner, lens.corner);
+		prog.setUniformValue(photoStarShaderVars.comaLength, lens.coma);
+		prog.setUniformValue(photoStarShaderVars.astigLength, lens.astigmatism);
+	}
 
 	photoVao->bind();
 	StelOpenGL::highGraphicsFunctions()->glDrawArraysInstanced(GL_TRIANGLES, 0, 6, static_cast<GLsizei>(nbPhotoPointSources));
@@ -696,6 +757,12 @@ void StelSkyDrawer::update(double)
 	}
 
 	updatePhotoExtinction();
+	{
+		const StelProjectorP prj = core->getProjection(StelCore::FrameJ2000);
+		photoLensCache = getPhotoLens(*prj);
+		photoLensCache.center += Vec2f(static_cast<float>(prj->getViewportPosX()), static_cast<float>(prj->getViewportPosY()));
+		photoLensAberrations = photoLensCache.coma > 0.f || photoLensCache.astigmatism > 0.f;
+	}
 
 	// update limit mag
 	limitMagnitude = computeLimitMagnitude();
@@ -943,6 +1010,12 @@ bool StelSkyDrawer::drawPhotoPointSource(StelPainter* sPainter, const Vec3d& v, 
 	star.center.set(static_cast<float>(win[0]), static_cast<float>(win[1]));
 	star.color = linearUnitColor * (rcMag.luminance * dim);
 	star.radius = rcMag.radius;
+	if (photoLensAberrations)
+	{
+		// Room for the coma and the astigmatism of the lens (see aberratedCore() in the shader)
+		const float rho = std::hypot(star.center[0]-photoLensCache.center[0], star.center[1]-photoLensCache.center[1]) / photoLensCache.corner;
+		star.radius += 2.5f*photoLensCache.coma*rho + 0.7f*photoLensCache.astigmatism*rho*rho;
+	}
 	star.shape.set(0.f, 1.f, 0.f, 1.f);
 	star.sunDir.set(1.f, 0.f);
 	++nbPhotoPointSources;
@@ -1909,6 +1982,60 @@ float StelSkyDrawer::photoToneCurveInverse(float y) const
 	return 0.5f*(lo+hi);
 }
 
+// ---- Lens model ----
+
+StelSkyDrawer::PhotoLens StelSkyDrawer::getPhotoLens(const StelProjector& prj) const
+{
+	PhotoLens lens;
+	const auto c = prj.getViewportCenter();
+	lens.center.set(static_cast<float>(c[0]) - static_cast<float>(prj.getViewportPosX()),
+	                static_cast<float>(c[1]) - static_cast<float>(prj.getViewportPosY()));
+	lens.corner = qMax(1.f, 0.5f*static_cast<float>(std::hypot(prj.getViewportWidth(), prj.getViewportHeight())));
+	// Rectilinear lens: tan(field angle) = distance from the center / focal length (pixels)
+	lens.focal = qMax(1.f, prj.getPixelPerRadAtCenter());
+	const float N = static_cast<float>(photoAperture);
+	lens.pupil = qMin(1.f, PHOTO_LENS_MAX_APERTURE/N);
+	lens.vignetting = flagPhotoVignetting && getFlagPhotographicModeActive();
+	if (flagPhotoAberrations && getFlagPhotographicModeActive())
+	{
+		// Third-order aberrations: the coma grows with the field and the square of the aperture,
+		// the astigmatism with the square of the field and the aperture (the field factors are in the shader)
+		const float diagonal = 2.f*lens.corner;
+		const float open = PHOTO_LENS_MAX_APERTURE/N;
+		lens.coma = photoAberrationStrength * PHOTO_COMA_LENGTH * diagonal * open*open;
+		lens.astigmatism = photoAberrationStrength * PHOTO_ASTIGMATISM_LENGTH * diagonal * open;
+	}
+	return lens;
+}
+
+void StelSkyDrawer::setFlagPhotoVignetting(bool b)
+{
+	if (b == flagPhotoVignetting)
+		return;
+	flagPhotoVignetting = b;
+	StelApp::immediateSave("viewing/flag_photographic_vignetting", b);
+	emit flagPhotoVignettingChanged(b);
+}
+
+void StelSkyDrawer::setFlagPhotoAberrations(bool b)
+{
+	if (b == flagPhotoAberrations)
+		return;
+	flagPhotoAberrations = b;
+	StelApp::immediateSave("viewing/flag_photographic_aberrations", b);
+	emit flagPhotoAberrationsChanged(b);
+}
+
+void StelSkyDrawer::setPhotoAberrationStrength(double strength)
+{
+	const float v = qBound(0.f, static_cast<float>(strength), 3.f);
+	if (qFuzzyCompare(1.f+v, 1.f+photoAberrationStrength))
+		return;
+	photoAberrationStrength = v;
+	StelApp::immediateSave("viewing/photographic_aberration_strength", static_cast<double>(v));
+	emit photoAberrationStrengthChanged(static_cast<double>(v));
+}
+
 // ---- White balance ----
 
 namespace
@@ -2340,6 +2467,9 @@ void StelSkyDrawer::resetPhotographicSettings()
 	setFlagPhotoExtinctionColor(true);
 	setPhotoWhiteBalance(PhotoWBDaylight);
 	setPhotoWhiteBalanceKelvin(5200.);
+	setFlagPhotoVignetting(true);
+	setFlagPhotoAberrations(true);
+	setPhotoAberrationStrength(1.);
 }
 
 float StelSkyDrawer::getPhotoSceneScale() const
