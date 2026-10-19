@@ -105,6 +105,13 @@ void PhotographicModeDialog::fillComboBoxes()
 		ui->spikesComboBox->addItem(QString::number(6), 6);
 		ui->spikesComboBox->addItem(QString::number(8), 8);
 	}
+	{
+		const QSignalBlocker blocker(ui->meteringComboBox);
+		ui->meteringComboBox->clear();
+		ui->meteringComboBox->addItem(q_("Center-weighted"), StelSkyDrawer::PhotoMeteringCenterWeighted);
+		ui->meteringComboBox->addItem(q_("Spot"), StelSkyDrawer::PhotoMeteringSpot);
+		ui->meteringComboBox->addItem(q_("Highlight-weighted"), StelSkyDrawer::PhotoMeteringHighlight);
+	}
 }
 
 void PhotographicModeDialog::selectNearest(QComboBox* comboBox, const QVector<double>& values, double value)
@@ -145,6 +152,8 @@ void PhotographicModeDialog::createDialogContent()
 	connectDoubleProperty(ui->fwhmDoubleSpinBox,      "StelSkyDrawer.photoPsfMinFwhm");
 	connectDoubleProperty(ui->seeingDoubleSpinBox,    "StelSkyDrawer.photoSeeing");
 	connectBoolProperty(ui->bloomCheckBox,            "StelSkyDrawer.flagPhotoBloom");
+	connectBoolProperty(ui->autoExposureCheckBox,     "StelSkyDrawer.flagPhotoAutoExposure");
+	connectBoolProperty(ui->infoLineCheckBox,         "StelSkyDrawer.flagPhotoInfoLine");
 
 	fillComboBoxes();
 
@@ -168,6 +177,14 @@ void PhotographicModeDialog::createDialogContent()
 	connect(drawer, &StelSkyDrawer::photoApertureChanged,     this, &PhotographicModeDialog::updateCameraWidgets);
 	connect(drawer, &StelSkyDrawer::photoISOChanged,          this, &PhotographicModeDialog::updateCameraWidgets);
 	connect(drawer, &StelSkyDrawer::photoExposureEVChanged,   this, &PhotographicModeDialog::updateCameraWidgets);
+	connect(ui->meteringComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this, drawer](int index)
+	{
+		if (index >= 0)
+			drawer->setPhotoMeteringMode(ui->meteringComboBox->itemData(index).toInt());
+	});
+	connect(drawer, &StelSkyDrawer::flagPhotoAutoExposureChanged,      this, &PhotographicModeDialog::updateCameraWidgets);
+	connect(drawer, &StelSkyDrawer::photoMeteringModeChanged,          this, &PhotographicModeDialog::updateCameraWidgets);
+	connect(drawer, &StelSkyDrawer::photoEffectiveExposureTimeChanged, this, &PhotographicModeDialog::updateCameraWidgets);
 
 	// Star images: percentages in the dialog, fractions in the properties
 	connect(ui->haloDoubleSpinBox, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [drawer](double percent)
@@ -196,16 +213,26 @@ void PhotographicModeDialog::createDialogContent()
 void PhotographicModeDialog::updateCameraWidgets()
 {
 	const StelSkyDrawer* drawer = StelApp::getInstance().getCore()->getSkyDrawer();
-	const double t = drawer->getPhotoExposureTime();
+	// With the automatic exposure the camera chooses the time: the list shows it, but cannot be changed
+	const bool autoExposure = drawer->getFlagPhotoAutoExposure();
+	const double t = autoExposure ? drawer->getPhotoEffectiveExposureTime() : drawer->getPhotoExposureTime();
 	const double n = drawer->getPhotoAperture();
 	const double iso = drawer->getPhotoISO();
 	selectNearest(ui->exposureTimeComboBox, exposureTimes, t);
 	selectNearest(ui->apertureComboBox, apertures, n);
 	selectNearest(ui->isoComboBox, isoValues, iso);
+	ui->exposureTimeComboBox->setEnabled(!autoExposure);
+	ui->meteringComboBox->setEnabled(autoExposure);
+	ui->meteringLabel->setEnabled(autoExposure);
+	{
+		const QSignalBlocker blocker(ui->meteringComboBox);
+		ui->meteringComboBox->setCurrentIndex(qMax(0, ui->meteringComboBox->findData(drawer->getPhotoMeteringMode())));
+	}
 
 	// Exposure value at ISO 100, the usual way photographers compare exposures.
-	// The compensation brightens the picture, i.e. acts like a lower EV.
-	const double ev100 = std::log2(n*n/t) - std::log2(iso/100.) - drawer->getPhotoExposureEV();
+	// In manual mode the compensation brightens the picture, i.e. acts like a lower EV.
+	// With the automatic exposure it is part of the exposure time already.
+	const double ev100 = std::log2(n*n/t) - std::log2(iso/100.) - (autoExposure ? 0. : drawer->getPhotoExposureEV());
 	ui->exposureValueLabel->setText(QString("%1: EV<sub>100</sub> = %2")
 	                                .arg(q_("Exposure value"), QLocale().toString(ev100, 'f', 1)));
 }

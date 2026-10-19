@@ -38,6 +38,7 @@
 #include "LandscapeMgr.hpp"
 #include "LabelMgr.hpp"
 #include "Landscape.hpp"
+#include "StelPropertyMgr.hpp"
 
 #include <QOpenGLContext>
 #include <QOpenGLVertexArrayObject>
@@ -48,6 +49,9 @@
 #include <QSettings>
 #include <QDebug>
 #include <QtGlobal>
+#include <QGuiApplication>
+#include <QFontMetrics>
+#include <QLocale>
 
 // The 0.025 corresponds to the maximum eye resolution in degree
 #define EYE_RESOLUTION (0.25f)
@@ -115,6 +119,9 @@ StelSkyDrawer::StelSkyDrawer(StelCore* acore) :
 	photoSpikeCount = (photoSpikeCount<=0) ? 0 : (photoSpikeCount<=4 ? 4 : (photoSpikeCount<=6 ? 6 : 8));
 	photoSpikeFraction = qBound(0.f, conf->value("viewing/photographic_spike_strength", 0.02).toFloat(), 0.1f);
 	flagPhotoBloom = conf->value("viewing/flag_photographic_bloom", true).toBool();
+	flagPhotoAutoExposure = conf->value("viewing/flag_photographic_auto_exposure", false).toBool();
+	photoMeteringMode = qBound(0, conf->value("viewing/photographic_metering_mode", 0).toInt(), 2);
+	flagPhotoInfoLine = conf->value("viewing/flag_photographic_info_line", true).toBool();
 	setFlagStarMagnitudeLimit(conf->value("astro/flag_star_magnitude_limit", false).toBool());
 	setCustomStarMagnitudeLimit(conf->value("astro/star_magnitude_limit", 6.5).toDouble());
 	setFlagPlanetMagnitudeLimit(conf->value("astro/flag_planet_magnitude_limit", false).toBool());
@@ -1741,6 +1748,9 @@ void StelSkyDrawer::resetPhotoExposure()
 
 float StelSkyDrawer::getPhotoExposureFactor() const
 {
+	// With the automatic exposure, the compensation changes the exposure time instead (as in a camera)
+	if (getFlagPhotoAutoExposureActive())
+		return 1.f;
 	return static_cast<float>(std::exp2(photoExposureEV));
 }
 
@@ -1757,6 +1767,7 @@ void StelSkyDrawer::setPhotoExposureTime(double seconds)
 	photoExposureTime=seconds;
 	StelApp::immediateSave("viewing/photographic_exposure_time", seconds);
 	emit photoExposureTimeChanged(seconds);
+	announcePhotoExposureTime();
 }
 
 void StelSkyDrawer::setPhotoAperture(double fNumber)
@@ -1764,6 +1775,9 @@ void StelSkyDrawer::setPhotoAperture(double fNumber)
 	fNumber = qBound(0.7, fNumber, 64.);
 	if (qFuzzyCompare(fNumber, photoAperture))
 		return;
+	// Aperture priority: the camera keeps the exposure and changes the time at once
+	if (flagPhotoAutoExposure)
+		photoAutoExposureTime = qBound(PHOTO_AUTO_MIN_TIME, photoAutoExposureTime*(fNumber*fNumber)/(photoAperture*photoAperture), PHOTO_AUTO_MAX_TIME);
 	photoAperture=fNumber;
 	StelApp::immediateSave("viewing/photographic_aperture", fNumber);
 	emit photoApertureChanged(fNumber);
@@ -1774,6 +1788,8 @@ void StelSkyDrawer::setPhotoISO(double iso)
 	iso = qBound(25., iso, 409600.);
 	if (qFuzzyCompare(iso, photoISO))
 		return;
+	if (flagPhotoAutoExposure)
+		photoAutoExposureTime = qBound(PHOTO_AUTO_MIN_TIME, photoAutoExposureTime*photoISO/iso, PHOTO_AUTO_MAX_TIME);
 	photoISO=iso;
 	StelApp::immediateSave("viewing/photographic_iso", iso);
 	emit photoISOChanged(iso);
@@ -1879,6 +1895,8 @@ void StelSkyDrawer::resetPhotographicSettings()
 	setPhotoSpikeCount(6);
 	setPhotoSpikeStrength(0.02);
 	setFlagPhotoBloom(true);
+	setFlagPhotoAutoExposure(false);
+	setPhotoMeteringMode(0);
 }
 
 float StelSkyDrawer::getPhotoSceneScale() const
@@ -1886,7 +1904,221 @@ float StelSkyDrawer::getPhotoSceneScale() const
 	// Reflected-light meter calibration constant K (ISO 2720), and middle grey
 	constexpr double K = 12.5;
 	constexpr double middleGrey = 0.18;
-	return static_cast<float>(middleGrey * photoExposureTime * photoISO / (K * photoAperture * photoAperture));
+	return static_cast<float>(middleGrey * getPhotoEffectiveExposureTime() * photoISO / (K * photoAperture * photoAperture));
+}
+
+// ---- Automatic exposure (aperture priority) ----
+
+namespace
+{
+// Exposure times in 1/3-stop steps, as a camera shows them
+const double nominalExposureTimes[] = {
+	1./8000, 1./6400, 1./5000, 1./4000, 1./3200, 1./2500, 1./2000, 1./1600, 1./1250, 1./1000,
+	1./800, 1./640, 1./500, 1./400, 1./320, 1./250, 1./200, 1./160, 1./125, 1./100,
+	1./80, 1./60, 1./50, 1./40, 1./30, 1./25, 1./20, 1./15, 1./13, 1./10,
+	1./8, 1./6, 1./5, 1./4, 0.3, 0.4, 0.5, 0.6, 0.8, 1., 1.3, 1.6, 2., 2.5, 3.2, 4., 5., 6., 8., 10.,
+	13., 15., 20., 25., 30., 45., 60., 90., 120., 180., 240., 300., 600., 900., 1200., 1800., 3600. };
+
+float linearToSRGB(float c)
+{
+	return c <= 0.0031308f ? 12.92f*c : 1.055f*std::pow(c, 1.f/2.4f) - 0.055f;
+}
+}
+
+double StelSkyDrawer::photoNominalExposureTime(double seconds)
+{
+	if (!(seconds > 0.))
+		return seconds;
+	double best = seconds;
+	double bestDistance = 1e300;
+	for (const double t : nominalExposureTimes)
+	{
+		const double distance = std::fabs(std::log(t/seconds));
+		if (distance < bestDistance)
+		{
+			bestDistance = distance;
+			best = t;
+		}
+	}
+	// Outside the table (or between its sparse long values): keep the true value
+	return bestDistance < 0.2 ? best : seconds;
+}
+
+QString StelSkyDrawer::photoExposureTimeText(double seconds)
+{
+	const double t = photoNominalExposureTime(seconds);
+	if (t < 0.25)
+		return QString("1/%1 %2").arg(qRound(1./t)).arg(qc_("s", "unit of time: seconds"));
+	if (t < 60.)
+		return QString("%1 %2").arg(QLocale().toString(t, 'g', 3), qc_("s", "unit of time: seconds"));
+	return QString("%1 %2").arg(QLocale().toString(t/60., 'g', 3), qc_("min", "unit of time: minutes"));
+}
+
+bool StelSkyDrawer::getFlagPhotoAutoExposureActive() const
+{
+	return flagPhotoAutoExposure && getFlagPhotographicModeActive();
+}
+
+double StelSkyDrawer::getPhotoEffectiveExposureTime() const
+{
+	return getFlagPhotoAutoExposureActive() ? photoAutoExposureTime : photoExposureTime;
+}
+
+void StelSkyDrawer::setFlagPhotoAutoExposure(bool b)
+{
+	if (b == flagPhotoAutoExposure)
+		return;
+	flagPhotoAutoExposure = b;
+	if (b)
+	{
+		// Start from the set time; the first reading of the meter sets the right one at once
+		photoAutoExposureTime = qBound(PHOTO_AUTO_MIN_TIME, photoExposureTime, PHOTO_AUTO_MAX_TIME);
+		photoAutoExposureFresh = true;
+	}
+	photoAutoExposureLimit = 0;
+	StelApp::immediateSave("viewing/flag_photographic_auto_exposure", b);
+	emit flagPhotoAutoExposureChanged(b);
+	announcePhotoExposureTime();
+}
+
+void StelSkyDrawer::setPhotoMeteringMode(int mode)
+{
+	mode = qBound(0, mode, 2);
+	if (mode == photoMeteringMode)
+		return;
+	photoMeteringMode = mode;
+	StelApp::immediateSave("viewing/photographic_metering_mode", mode);
+	emit photoMeteringModeChanged(mode);
+}
+
+void StelSkyDrawer::setFlagPhotoInfoLine(bool b)
+{
+	if (b == flagPhotoInfoLine)
+		return;
+	flagPhotoInfoLine = b;
+	StelApp::immediateSave("viewing/flag_photographic_info_line", b);
+	emit flagPhotoInfoLineChanged(b);
+}
+
+void StelSkyDrawer::announcePhotoExposureTime()
+{
+	const double t = photoNominalExposureTime(getPhotoEffectiveExposureTime());
+	if (qFuzzyCompare(t, photoAnnouncedExposureTime))
+		return;
+	photoAnnouncedExposureTime = t;
+	emit photoEffectiveExposureTimeChanged(getPhotoEffectiveExposureTime());
+}
+
+void StelSkyDrawer::applyPhotoMeterReading(const StelPhotoMeter::Reading& reading, double deltaTime)
+{
+	if (!getFlagPhotoAutoExposureActive())
+	{
+		photoAutoExposureFresh = true;
+		return;
+	}
+	if (!(reading.sceneScale > 0.))
+		return;
+
+	// A reflected-light meter (ISO 2720) sets the exposure so that the metered luminance L
+	// becomes middle grey: t = K N^2 / (S L). Here the meter reads the scene image, which holds
+	// L times the scene scale of the frame it measured. The compensation changes the time.
+	constexpr double K = 12.5;
+	const double compensation = std::exp2(photoExposureEV);
+	const double nn = photoAperture*photoAperture;
+	const double metered = (photoMeteringMode == PhotoMeteringSpot) ? reading.spot : reading.centerWeighted;
+	const double L = metered / reading.sceneScale; // cd/m^2
+	double wanted = (L > 0.) ? compensation * K * nn / (photoISO * L) : PHOTO_AUTO_MAX_TIME * 4.;
+	if (photoMeteringMode == PhotoMeteringHighlight)
+	{
+		// Highlight-weighted: the brightest segment must not saturate. It may come up to 1.0, where the
+		// camera stage still keeps some contrast (the shoulder starts at PHOTO_SHOULDER_KNEE).
+		const double Lh = reading.highlight / reading.sceneScale;
+		if (Lh > 0.)
+			wanted = std::min(wanted, compensation * 1.0 * K * nn / (StelSkyDrawer::PHOTO_MIDDLE_GREY * photoISO * Lh));
+	}
+
+	// The camera cannot go beyond its range of exposure times: the picture gets too dark or too bright
+	constexpr double tolerance = 1.12; // 1/6 stop
+	photoAutoExposureLimit = (wanted > PHOTO_AUTO_MAX_TIME*tolerance) ? -1 : ((wanted < PHOTO_AUTO_MIN_TIME/tolerance) ? 1 : 0);
+	wanted = qBound(PHOTO_AUTO_MIN_TIME, wanted, PHOTO_AUTO_MAX_TIME);
+
+	if (photoAutoExposureFresh || !(photoAutoExposureTime > 0.))
+	{
+		photoAutoExposureTime = wanted;
+		photoAutoExposureFresh = false;
+	}
+	else
+	{
+		// Smooth adaptation in log space, like the live view of a camera
+		const double dt = qBound(0., deltaTime, 1.);
+		const double f = 1. - std::exp(-dt/PHOTO_AUTO_TIME_CONSTANT);
+		photoAutoExposureTime = std::exp(std::log(photoAutoExposureTime) + f*(std::log(wanted) - std::log(photoAutoExposureTime)));
+	}
+	announcePhotoExposureTime();
+}
+
+void StelSkyDrawer::drawPhotoInfoLine(StelCore* core) const
+{
+	if (!flagPhotoInfoLine || !getFlagPhotographicModeActive())
+		return;
+
+	const bool autoExposure = getFlagPhotoAutoExposureActive();
+	const double t = getPhotoEffectiveExposureTime();
+	// Exposure value at ISO 100. In manual mode the compensation brightens the picture like a lower EV;
+	// with the automatic exposure it is already part of the exposure time.
+	const double ev100 = std::log2(photoAperture*photoAperture/t) - std::log2(photoISO/100.) - (autoExposure ? 0. : photoExposureEV);
+	const QString sep = QStringLiteral("   ");
+	QStringList parts;
+	parts << (autoExposure ? qc_("Av", "camera mode: aperture priority") : qc_("M", "camera mode: manual"));
+	parts << photoExposureTimeText(t);
+	parts << QString("f/%1").arg(QLocale().toString(photoAperture, 'g', 3));
+	parts << QString("ISO %1").arg(qRound(photoISO));
+	parts << QString("EV100 %1").arg(QLocale().toString(ev100, 'f', 1));
+	if (std::fabs(photoExposureEV) > 0.01)
+		parts << QString("%1 EV").arg(QString::asprintf("%+.1f", photoExposureEV));
+	if (autoExposure)
+	{
+		static const char* modeNames[] = {
+			QT_TRANSLATE_NOOP("StelSkyDrawer", "center-weighted"),
+			QT_TRANSLATE_NOOP("StelSkyDrawer", "spot"),
+			QT_TRANSLATE_NOOP("StelSkyDrawer", "highlight-weighted") };
+		parts << q_(modeNames[qBound(0, photoMeteringMode, 2)]);
+		if (photoAutoExposureLimit < 0)
+			parts << q_("underexposed");
+		else if (photoAutoExposureLimit > 0)
+			parts << q_("overexposed");
+	}
+	const QString text = parts.join(sep);
+
+	StelPainter sPainter(core->getProjection2d());
+	sPainter.setAnnotation(false);
+	const StelProjector::StelProjectorParams params = core->getCurrentStelProjectorParams();
+	const float ppx = static_cast<float>(params.devicePixelsPerPixel);
+	QFont font = QGuiApplication::font();
+	font.setPixelSize(PHOTO_INFO_FONT_SIZE);
+	sPainter.setFont(font);
+	const QFontMetrics fm(font);
+	const QSize fs = fm.size(Qt::TextSingleLine, text);
+
+	// At the top of the screen, like the Equation of Time plugin (below its line if that is shown)
+	float lines = 1.5f;
+	StelPropertyMgr* propMgr = StelApp::getInstance().getStelPropertyManager();
+	if (propMgr && propMgr->getProperty("EquationOfTime.showEOT") && propMgr->getStelPropertyValue("EquationOfTime.showEOT").toBool())
+		lines += 1.5f;
+	const float x = params.viewportXywh[2]*ppx/2.f - fs.width()*ppx/2.f;
+	const float y = params.viewportXywh[3]*ppx - fs.height()*ppx*lines;
+
+	// The text is drawn after the camera stage, straight into the display (sRGB) framebuffer, but the
+	// painter converts colors to linear light: hand it the sRGB encoding of the wanted display values.
+	auto encode = [](const Vec3f& display) {
+		return Vec3f(linearToSRGB(display[0]), linearToSRGB(display[1]), linearToSRGB(display[2]));
+	};
+	// A soft shadow keeps the line readable on a bright sky
+	sPainter.setColor(Vec3f(0.f), 0.6f);
+	sPainter.drawText(x+ppx, y-ppx, text);
+	// Light green, like the display in a camera's viewfinder
+	sPainter.setColor(encode(Vec3f(0.62f, 1.f, 0.55f)), 1.f);
+	sPainter.drawText(x, y, text);
 }
 
 void StelSkyDrawer::showPhotoExposureMessage()

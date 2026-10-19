@@ -49,56 +49,80 @@
         </property>
        </widget>
       </item>
-      <item row="1" column="0">
+      <item row="1" column="0" colspan="2">
+       <widget class="QCheckBox" name="autoExposureCheckBox">
+        <property name="toolTip">
+         <string>The camera meters the picture and sets the exposure time (1/8000 s to 30 s) for the chosen aperture and ISO, like the aperture priority mode (Av, A) of a camera. The exposure compensation then changes the exposure time.</string>
+        </property>
+        <property name="text">
+         <string>Automatic exposure (aperture priority)</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0">
+       <widget class="QLabel" name="meteringLabel">
+        <property name="text">
+         <string>Metering:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="QComboBox" name="meteringComboBox">
+        <property name="toolTip">
+         <string>Center-weighted: most of the weight in the middle of the picture, like a classic camera meter. Spot: only a small circle in the middle. Highlight-weighted: the brightest part of the picture must not burn out.</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="0">
        <widget class="QLabel" name="exposureTimeLabel">
         <property name="text">
          <string>Exposure time:</string>
         </property>
        </widget>
       </item>
-      <item row="1" column="1">
+      <item row="3" column="1">
        <widget class="QComboBox" name="exposureTimeComboBox">
         <property name="toolTip">
          <string>Shutter speed of the virtual camera</string>
         </property>
        </widget>
       </item>
-      <item row="2" column="0">
+      <item row="4" column="0">
        <widget class="QLabel" name="apertureLabel">
         <property name="text">
          <string>Aperture:</string>
         </property>
        </widget>
       </item>
-      <item row="2" column="1">
+      <item row="4" column="1">
        <widget class="QComboBox" name="apertureComboBox">
         <property name="toolTip">
          <string>f-number of the lens. The field of view of the screen acts as the focal length.</string>
         </property>
        </widget>
       </item>
-      <item row="3" column="0">
+      <item row="5" column="0">
        <widget class="QLabel" name="isoLabel">
         <property name="text">
          <string>ISO:</string>
         </property>
        </widget>
       </item>
-      <item row="3" column="1">
+      <item row="5" column="1">
        <widget class="QComboBox" name="isoComboBox">
         <property name="toolTip">
          <string>Sensitivity of the sensor</string>
         </property>
        </widget>
       </item>
-      <item row="4" column="0">
+      <item row="6" column="0">
        <widget class="QLabel" name="evLabel">
         <property name="text">
          <string>Exposure compensation:</string>
         </property>
        </widget>
       </item>
-      <item row="4" column="1">
+      <item row="6" column="1">
        <widget class="QDoubleSpinBox" name="evDoubleSpinBox">
         <property name="toolTip">
          <string>Brighten (+) or darken (-) the picture in photographic stops. Keyboard: Alt+X / Alt+Shift+X</string>
@@ -123,13 +147,23 @@
         </property>
        </widget>
       </item>
-      <item row="5" column="0" colspan="2">
+      <item row="7" column="0" colspan="2">
        <widget class="QLabel" name="exposureValueLabel">
         <property name="toolTip">
          <string>Exposure value at ISO 100, including the compensation. Bright daylight is about 15, a moonless night sky about -6.</string>
         </property>
         <property name="text">
          <string notr="true">EV100</string>
+        </property>
+       </widget>
+      </item>
+      <item row="8" column="0" colspan="2">
+       <widget class="QCheckBox" name="infoLineCheckBox">
+        <property name="toolTip">
+         <string>Show the exposure time, aperture, ISO and exposure value in use at the top of the screen</string>
+        </property>
+        <property name="text">
+         <string>Show the camera settings on the screen</string>
         </property>
        </widget>
       </item>
