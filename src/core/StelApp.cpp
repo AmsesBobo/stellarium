@@ -916,13 +916,47 @@ uniform highp vec4 photoTone;
 uniform highp float photoToneClip;
 // White balance: light of the chosen color temperature -> display white (linear sRGB)
 uniform highp mat3 photoWhiteBalance;
+// Lens vignetting (see StelSkyDrawer::getPhotoLens()): window pixels
+uniform bool photoVignetting;
+uniform highp vec2 photoLensCenter;
+uniform highp float photoLensCorner;
+uniform highp float photoLensFocal;
+uniform highp float photoLensPupil;  // radius of the pupil relative to the lens barrel (1 = wide open)
+uniform highp float photoLensShift;  // offset of the pupil in the corner, in barrel radii
+
+// Area of the intersection of two circles with radii r1, r2 and the distance d of their centers
+highp float circleOverlap(highp float r1, highp float r2, highp float d)
+{
+	const highp float PI = 3.14159265358979;
+	if (d >= r1 + r2) return 0.;
+	if (d <= abs(r2 - r1)) return PI * min(r1, r2) * min(r1, r2);
+	highp float a1 = r1*r1 * acos(clamp((d*d + r1*r1 - r2*r2) / (2.*d*r1), -1., 1.));
+	highp float a2 = r2*r2 * acos(clamp((d*d + r2*r2 - r1*r1) / (2.*d*r2), -1., 1.));
+	highp float k = (-d + r1 + r2) * (d + r1 - r2) * (d - r1 + r2) * (d + r1 + r2);
+	return a1 + a2 - 0.5 * sqrt(max(k, 0.));
+}
+// Light that reaches the sensor at this pixel relative to the center of the image:
+// natural vignetting of the field angle (rectilinear lens) and optical vignetting: off axis the lens
+// barrel cuts the pupil (the "cat's eye"); stopping down shrinks the pupil and removes it.
+// A thin lens gives cos^4; real (retrofocus) lenses show their pupil larger off axis, which makes it
+// about cos^3 (e.g. about -1.5 EV in the corners of a 20 mm full frame lens stopped down).
+highp float vignetting(highp vec2 fragCoord)
+{
+	highp float r = length(fragCoord - photoLensCenter);
+	highp float t = r / photoLensFocal;
+	highp float c2 = 1. / (1. + t*t);
+	highp float pupilArea = 3.14159265358979 * photoLensPupil * photoLensPupil;
+	highp float optical = circleOverlap(photoLensPupil, 1., photoLensShift * r / photoLensCorner) / pupilArea;
+	return c2 * sqrt(c2) * optical;
+}
 
 highp vec3 cameraResponse(highp vec3 lin)
 {
 	if(!photoMode) return lin;
 	// min(): guard against an overflow to infinity (possible with half floats, as on OpenGL ES);
 	// keep it finite so that mix() below cannot produce NaN (inf*0)
-	highp vec3 x = min(max((photoWhiteBalance * lin) * photoExposure, vec3(0)), vec3(1e30));
+	highp float v = photoVignetting ? vignetting(gl_FragCoord.xy) : 1.;
+	highp vec3 x = min(max((photoWhiteBalance * lin) * (photoExposure * v), vec3(0)), vec3(1e30));
 	if (photoToneCurve != 0)
 	{
 		// Each channel separately, as in a camera: bright colored light turns white when it saturates
@@ -942,8 +976,16 @@ highp vec3 cameraResponse(highp vec3 lin)
 namespace
 {
 //! The tone curve of the photographic mode, for the camera stage (see makeCameraResponseShader())
-void setPhotoToneUniforms(QOpenGLShaderProgram& program, const StelSkyDrawer& drawer)
+void setPhotoToneUniforms(QOpenGLShaderProgram& program, const StelSkyDrawer& drawer, const StelProjector& prj)
 {
+	const StelSkyDrawer::PhotoLens lens = drawer.getPhotoLens(prj);
+	program.setUniformValue("photoVignetting", lens.vignetting);
+	program.setUniformValue("photoLensCenter", QVector2D(lens.center[0] + static_cast<float>(prj.getViewportPosX()),
+	                                                     lens.center[1] + static_cast<float>(prj.getViewportPosY())));
+	program.setUniformValue("photoLensCorner", lens.corner);
+	program.setUniformValue("photoLensFocal", lens.focal);
+	program.setUniformValue("photoLensPupil", lens.pupil);
+	program.setUniformValue("photoLensShift", StelSkyDrawer::PHOTO_VIGNETTING_SHIFT);
 	const StelSkyDrawer::PhotoToneParams& p = drawer.getPhotoToneParams();
 	program.setUniformValue("photoToneCurve", drawer.getPhotoToneCurve());
 	program.setUniformValue("photoTone", p.a, p.ad, p.b, p.c);
@@ -1258,7 +1300,7 @@ void StelApp::highGraphicsModeDraw()
 		postProcessorProgramMS->setUniformValue(postProcessorUniformLocationsMS.numMultiSamples, numMultiSamples);
 		postProcessorProgramMS->setUniformValue(postProcessorUniformLocationsMS.photoMode, photoMode);
 		postProcessorProgramMS->setUniformValue(postProcessorUniformLocationsMS.photoExposure, photoExposure);
-		setPhotoToneUniforms(*postProcessorProgramMS, *skyDrawer);
+		setPhotoToneUniforms(*postProcessorProgramMS, *skyDrawer, *core->getProjection(StelCore::FrameJ2000));
 	}
 	else
 	{
@@ -1278,7 +1320,7 @@ void StelApp::highGraphicsModeDraw()
 		                                      rgbMaxValue[0], rgbMaxValue[1], rgbMaxValue[2]);
 		postProcessorProgram->setUniformValue(postProcessorUniformLocations.photoMode, photoMode);
 		postProcessorProgram->setUniformValue(postProcessorUniformLocations.photoExposure, photoExposure);
-		setPhotoToneUniforms(*postProcessorProgram, *skyDrawer);
+		setPhotoToneUniforms(*postProcessorProgram, *skyDrawer, *core->getProjection(StelCore::FrameJ2000));
 
 		const bool haloOn = bloomDone && skyDrawer->getPhotoHaloStrength() > 0.;
 		const bool spikesOn = bloomDone && photoBloom->spikeTexture() != 0;

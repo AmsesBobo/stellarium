@@ -34,6 +34,8 @@
 #include <QSettings>
 #include <QOpenGLFunctions>
 
+class StelProjector;
+
 class QOpenGLVertexArrayObject;
 class StelToneReproducer;
 class QOpenGLBuffer;
@@ -119,6 +121,12 @@ class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 	Q_PROPERTY(int photoWhiteBalance READ getPhotoWhiteBalance WRITE setPhotoWhiteBalance NOTIFY photoWhiteBalanceChanged)
 	//! Color temperature (K) of the custom white balance
 	Q_PROPERTY(double photoWhiteBalanceKelvin READ getPhotoWhiteBalanceKelvin WRITE setPhotoWhiteBalanceKelvin NOTIFY photoWhiteBalanceKelvinChanged)
+	//! Lens: vignetting (natural cos^3 falloff and optical vignetting that shrinks when stopping down)
+	Q_PROPERTY(bool flagPhotoVignetting READ getFlagPhotoVignetting WRITE setFlagPhotoVignetting NOTIFY flagPhotoVignettingChanged)
+	//! Lens: off-axis aberrations of star images (coma and astigmatism), growing towards the corners and with the aperture
+	Q_PROPERTY(bool flagPhotoAberrations READ getFlagPhotoAberrations WRITE setFlagPhotoAberrations NOTIFY flagPhotoAberrationsChanged)
+	//! Lens: strength of the off-axis aberrations (1 = a typical fast lens; 0 ... 3)
+	Q_PROPERTY(double photoAberrationStrength READ getPhotoAberrationStrength WRITE setPhotoAberrationStrength NOTIFY photoAberrationStrengthChanged)
 	//! The exposure time in use (seconds): the set one, or the one chosen by the automatic exposure.
 	//! The change signal is only emitted when the value shown by a camera (1/3-stop steps) changes.
 	Q_PROPERTY(double photoEffectiveExposureTime READ getPhotoEffectiveExposureTime NOTIFY photoEffectiveExposureTimeChanged)
@@ -156,6 +164,28 @@ public:
 		PhotoWBCustom = 7,      //!< photoWhiteBalanceKelvin
 		PhotoWBNeutral = 8      //!< D65: no correction, the colors as rendered (display white)
 	};
+	//! Lens model: the lens is wide open at this f-number (optical vignetting is strongest there)
+	static constexpr float PHOTO_LENS_MAX_APERTURE = 1.4f;
+	//! Optical vignetting: offset of the pupil image against the lens barrel in the corner of the frame,
+	//! in units of the barrel radius. 0.81 gives half the light in the corner when wide open.
+	static constexpr float PHOTO_VIGNETTING_SHIFT = 0.81f;
+	//! Coma: length of the comet in the corner, wide open, as a fraction of the image diagonal (scales with 1/N^2)
+	static constexpr float PHOTO_COMA_LENGTH = 0.006f;
+	//! Astigmatism: length of the line image in the corner, wide open, as a fraction of the diagonal (scales with 1/N)
+	static constexpr float PHOTO_ASTIGMATISM_LENGTH = 0.004f;
+	//! The lens model for the given projection: center of the image (optical axis), half diagonal and focal length
+	//! (all in window pixels), relative pupil size (1 = wide open) and the aberration lengths in the corner (pixels)
+	struct PhotoLens
+	{
+		Vec2f center;
+		float corner = 1.f;
+		float focal = 1.f;
+		float pupil = 1.f;
+		float coma = 0.f;
+		float astigmatism = 0.f;
+		bool vignetting = false;
+	};
+	PhotoLens getPhotoLens(const StelProjector& prj) const;
 	//! Time constant of the smooth adaptation of the automatic white balance (seconds)
 	static constexpr double PHOTO_AWB_TIME_CONSTANT = 0.7;
 	//! The color temperature (K) whose white light has the given blue/red ratio (linear sRGB), within the AWB range
@@ -479,6 +509,12 @@ public slots:
 	//! Set the tone curve of the camera (see PhotoToneCurve).
 	void setPhotoToneCurve(int curve);
 	int getPhotoToneCurve() const {return photoToneCurve;}
+	void setFlagPhotoVignetting(bool b);
+	bool getFlagPhotoVignetting() const {return flagPhotoVignetting;}
+	void setFlagPhotoAberrations(bool b);
+	bool getFlagPhotoAberrations() const {return flagPhotoAberrations;}
+	void setPhotoAberrationStrength(double s);
+	double getPhotoAberrationStrength() const {return static_cast<double>(photoAberrationStrength);}
 	//! Set the white balance (see PhotoWhiteBalance).
 	void setPhotoWhiteBalance(int wb);
 	int getPhotoWhiteBalance() const {return photoWhiteBalance;}
@@ -669,6 +705,9 @@ signals:
 	void flagPhotoExtinctionColorChanged(bool b);
 	void photoWhiteBalanceChanged(int wb);
 	void photoWhiteBalanceKelvinChanged(double kelvin);
+	void flagPhotoVignettingChanged(bool b);
+	void flagPhotoAberrationsChanged(bool b);
+	void photoAberrationStrengthChanged(double s);
 	void photoEffectiveExposureTimeChanged(double seconds);
 
 	void extinctionCoefficientChanged(double coeff);
@@ -894,6 +933,10 @@ private:
 		int spikeDirs;
 		int visibleThreshold;
 		int spikeStart;
+		int lensCenter;
+		int lensCorner;
+		int comaLength;
+		int astigLength;
 	} photoStarShaderVars = {};
 	void initPhotoStarRendering();
 	void flushPhotoPointSources(StelPainter* sPainter);
@@ -995,6 +1038,13 @@ private:
 	float photoWBMatrix[9] = {1,0,0, 0,1,0, 0,0,1};    //!< row-major
 	float photoWBInverse[9] = {1,0,0, 0,1,0, 0,0,1};   //!< row-major
 	void updatePhotoWhiteBalanceMatrix();
+	//! Lens model
+	bool flagPhotoVignetting = true;
+	bool flagPhotoAberrations = true;
+	float photoAberrationStrength = 1.f;
+	//! The lens of the current frame (window coordinates), for the sprite sizes
+	PhotoLens photoLensCache;
+	bool photoLensAberrations = false;
 	//! Exposure time chosen by the automatic exposure (seconds)
 	double photoAutoExposureTime = 1./60.;
 	//! The automatic exposure jumps to the metered value at its first reading

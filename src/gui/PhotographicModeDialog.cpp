@@ -179,6 +179,8 @@ void PhotographicModeDialog::createDialogContent()
 	connectBoolProperty(ui->autoExposureCheckBox,     "StelSkyDrawer.flagPhotoAutoExposure");
 	connectBoolProperty(ui->infoLineCheckBox,         "StelSkyDrawer.flagPhotoInfoLine");
 	connectBoolProperty(ui->extinctionColorCheckBox,  "StelSkyDrawer.flagPhotoExtinctionColor");
+	connectBoolProperty(ui->vignettingCheckBox,       "StelSkyDrawer.flagPhotoVignetting");
+	connectBoolProperty(ui->aberrationsCheckBox,      "StelSkyDrawer.flagPhotoAberrations");
 
 	fillComboBoxes();
 
@@ -223,6 +225,13 @@ void PhotographicModeDialog::createDialogContent()
 		drawer->setPhotoWhiteBalanceKelvin(kelvin);
 	});
 	connect(drawer, &StelSkyDrawer::photoWhiteBalanceChanged,          this, &PhotographicModeDialog::updateCameraWidgets);
+	// Lens: percent in the dialog, factor in the property
+	connect(ui->aberrationStrengthSpinBox, QOverload<int>::of(&QSpinBox::valueChanged), this, [drawer](int percent)
+	{
+		drawer->setPhotoAberrationStrength(percent/100.);
+	});
+	connect(drawer, &StelSkyDrawer::photoAberrationStrengthChanged,    this, &PhotographicModeDialog::updateCameraWidgets);
+	connect(drawer, &StelSkyDrawer::flagPhotoAberrationsChanged,       this, &PhotographicModeDialog::updateCameraWidgets);
 	connect(drawer, &StelSkyDrawer::photoWhiteBalanceKelvinChanged,    this, &PhotographicModeDialog::updateCameraWidgets);
 	connect(drawer, &StelSkyDrawer::flagPhotoAutoExposureChanged,      this, &PhotographicModeDialog::updateCameraWidgets);
 	connect(drawer, &StelSkyDrawer::photoMeteringModeChanged,          this, &PhotographicModeDialog::updateCameraWidgets);
@@ -282,6 +291,12 @@ void PhotographicModeDialog::updateCameraWidgets()
 		const bool custom = drawer->getPhotoWhiteBalance() == StelSkyDrawer::PhotoWBCustom;
 		ui->whiteBalanceKelvinSpinBox->setEnabled(custom);
 		ui->whiteBalanceKelvinLabel->setEnabled(custom);
+	}
+	{
+		const QSignalBlocker blocker(ui->aberrationStrengthSpinBox);
+		ui->aberrationStrengthSpinBox->setValue(qRound(100.*drawer->getPhotoAberrationStrength()));
+		ui->aberrationStrengthSpinBox->setEnabled(drawer->getFlagPhotoAberrations());
+		ui->aberrationStrengthLabel->setEnabled(drawer->getFlagPhotoAberrations());
 	}
 
 	// Exposure value at ISO 100, the usual way photographers compare exposures.
