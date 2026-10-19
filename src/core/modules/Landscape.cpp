@@ -561,7 +561,7 @@ void LandscapeOldStyle::load(const QSettings& landscapeIni, const QString& lands
 		sideTexs[i] = texMan.createTexture(texturePath, texParams);
 		// GZ: To query the textures, also keep an array of QImage*, but only
 		// if that query is not going to be prevented by the polygon that already has been loaded at that point...
-		if ( (!horizonPolygon) && calibrated ) { // for uncalibrated landscapes the texture is currently never queried, so no need to store.
+		if (!horizonPolygon) { // keep a copy of the images for the opacity lookup
 			QImage *image = new QImage(texturePath);
 			if (image->isNull())
 				qWarning() << "Null image (out of memory!) in Landscape!";
@@ -581,7 +581,7 @@ void LandscapeOldStyle::load(const QSettings& landscapeIni, const QString& lands
 		else
 			sideTexs[nbSideTexs+i].clear();
 	}
-	if ( (!horizonPolygon) && calibrated )
+	if (!horizonPolygon)
 	{
 		Q_ASSERT(sidesImages.size()==nbSideTexs);
 	}
@@ -1375,86 +1375,60 @@ float LandscapeOldStyle::getOpacity(Vec3d azalt) const
 {
 	if(!validLandscape) return (azalt[2]>0.0 ? 0.0f : 1.0f);
 
-	if (angleRotateZOffset!=0.0f)
-		azalt.transfo4d(Mat4d::zrotation(static_cast<double>(angleRotateZOffset)));
-
 	// in case we also have a horizon polygon defined, this is trivial and fast.
 	if (horizonPolygon)
 	{
+		if (angleRotateZOffset!=0.0f)
+			azalt.transfo4d(Mat4d::zrotation(static_cast<double>(angleRotateZOffset)));
 		if (horizonPolygon->contains(azalt)) return 1.0f; else return 0.0f;
 	}
-	// Else, sample the images...
-	float az, alt_rad;
-	StelUtils::rectToSphe(&az, &alt_rad, azalt);
-
-	if (alt_rad < decorAngleShift*M_PI_180f) return 1.0f; // below decor, i.e. certainly opaque ground.
-	if (alt_rad > (decorAltAngle+decorAngleShift)*M_PI_180f) return 0.0f; // above decor, i.e. certainly free sky.
-	if (!calibrated) // the result of this function has no real use here: just complain and return result for math. horizon.
-	{
-		static QString lastLandscapeName;
-		if (lastLandscapeName != name)
-		{
-			qWarning() << "Dubious result: Landscape " << name
-				   << " not calibrated. Opacity test represents mathematical horizon only.";
-			lastLandscapeName=name;
-		}
+	if (sidesImages.size()!=nbSideTexs || nbSide==0)
 		return (azalt[2] > 0 ? 0.0f : 1.0f);
-	}
-	az = (M_PIf-az) / M_PIf;                             //  0..2 = N.E.S.W.N
-	// we go to 0..1 domain, it's easier to think.
-	const float xShift=angleRotateZ /(2.0f*M_PIf); // shift value in -1..1 domain
-	Q_ASSERT(xShift >= -1.0f);
-	Q_ASSERT(xShift <=  1.0f);
-	float az_phot=az*0.5f - 0.25f - xShift;      // The 0.25 is caused by regular pano left edge being East. The xShift compensates any configured angleRotateZ
-	az_phot=fmodf(az_phot, 1.0f);
-	if (az_phot<0) az_phot+=1.0f;                                //  0..1 = image-X for a non-repeating pano photo
-	float az_panel =  nbSide*nbDecorRepeat * az_phot; // azimuth in "panel space". Ex for nbS=4, nbDR=3: [0..[12, say 11.4
-	float x_in_panel=fmodf(az_panel, 1.0f);
-	int currentSide = static_cast<int>(std::floor(fmodf(az_panel, nbSide)));
-	Q_ASSERT(currentSide>=0);
-	Q_ASSERT(currentSide<static_cast<int>(nbSideTexs));
-	if (sidesImages[currentSide]->isNull()) return 0.0f; // can happen if image is misconfigured and failed to load.
-	int x= static_cast<int>(sides[currentSide].texCoords[0] + x_in_panel*(sides[currentSide].texCoords[2]-sides[currentSide].texCoords[0]))
-			* sidesImages[currentSide]->width(); // pixel X from left.
 
-	// QImage has pixel 0/0 in top left corner. We must find image Y for optionally cropped images.
-	// It should no longer be possible that sample position is outside cropped texture. in this case, assert(0) but again assume full transparency and exit early.
+	// Else, sample the images exactly where the decor is drawn (see the fragment shader in draw()),
+	// for calibrated and uncalibrated landscapes alike. For an uncalibrated landscape the altitudes
+	// in landscape.ini are not the true ones, but the result tells what is hidden on the screen.
+	Vec3d dir = azalt;
+	dir.transfo4d(Mat4d::zrotation(static_cast<double>(angleRotateZ+angleRotateZOffset)));
+	dir.normalize();
+	float azimuth = std::atan2(static_cast<float>(dir[0]), static_cast<float>(dir[1]));
+	if (azimuth<0.f) azimuth += 2.f*M_PIf;
+	const float elevation = std::asin(qBound(-1.f, static_cast<float>(dir[2]), 1.f));
 
-	float y_img_1; // y of the sampled altitude in 0..1 visible image height from bottom
-	if (tanMode)
+	const float shift = decorAngleShift*M_PI_180f;
+	const float height = decorAltAngle*M_PI_180f;
+	if (elevation < shift) return 1.0f; // below decor, i.e. certainly opaque ground.
+	float unit; // vertical position in the side panels, 0..1 from bottom
+	if (calibrated)
+		unit = tanMode ? (std::tan(elevation)-std::tan(shift))/(std::tan(shift+height)-std::tan(shift))
+		               : (elevation-shift)/height;
+	else // the legacy geometry
+		unit = tanMode ? (std::tan(elevation)-std::tan(shift))/std::tan(height)
+		               : (std::tan(elevation)-std::sin(shift))/std::sin(height);
+	if (unit > 1.f) return 0.0f; // above decor, i.e. certainly free sky.
+	if (unit < 0.f) return (elevation < 0.f ? 1.0f : 0.0f); // gap between decor and ground
+
+	const float sideAngularWidth = 2.f*M_PIf/nbSide;
+	const int currentSide = qBound(0, static_cast<int>(azimuth/sideAngularWidth), nbSide-1);
+	const landscapeTexCoord& side = sides[currentSide];
+	// the image of this side
+	const QImage* image = nullptr;
+	for (int i=0; i<nbSideTexs; ++i)
 	{
-		const float tanAlt=std::tan(alt_rad);
-		const float tanTop=std::tan((decorAltAngle+decorAngleShift)*M_PI_180f);
-		const float tanBot=std::tan(decorAngleShift*M_PI_180f);
-		y_img_1=(tanAlt-tanBot)/(tanTop-tanBot); // Y position 0..1 in visible image height from bottom
+		if (sideTexs[i] == side.tex)
+		{
+			image = sidesImages.at(i);
+			break;
+		}
 	}
-	else
-	{ // adapted from spherical...
-		const float alt_pm1 = 2.0f * alt_rad  / M_PIf;  // sampled altitude, -1...+1 linear in altitude angle
-		const float img_top_pm1 = 1.0f-( (90.0f-decorAltAngle-decorAngleShift) / 90.0f); // the top line in -1..+1 (angular)
-		if (alt_pm1>img_top_pm1) { Q_ASSERT(0); return 0.0f; } // should have been caught above with alt_rad tests
-		const float img_bot_pm1 = 1.0f-((90.0f-decorAngleShift) / 90.0f); // the bottom line in -1..+1 (angular)
-		if (alt_pm1<img_bot_pm1) { Q_ASSERT(0); return 1.0f; } // should have been caught above with alt_rad tests
+	if (!image || image->isNull()) return 0.0f; // can happen if image is misconfigured and failed to load.
 
-		y_img_1=(alt_pm1-img_bot_pm1)/(img_top_pm1-img_bot_pm1); // the sampled altitude in 0..1 visible image height from bottom
-		Q_ASSERT(y_img_1<=1.f);
-		Q_ASSERT(y_img_1>=0.f);
-	}
-	// x0/y0 is lower left, x1/y1 upper right corner.
-	float y_baseImg_1 = sides[currentSide].texCoords[1]+ y_img_1*(sides[currentSide].texCoords[3]-sides[currentSide].texCoords[1]);
-	int y=static_cast<int>((1.0f-y_baseImg_1)*static_cast<float>(sidesImages[currentSide]->height())); // pixel Y from top.
-	QRgb pixVal=sidesImages[currentSide]->pixel(x, y);
-/*
-#ifndef NDEBUG
-	// GZ: please leave the comment available for further development!
-	qDebug() << "Oldstyle Landscape sampling: az=" << az*180.0 << "° alt=" << alt_rad*180.0f/M_PI
-			 << "°, xShift[-1..+1]=" << xShift << " az_phot[0..1]=" << az_phot
-			 << " --> current side panel " << currentSide
-			 << ", w=" << sidesImages[currentSide]->width() << " h=" << sidesImages[currentSide]->height()
-			 << " --> x:" << x << " y:" << y << " alpha:" << qAlpha(pixVal)/255.0f;
-#endif
-*/
-	return qAlpha(pixVal)/255.0f;
+	const float s = side.texCoords[0] + (azimuth/sideAngularWidth - currentSide) * (side.texCoords[2]-side.texCoords[0]);
+	const float t = side.texCoords[1] + unit * (side.texCoords[3]-side.texCoords[1]);
+	// Textures are flipped: t=0 is the bottom of the image, QImage has pixel 0/0 in the top left corner.
+	const int x = qBound(0, static_cast<int>(s*static_cast<float>(image->width())), image->width()-1);
+	const int y = qBound(0, static_cast<int>((1.0f-t)*static_cast<float>(image->height())), image->height()-1);
+	return qAlpha(image->pixel(x, y))/255.0f;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
