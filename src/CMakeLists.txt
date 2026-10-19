@@ -41,6 +41,8 @@ SET(stellarium_lib_SRCS
      core/StelSkyDrawer.cpp
      core/StelPhotoBloom.hpp
      core/StelPhotoBloom.cpp
+     core/StelPhotoMeter.hpp
+     core/StelPhotoMeter.cpp
      core/StelSkyDrawer.hpp
      core/StelPainter.hpp
      core/StelPainter.cpp

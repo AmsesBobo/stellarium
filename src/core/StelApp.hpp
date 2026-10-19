@@ -560,6 +560,10 @@ private:
 	std::unique_ptr<QOpenGLFramebufferObject> sceneFBO;
 	//! The lens halo ("bloom") of the photographic mode
 	std::unique_ptr<class StelPhotoBloom> photoBloom;
+	//! Photographic mode: the exposure meter of the automatic exposure
+	std::unique_ptr<class StelPhotoMeter> photoMeter;
+	//! Milliseconds of the last meter reading (for the smooth adaptation of the exposure)
+	qint64 photoMeterLastMs = -1;
 	//! Whether the scene buffers have a floating-point format (needed for the photographic mode)
 	bool sceneFBOIsFloat = false;
 	GLuint sceneMultisampledFBO = 0;

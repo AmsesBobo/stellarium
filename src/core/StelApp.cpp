@@ -23,6 +23,7 @@
 #include "StelCore.hpp"
 #include "StelSkyDrawer.hpp"
 #include "StelPhotoBloom.hpp"
+#include "StelPhotoMeter.hpp"
 #include "StelMainView.hpp"
 #include "StelSplashScreen.hpp"
 #include "StelUtils.hpp"
@@ -1062,6 +1063,9 @@ void StelApp::highGraphicsModeDraw()
 	const bool wantFloatScene = photoMode;
 #endif
 	const float photoExposure = photoMode ? skyDrawer->getPhotoExposureFactor() : 1.f;
+	// How this frame is exposed (the automatic exposure may change it after the frame has been measured)
+	const double photoSceneScale = skyDrawer->getPhotoSceneScale();
+	const double photoExposureTime = skyDrawer->getPhotoEffectiveExposureTime();
 
 	if(!sceneFBO || sceneFBO->size() != QSize(w,h) || sceneFBOIsFloat != wantFloatScene)
 	{
@@ -1171,6 +1175,42 @@ void StelApp::highGraphicsModeDraw()
 		                                postProcessorVAO.get());
 	}
 
+	// Photographic mode: the exposure meter of the automatic exposure
+	if (photoMode && skyDrawer->getFlagPhotoAutoExposureActive())
+	{
+#if !QT_CONFIG(opengles2)
+		if (sceneMultisampledFBO && !bloomDone)
+		{
+			// The meter needs a plain texture: resolve the multisampled scene into sceneFBO
+			const auto glh = StelOpenGL::highGraphicsFunctions();
+			GL(glh->glBindFramebuffer(GL_READ_FRAMEBUFFER, sceneMultisampledFBO));
+			GL(glh->glBindFramebuffer(GL_DRAW_FRAMEBUFFER, sceneFBO->handle()));
+			GL(glh->glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST));
+			GL(glh->glBindFramebuffer(GL_FRAMEBUFFER, sceneFBO->handle()));
+		}
+#endif
+		if (!photoMeter)
+			photoMeter.reset(new StelPhotoMeter);
+		// First the reading of the previous frame (its transfer is finished by now), then this frame
+		StelPhotoMeter::Reading reading;
+		if (photoMeter->takeReading(reading))
+		{
+			const qint64 now = QDateTime::currentMSecsSinceEpoch();
+			const double dt = photoMeterLastMs < 0 ? 0. : 0.001*static_cast<double>(now - photoMeterLastMs);
+			photoMeterLastMs = now;
+			core->getSkyDrawer()->applyPhotoMeterReading(reading, dt);
+		}
+		photoMeter->measure(sceneFBO->texture(), static_cast<int>(w), static_cast<int>(h),
+		                    photoSceneScale, photoExposureTime, postProcessorVAO.get());
+	}
+	else
+	{
+		if (photoMeter)
+			photoMeter->reset();
+		photoMeterLastMs = -1;
+		core->getSkyDrawer()->applyPhotoMeterReading(StelPhotoMeter::Reading(), 0.); // marks the next reading as the first
+	}
+
 	if(sceneMultisampledFBO && !bloomDone)
 	{
 		GL(gl->glBindFramebuffer(GL_FRAMEBUFFER, targetFBO));
@@ -1245,6 +1285,10 @@ void StelApp::highGraphicsModeDraw()
 	GL(gl->glDrawArrays(GL_TRIANGLE_STRIP, 0, 4));
 	GL(gl->glDisable(GL_BLEND));
 	postProcessorVAO->release();
+
+	// Photographic mode: the camera settings in use, on top of the finished picture
+	if (photoMode)
+		skyDrawer->drawPhotoInfoLine(core);
 }
 
 //! Main drawing function called at each frame

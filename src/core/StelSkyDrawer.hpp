@@ -24,6 +24,7 @@
 #include "RefractionExtinction.hpp"
 #include "StelTextureTypes.hpp"
 #include "VecMath.hpp"
+#include "StelPhotoMeter.hpp"
 
 #include <memory>
 #include <QObject>
@@ -98,6 +99,17 @@ class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 	//! Photographic mode: apply the lens halo to the whole image ("bloom") instead of drawing it with each star.
 	//! This gives the right shape for extended bright objects (lunar crescent, Sun behind branches, lights).
 	Q_PROPERTY(bool flagPhotoBloom READ getFlagPhotoBloom WRITE setFlagPhotoBloom NOTIFY flagPhotoBloomChanged)
+	//! Photographic mode: automatic exposure with aperture priority. The camera meters the image and
+	//! chooses the exposure time (1/8000 s ... 30 s) for the set aperture and ISO, like the "Av"/"A"
+	//! mode of a camera. The exposure compensation (photoExposureEV) then changes the exposure time.
+	Q_PROPERTY(bool flagPhotoAutoExposure READ getFlagPhotoAutoExposure WRITE setFlagPhotoAutoExposure NOTIFY flagPhotoAutoExposureChanged)
+	//! Metering mode of the automatic exposure: 0 = center-weighted average, 1 = spot, 2 = highlight-weighted
+	Q_PROPERTY(int photoMeteringMode READ getPhotoMeteringMode WRITE setPhotoMeteringMode NOTIFY photoMeteringModeChanged)
+	//! Photographic mode: show a line with the camera settings in use at the top of the screen
+	Q_PROPERTY(bool flagPhotoInfoLine READ getFlagPhotoInfoLine WRITE setFlagPhotoInfoLine NOTIFY flagPhotoInfoLineChanged)
+	//! The exposure time in use (seconds): the set one, or the one chosen by the automatic exposure.
+	//! The change signal is only emitted when the value shown by a camera (1/3-stop steps) changes.
+	Q_PROPERTY(double photoEffectiveExposureTime READ getPhotoEffectiveExposureTime NOTIFY photoEffectiveExposureTimeChanged)
 
 	Q_PROPERTY(double extinctionCoefficient READ getExtinctionCoefficient WRITE setExtinctionCoefficient NOTIFY extinctionCoefficientChanged)
 	Q_PROPERTY(double atmosphereTemperature READ getAtmosphereTemperature WRITE setAtmosphereTemperature NOTIFY atmosphereTemperatureChanged)
@@ -111,6 +123,21 @@ class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 public:
 	//! The camera pass of the photographic mode is linear up to this value, then rolls off smoothly towards 1.0.
 	static constexpr float PHOTO_SHOULDER_KNEE = 0.8f;
+	//! Middle grey of the reflected-light meter calibration (scene units)
+	static constexpr double PHOTO_MIDDLE_GREY = 0.18;
+	//! Range of exposure times of the automatic exposure (seconds), as in a camera
+	static constexpr double PHOTO_AUTO_MIN_TIME = 1./8000.;
+	static constexpr double PHOTO_AUTO_MAX_TIME = 30.;
+	//! Time constant of the smooth adaptation of the automatic exposure (seconds)
+	static constexpr double PHOTO_AUTO_TIME_CONSTANT = 0.3;
+	//! Font size (pixels) of the line with the camera settings
+	static constexpr int PHOTO_INFO_FONT_SIZE = 18;
+	//! Metering modes of the automatic exposure
+	enum PhotoMeteringMode {
+		PhotoMeteringCenterWeighted = 0, //!< 75% in a central circle, 25% over the whole image
+		PhotoMeteringSpot = 1,           //!< a central circle of 2.5% of the image area
+		PhotoMeteringHighlight = 2       //!< the brightest part must not saturate
+	};
 	//! The inverse of the highlight shoulder of the camera pass (for values below 1.0).
 	static float invertPhotoShoulder(float y);
 	//! For annotations (lines, labels, markers) in the photographic mode: the linear color that has
@@ -375,6 +402,29 @@ public slots:
 	//! Switch the image-based lens halo ("bloom") of the photographic mode on or off.
 	void setFlagPhotoBloom(bool b);
 	bool getFlagPhotoBloom() const {return flagPhotoBloom;}
+	//! Switch the automatic exposure (aperture priority) of the photographic mode on or off.
+	void setFlagPhotoAutoExposure(bool b);
+	bool getFlagPhotoAutoExposure() const {return flagPhotoAutoExposure;}
+	//! Whether the automatic exposure is switched on AND the photographic mode is active.
+	bool getFlagPhotoAutoExposureActive() const;
+	//! Set the metering mode of the automatic exposure (see PhotoMeteringMode).
+	void setPhotoMeteringMode(int mode);
+	int getPhotoMeteringMode() const {return photoMeteringMode;}
+	//! Show the line with the camera settings at the top of the screen.
+	void setFlagPhotoInfoLine(bool b);
+	bool getFlagPhotoInfoLine() const {return flagPhotoInfoLine;}
+	//! The exposure time in use (seconds): the set one, or the one chosen by the automatic exposure.
+	double getPhotoEffectiveExposureTime() const;
+	//! The exposure time as a camera shows it: the nearest standard value (1/3-stop steps).
+	static double photoNominalExposureTime(double seconds);
+	//! Text of an exposure time, e.g. "1/125 s", "2.5 s" or "4 min".
+	static QString photoExposureTimeText(double seconds);
+	//! Automatic exposure: use a reading of the exposure meter. Called by StelApp once per frame.
+	//! @param deltaTime time since the last call, seconds (for the smooth adaptation)
+	void applyPhotoMeterReading(const StelPhotoMeter::Reading& reading, double deltaTime);
+	//! Draw the line with the camera settings (if switched on). Called by StelApp after the camera
+	//! stage, so that the text is neither exposed nor blurred like the scene.
+	void drawPhotoInfoLine(StelCore* core) const;
 	//! Restore the default camera and star image settings of the photographic mode.
 	void resetPhotographicSettings();
 	//! Get the factor that converts a scene luminance in cd/m^2 into the linear value of the
@@ -510,6 +560,10 @@ signals:
 	void photoSpikeCountChanged(int count);
 	void photoSpikeStrengthChanged(double fraction);
 	void flagPhotoBloomChanged(bool b);
+	void flagPhotoAutoExposureChanged(bool b);
+	void photoMeteringModeChanged(int mode);
+	void flagPhotoInfoLineChanged(bool b);
+	void photoEffectiveExposureTimeChanged(double seconds);
 
 	void extinctionCoefficientChanged(double coeff);
 	void atmosphereTemperatureChanged(double celsius);
@@ -804,6 +858,19 @@ private:
 	double photoExposureTime = 20.;
 	double photoAperture = 2.8;
 	double photoISO = 1600.;
+	//! Automatic exposure (aperture priority)
+	bool flagPhotoAutoExposure = false;
+	int photoMeteringMode = 0;
+	bool flagPhotoInfoLine = true;
+	//! Exposure time chosen by the automatic exposure (seconds)
+	double photoAutoExposureTime = 1./60.;
+	//! The automatic exposure jumps to the metered value at its first reading
+	bool photoAutoExposureFresh = true;
+	//! The metered exposure is outside the range of the camera: -1 too dark (longest time), +1 too bright
+	int photoAutoExposureLimit = 0;
+	//! Last value announced with photoEffectiveExposureTimeChanged (nominal value)
+	double photoAnnouncedExposureTime = 0.;
+	void announcePhotoExposureTime();
 	//! ID of the on-screen message that shows the current exposure (0 = none)
 	int photoExposureMessageID = 0;
 	//! Show the current exposure briefly on screen
