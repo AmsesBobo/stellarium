@@ -41,6 +41,7 @@ class QOpenGLVertexArrayObject;
 //!   (like the classic 8 mm circle of a 24 mm high frame), 25% spread over the whole image
 //! - spot: a central circle of 2.5% of the image area
 //! - highlight: the brightest sub-segment (each segment is divided into 4 x 4 for this)
+//! It also sums up the colors of the segments for the automatic white balance (grey world).
 class StelPhotoMeter
 {
 public:
@@ -54,6 +55,8 @@ public:
 		double highlight = 0.;      //!< brightest sub-segment (scene units)
 		double sceneScale = 0.;     //!< scene units per cd/m^2 of the frame that was measured
 		double exposureTime = 0.;   //!< exposure time of the frame that was measured (seconds)
+		//! Sum of the linear red, green and blue of the segments that do not saturate (grey world white balance)
+		double greyRed = 0., greyGreen = 0., greyBlue = 0.;
 	};
 
 	StelPhotoMeter();
@@ -64,7 +67,8 @@ public:
 	//! @param vao a vertex array object with a full screen quad (2D vertices in [-1,1], attribute 0)
 	void measure(GLuint sceneTexture, int w, int h, double sceneScale, double exposureTime, QOpenGLVertexArrayObject* vao);
 	//! Get the newest finished reading. Returns false if there is none (yet).
-	bool takeReading(Reading& reading);
+	//! @param clipLevel scene value where the sensor saturates; brighter segments are left out of the grey world sums
+	bool takeReading(Reading& reading, double clipLevel = 1e30);
 	//! Forget pending measurements (e.g. when the metering was off for a while)
 	void reset();
 
@@ -80,7 +84,7 @@ private:
 	bool ok = false;
 
 	void init();
-	Reading evaluate(const float* cells, int w, int h) const;
+	Reading evaluate(const float* cells, int w, int h, double clipLevel) const;
 };
 
 #endif // STELPHOTOMETER_HPP

@@ -26,6 +26,7 @@
 #include "StelTranslator.hpp"
 
 #include <QComboBox>
+#include <QSpinBox>
 #include <QDoubleSpinBox>
 #include <QSignalBlocker>
 #include <cmath>
@@ -119,6 +120,22 @@ void PhotographicModeDialog::fillComboBoxes()
 		ui->toneCurveComboBox->addItem(q_("Standard (camera)"), StelSkyDrawer::PhotoToneStandard);
 		ui->toneCurveComboBox->addItem(q_("Film"), StelSkyDrawer::PhotoToneFilm);
 	}
+	{
+		const QSignalBlocker blocker(ui->whiteBalanceComboBox);
+		ui->whiteBalanceComboBox->clear();
+		const auto preset = [this](const QString& name, int wb) {
+			ui->whiteBalanceComboBox->addItem(QString("%1 (%2 K)").arg(name).arg(qRound(StelSkyDrawer::photoWhiteBalancePresetKelvin(wb))), wb);
+		};
+		ui->whiteBalanceComboBox->addItem(q_("Automatic"), StelSkyDrawer::PhotoWBAuto);
+		preset(q_("Daylight"), StelSkyDrawer::PhotoWBDaylight);
+		preset(q_("Cloudy"), StelSkyDrawer::PhotoWBCloudy);
+		preset(q_("Shade"), StelSkyDrawer::PhotoWBShade);
+		preset(q_("Tungsten"), StelSkyDrawer::PhotoWBTungsten);
+		preset(q_("Fluorescent"), StelSkyDrawer::PhotoWBFluorescent);
+		preset(q_("Flash"), StelSkyDrawer::PhotoWBFlash);
+		ui->whiteBalanceComboBox->addItem(q_("Custom"), StelSkyDrawer::PhotoWBCustom);
+		ui->whiteBalanceComboBox->addItem(q_("Neutral (as rendered)"), StelSkyDrawer::PhotoWBNeutral);
+	}
 }
 
 void PhotographicModeDialog::selectNearest(QComboBox* comboBox, const QVector<double>& values, double value)
@@ -196,6 +213,17 @@ void PhotographicModeDialog::createDialogContent()
 			drawer->setPhotoToneCurve(ui->toneCurveComboBox->itemData(index).toInt());
 	});
 	connect(drawer, &StelSkyDrawer::photoToneCurveChanged,             this, &PhotographicModeDialog::updateCameraWidgets);
+	connect(ui->whiteBalanceComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this, drawer](int index)
+	{
+		if (index >= 0)
+			drawer->setPhotoWhiteBalance(ui->whiteBalanceComboBox->itemData(index).toInt());
+	});
+	connect(ui->whiteBalanceKelvinSpinBox, QOverload<int>::of(&QSpinBox::valueChanged), this, [drawer](int kelvin)
+	{
+		drawer->setPhotoWhiteBalanceKelvin(kelvin);
+	});
+	connect(drawer, &StelSkyDrawer::photoWhiteBalanceChanged,          this, &PhotographicModeDialog::updateCameraWidgets);
+	connect(drawer, &StelSkyDrawer::photoWhiteBalanceKelvinChanged,    this, &PhotographicModeDialog::updateCameraWidgets);
 	connect(drawer, &StelSkyDrawer::flagPhotoAutoExposureChanged,      this, &PhotographicModeDialog::updateCameraWidgets);
 	connect(drawer, &StelSkyDrawer::photoMeteringModeChanged,          this, &PhotographicModeDialog::updateCameraWidgets);
 	connect(drawer, &StelSkyDrawer::photoEffectiveExposureTimeChanged, this, &PhotographicModeDialog::updateCameraWidgets);
@@ -245,6 +273,15 @@ void PhotographicModeDialog::updateCameraWidgets()
 	{
 		const QSignalBlocker blocker(ui->toneCurveComboBox);
 		ui->toneCurveComboBox->setCurrentIndex(qMax(0, ui->toneCurveComboBox->findData(drawer->getPhotoToneCurve())));
+	}
+	{
+		const QSignalBlocker blocker(ui->whiteBalanceComboBox);
+		ui->whiteBalanceComboBox->setCurrentIndex(qMax(0, ui->whiteBalanceComboBox->findData(drawer->getPhotoWhiteBalance())));
+		const QSignalBlocker blocker2(ui->whiteBalanceKelvinSpinBox);
+		ui->whiteBalanceKelvinSpinBox->setValue(qRound(drawer->getPhotoWhiteBalanceKelvin()));
+		const bool custom = drawer->getPhotoWhiteBalance() == StelSkyDrawer::PhotoWBCustom;
+		ui->whiteBalanceKelvinSpinBox->setEnabled(custom);
+		ui->whiteBalanceKelvinLabel->setEnabled(custom);
 	}
 
 	// Exposure value at ISO 100, the usual way photographers compare exposures.
