@@ -157,7 +157,21 @@
         </property>
        </widget>
       </item>
-      <item row="8" column="0" colspan="2">
+      <item row="8" column="0">
+       <widget class="QLabel" name="toneCurveLabel">
+        <property name="text">
+         <string>Tone curve:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="8" column="1">
+       <widget class="QComboBox" name="toneCurveComboBox">
+        <property name="toolTip">
+         <string>How the camera turns the recorded light into the picture. Linear: proportional, with a soft roll-off of the highlights. Standard: like the JPEG of a camera, with more contrast and the highlights clipping about 3 stops above middle grey. Film: like negative film, softer, with room for 6 stops above middle grey.</string>
+        </property>
+       </widget>
+      </item>
+      <item row="9" column="0" colspan="2">
        <widget class="QCheckBox" name="infoLineCheckBox">
         <property name="toolTip">
          <string>Show the exposure time, aperture, ISO and exposure value in use at the top of the screen</string>

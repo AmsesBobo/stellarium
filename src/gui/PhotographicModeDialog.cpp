@@ -112,6 +112,13 @@ void PhotographicModeDialog::fillComboBoxes()
 		ui->meteringComboBox->addItem(q_("Spot"), StelSkyDrawer::PhotoMeteringSpot);
 		ui->meteringComboBox->addItem(q_("Highlight-weighted"), StelSkyDrawer::PhotoMeteringHighlight);
 	}
+	{
+		const QSignalBlocker blocker(ui->toneCurveComboBox);
+		ui->toneCurveComboBox->clear();
+		ui->toneCurveComboBox->addItem(q_("Linear"), StelSkyDrawer::PhotoToneLinear);
+		ui->toneCurveComboBox->addItem(q_("Standard (camera)"), StelSkyDrawer::PhotoToneStandard);
+		ui->toneCurveComboBox->addItem(q_("Film"), StelSkyDrawer::PhotoToneFilm);
+	}
 }
 
 void PhotographicModeDialog::selectNearest(QComboBox* comboBox, const QVector<double>& values, double value)
@@ -182,6 +189,12 @@ void PhotographicModeDialog::createDialogContent()
 		if (index >= 0)
 			drawer->setPhotoMeteringMode(ui->meteringComboBox->itemData(index).toInt());
 	});
+	connect(ui->toneCurveComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this, drawer](int index)
+	{
+		if (index >= 0)
+			drawer->setPhotoToneCurve(ui->toneCurveComboBox->itemData(index).toInt());
+	});
+	connect(drawer, &StelSkyDrawer::photoToneCurveChanged,             this, &PhotographicModeDialog::updateCameraWidgets);
 	connect(drawer, &StelSkyDrawer::flagPhotoAutoExposureChanged,      this, &PhotographicModeDialog::updateCameraWidgets);
 	connect(drawer, &StelSkyDrawer::photoMeteringModeChanged,          this, &PhotographicModeDialog::updateCameraWidgets);
 	connect(drawer, &StelSkyDrawer::photoEffectiveExposureTimeChanged, this, &PhotographicModeDialog::updateCameraWidgets);
@@ -227,6 +240,10 @@ void PhotographicModeDialog::updateCameraWidgets()
 	{
 		const QSignalBlocker blocker(ui->meteringComboBox);
 		ui->meteringComboBox->setCurrentIndex(qMax(0, ui->meteringComboBox->findData(drawer->getPhotoMeteringMode())));
+	}
+	{
+		const QSignalBlocker blocker(ui->toneCurveComboBox);
+		ui->toneCurveComboBox->setCurrentIndex(qMax(0, ui->toneCurveComboBox->findData(drawer->getPhotoToneCurve())));
 	}
 
 	// Exposure value at ISO 100, the usual way photographers compare exposures.

@@ -122,6 +122,8 @@ StelSkyDrawer::StelSkyDrawer(StelCore* acore) :
 	flagPhotoAutoExposure = conf->value("viewing/flag_photographic_auto_exposure", false).toBool();
 	photoMeteringMode = qBound(0, conf->value("viewing/photographic_metering_mode", 0).toInt(), 2);
 	flagPhotoInfoLine = conf->value("viewing/flag_photographic_info_line", true).toBool();
+	photoToneCurve = qBound(0, conf->value("viewing/photographic_tone_curve", static_cast<int>(PhotoToneStandard)).toInt(), 2);
+	updatePhotoToneCurve();
 	setFlagStarMagnitudeLimit(conf->value("astro/flag_star_magnitude_limit", false).toBool());
 	setCustomStarMagnitudeLimit(conf->value("astro/star_magnitude_limit", 6.5).toDouble());
 	setFlagPlanetMagnitudeLimit(conf->value("astro/flag_planet_magnitude_limit", false).toBool());
@@ -657,9 +659,14 @@ void StelSkyDrawer::update(double)
 		const float exposure = getPhotoExposureFactor();
 		const float skyLuminance = (lmgr && lmgr->getFlagAtmosphere()) ? 0.5f*lmgr->getAtmosphereAverageLuminance() : 0.f;
 		photoSkyBackground = skyLuminance * getPhotoSceneScale();
+		// Half a step of the display above the sky, through the tone curve and the sRGB encoding
 		const float skyOnScreen = photoSkyBackground * exposure;
-		const float displayStep = qMax(1.f/(255.f*12.92f), 2.4f/(255.f*1.055f) * std::pow(skyOnScreen, 1.f-1.f/2.4f));
-		photoVisibleThreshold = 0.5f * displayStep / exposure;
+		const float skyDisplay = photoToneCurveValue(skyOnScreen);
+		const float skyEncoded = skyDisplay <= 0.0031308f ? 12.92f*skyDisplay : 1.055f*std::pow(skyDisplay, 1.f/2.4f) - 0.055f;
+		const float nextDisplay = srgbToLinear(qMin(skyEncoded + 0.5f/255.f, 1.f));
+		const float nextOnScreen = photoToneCurveInverse(nextDisplay);
+		// A saturated (white) sky hides everything
+		photoVisibleThreshold = (nextOnScreen > skyOnScreen) ? (nextOnScreen - skyOnScreen) / exposure : 1e30f;
 	}
 
 	// update limit mag
@@ -1805,12 +1812,105 @@ float StelSkyDrawer::invertPhotoShoulder(float y)
 	return knee - (1.f-knee) * std::log(1.f - (y-knee)/(1.f-knee));
 }
 
+void StelSkyDrawer::updatePhotoToneCurve()
+{
+	// Contrast a, shoulder d and the clipping point (in scene units, middle grey = 0.18) of each curve.
+	// Standard: the shape of a camera JPEG (more contrast than linear: darker shadows, brighter
+	// mid-highlights), with the sensor saturating about 3 stops above middle grey, as the
+	// saturation-based ISO speed (ISO 12232) puts it: 0.18 * 7.8 = 1.4.
+	// Film: like a negative film, slightly soft, with 6 stops of room above middle grey (0.18 * 64).
+	float a = 1.f, d = 1.f, clip = 1.f;
+	switch (photoToneCurve)
+	{
+		case PhotoToneStandard: a = 1.30f; d = 1.f; clip = 1.4f;  break;
+		case PhotoToneFilm:     a = 1.15f; d = 1.f; clip = 11.5f; break;
+		default: break;
+	}
+	constexpr double midIn = 0.18, midOut = 0.18;
+	const double ha = std::pow(static_cast<double>(clip), static_cast<double>(a));
+	const double had = std::pow(static_cast<double>(clip), static_cast<double>(a*d));
+	const double ma = std::pow(midIn, static_cast<double>(a));
+	const double mad = std::pow(midIn, static_cast<double>(a*d));
+	photoToneParams.a = a;
+	photoToneParams.ad = a*d;
+	photoToneParams.b = static_cast<float>((-ma + ha*midOut) / ((had - mad)*midOut));
+	photoToneParams.c = static_cast<float>((had*ma - ha*mad*midOut) / ((had - mad)*midOut));
+	photoToneParams.clip = clip;
+
+	// Table of the inverse for the annotations (many lookups per frame)
+	constexpr int tableSize = 1024;
+	photoToneInverseTable.resize(tableSize);
+	for (int i=0; i<tableSize; ++i)
+		photoToneInverseTable[static_cast<size_t>(i)] = photoToneCurveInverse(static_cast<float>(i)/(tableSize-1));
+}
+
+float StelSkyDrawer::photoToneCurveValue(float x) const
+{
+	x = qMax(0.f, x);
+	if (photoToneCurve == PhotoToneLinear)
+	{
+		constexpr float knee = PHOTO_SHOULDER_KNEE;
+		if (x <= knee)
+			return x;
+		return knee + (1.f-knee)*(1.f - std::exp(-(x-knee)/(1.f-knee)));
+	}
+	const PhotoToneParams& p = photoToneParams;
+	if (x >= p.clip)
+		return 1.f;
+	return std::pow(x, p.a) / (std::pow(x, p.ad)*p.b + p.c);
+}
+
+float StelSkyDrawer::photoToneCurveInverse(float y) const
+{
+	if (photoToneCurve == PhotoToneLinear)
+		return invertPhotoShoulder(qMax(0.f, y));
+	if (!(y > 0.f))
+		return 0.f;
+	if (y >= 1.f)
+		return photoToneParams.clip;
+	// The curve rises monotonically from 0 to 1 between 0 and the clipping point: bisection
+	float lo = 0.f, hi = photoToneParams.clip;
+	for (int i=0; i<40; ++i)
+	{
+		const float mid = 0.5f*(lo+hi);
+		if (photoToneCurveValue(mid) < y)
+			lo = mid;
+		else
+			hi = mid;
+	}
+	return 0.5f*(lo+hi);
+}
+
+void StelSkyDrawer::setPhotoToneCurve(int curve)
+{
+	curve = qBound(0, curve, 2);
+	if (curve == photoToneCurve)
+		return;
+	photoToneCurve = curve;
+	updatePhotoToneCurve();
+	StelApp::immediateSave("viewing/photographic_tone_curve", curve);
+	emit photoToneCurveChanged(curve);
+}
+
 Vec3f StelSkyDrawer::photoAnnotationCompensation(const Vec3f& linearColor) const
 {
 	const float invExposure = 1.f / getPhotoExposureFactor();
-	return Vec3f(invertPhotoShoulder(qMax(0.f, linearColor[0])) * invExposure,
-	             invertPhotoShoulder(qMax(0.f, linearColor[1])) * invExposure,
-	             invertPhotoShoulder(qMax(0.f, linearColor[2])) * invExposure);
+	if (photoToneCurve == PhotoToneLinear || photoToneInverseTable.size() < 2)
+		return Vec3f(invertPhotoShoulder(qMax(0.f, linearColor[0])) * invExposure,
+		             invertPhotoShoulder(qMax(0.f, linearColor[1])) * invExposure,
+		             invertPhotoShoulder(qMax(0.f, linearColor[2])) * invExposure);
+	// Interpolate the table of the inverse curve. Keep white a little below the clipping point,
+	// so that it does not depend on rounding at the edge.
+	const auto lookup = [this](float y) {
+		const float n = static_cast<float>(photoToneInverseTable.size() - 1);
+		const float f = qBound(0.f, y, 0.998f) * n;
+		const size_t i = static_cast<size_t>(f);
+		const float t = f - static_cast<float>(i);
+		return photoToneInverseTable[i] + t*(photoToneInverseTable[qMin(i+1, photoToneInverseTable.size()-1)] - photoToneInverseTable[i]);
+	};
+	return Vec3f(lookup(linearColor[0]) * invExposure,
+	             lookup(linearColor[1]) * invExposure,
+	             lookup(linearColor[2]) * invExposure);
 }
 
 void StelSkyDrawer::setPhotoPsfMinFwhm(double pixels)
@@ -1897,6 +1997,7 @@ void StelSkyDrawer::resetPhotographicSettings()
 	setFlagPhotoBloom(true);
 	setFlagPhotoAutoExposure(false);
 	setPhotoMeteringMode(0);
+	setPhotoToneCurve(PhotoToneStandard);
 }
 
 float StelSkyDrawer::getPhotoSceneScale() const
@@ -2030,11 +2131,12 @@ void StelSkyDrawer::applyPhotoMeterReading(const StelPhotoMeter::Reading& readin
 	double wanted = (L > 0.) ? compensation * K * nn / (photoISO * L) : PHOTO_AUTO_MAX_TIME * 4.;
 	if (photoMeteringMode == PhotoMeteringHighlight)
 	{
-		// Highlight-weighted: the brightest segment must not saturate. It may come up to 1.0, where the
-		// camera stage still keeps some contrast (the shoulder starts at PHOTO_SHOULDER_KNEE).
+		// Highlight-weighted: the brightest segment must not saturate. It may come up to 90% of white
+		// (display, linear), where the tone curve still keeps some contrast.
 		const double Lh = reading.highlight / reading.sceneScale;
+		const double highlightTarget = static_cast<double>(photoToneCurveInverse(0.9f));
 		if (Lh > 0.)
-			wanted = std::min(wanted, compensation * 1.0 * K * nn / (StelSkyDrawer::PHOTO_MIDDLE_GREY * photoISO * Lh));
+			wanted = std::min(wanted, compensation * highlightTarget * K * nn / (StelSkyDrawer::PHOTO_MIDDLE_GREY * photoISO * Lh));
 	}
 
 	// The camera cannot go beyond its range of exposure times: the picture gets too dark or too bright
