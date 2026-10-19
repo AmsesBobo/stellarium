@@ -95,6 +95,9 @@ class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 	Q_PROPERTY(int photoSpikeCount READ getPhotoSpikeCount WRITE setPhotoSpikeCount NOTIFY photoSpikeCountChanged)
 	//! Fraction of a star's light that goes into the diffraction spikes (0 ... 0.1).
 	Q_PROPERTY(double photoSpikeStrength READ getPhotoSpikeStrength WRITE setPhotoSpikeStrength NOTIFY photoSpikeStrengthChanged)
+	//! Photographic mode: apply the lens halo to the whole image ("bloom") instead of drawing it with each star.
+	//! This gives the right shape for extended bright objects (lunar crescent, Sun behind branches, lights).
+	Q_PROPERTY(bool flagPhotoBloom READ getFlagPhotoBloom WRITE setFlagPhotoBloom NOTIFY flagPhotoBloomChanged)
 
 	Q_PROPERTY(double extinctionCoefficient READ getExtinctionCoefficient WRITE setExtinctionCoefficient NOTIFY extinctionCoefficientChanged)
 	Q_PROPERTY(double atmosphereTemperature READ getAtmosphereTemperature WRITE setAtmosphereTemperature NOTIFY atmosphereTemperatureChanged)
@@ -369,6 +372,9 @@ public slots:
 	//! Set the fraction of a star's light in the diffraction spikes (0 ... 0.1).
 	void setPhotoSpikeStrength(double fraction);
 	double getPhotoSpikeStrength() const {return static_cast<double>(photoSpikeFraction);}
+	//! Switch the image-based lens halo ("bloom") of the photographic mode on or off.
+	void setFlagPhotoBloom(bool b);
+	bool getFlagPhotoBloom() const {return flagPhotoBloom;}
 	//! Restore the default camera and star image settings of the photographic mode.
 	void resetPhotographicSettings();
 	//! Get the factor that converts a scene luminance in cd/m^2 into the linear value of the
@@ -377,6 +383,36 @@ public slots:
 	//! a luminance L that the meter would expose "correctly" for t, N and ISO ends up at
 	//! middle grey (0.18), i.e. value = 0.18 * L * t * ISO / (12.5 * N^2). 1.0 means saturation.
 	float getPhotoSceneScale() const;
+	//! Whether the lens halo is applied to the whole image (photographic mode active, bloom on, halo > 0).
+	//! The star images then leave out their halo.
+	bool getFlagPhotoBloomActive() const;
+	//! Moffat alpha (pixels) and beta of the lens halo
+	float getPhotoHaloAlpha() const {return photoCoreAlpha*PHOTO_HALO_WIDTH_FACTOR;}
+	static float getPhotoHaloBeta() {return PHOTO_HALO_BETA;}
+	//! Fraction of the light that stays in the PSF core (the rest goes into the halo and the spikes)
+	float getPhotoCoreFraction() const;
+	//! Fraction of the light in the diffraction spikes (0 without spikes)
+	float getPhotoSpikeFractionEffective() const {return photoSpikeCount > 0 ? photoSpikeFraction : 0.f;}
+	//! Diffraction spikes: number of lines (spikes/2), direction of the first line on the screen (radians), length scale (pixels)
+	int getPhotoSpikeLines() const {return photoSpikeCount/2;}
+	static float getPhotoSpikeAngle() {return PHOTO_SPIKE_ANGLE;}
+	float getPhotoSpikeLength() const {return photoCoreAlpha*PHOTO_SPIKE_LENGTH_FACTOR;}
+	//! Photographic mode: weight of the PSF core for a body whose disk has the given radius in pixels.
+	//! 1 for an unresolved body (drawn like a star), falling to 0 as the disk becomes resolved.
+	float getPhotoCoreWeight(float diskPixRadius) const;
+	//! Photographic mode: the fraction of a body's light that its (resolved) disk keeps: the rest
+	//! is spread by the lens into the halo and the diffraction spikes, or drawn as PSF core.
+	float getPhotoDiskFraction(float diskPixRadius) const;
+	//! Photographic mode: draw the image of a bright body seen through the camera: the PSF core
+	//! (weighted with getPhotoCoreWeight()), the lens halo and the diffraction spikes, all spread
+	//! around a disk of the given radius. The disk itself is drawn by the caller.
+	//! @param mag magnitude of the body including extinction
+	//! @param color display color (sRGB) of the body's light
+	//! @param illuminatedFraction for a body in phases: its light comes from the lit part, so the image is
+	//!        spread around a smaller disk shifted towards the Sun (no glow around the dark limb)
+	//! @param sunDirection direction towards the Sun in the sky (J2000, perpendicular to v), used with illuminatedFraction
+	bool drawPhotoBody(StelPainter* sPainter, const Vec3d& v, float diskPixRadius, float mag, const Vec3f& color,
+	                   float illuminatedFraction = 1.f, const Vec3d& sunDirection = Vec3d(0.));
 
 	//! Informing the drawer whether atmosphere is displayed.
 	//! This is used to avoid twinkling/simulate extinction/refraction.
@@ -473,6 +509,7 @@ signals:
 	void photoHaloStrengthChanged(double fraction);
 	void photoSpikeCountChanged(int count);
 	void photoSpikeStrengthChanged(double fraction);
+	void flagPhotoBloomChanged(bool b);
 
 	void extinctionCoefficientChanged(double coeff);
 	void atmosphereTemperatureChanged(double celsius);
@@ -655,8 +692,10 @@ private:
 		Vec2f center;   //!< window position of the star
 		Vec3f color;    //!< linear color times total recorded light (sum over all pixels)
 		float radius;   //!< sprite radius in pixels (the profile fades out smoothly towards it)
+		Vec4f shape;    //!< x: disk radius (0 for a star), y: weight of the PSF core, z: radius of a disk with the area of the lit part, w: cos(phase angle)
+		Vec2f sunDir;   //!< direction towards the Sun on the screen (bodies in phases)
 	};
-	static_assert(sizeof(PhotoStarInstance) == 24, "PhotoStarInstance must be tightly packed");
+	static_assert(sizeof(PhotoStarInstance) == 48, "PhotoStarInstance must be tightly packed");
 	//! Point sources per batch in the photographic mode. Far more stars are visible on a photo
 	//! than to the eye, so batches are large to keep the number of draw calls low.
 	constexpr static unsigned int maxPhotoPointSources=16384;
@@ -678,17 +717,23 @@ private:
 		int center;
 		int color;
 		int radius;
+		int shape;
+		int sunDir;
 		int coreAlpha;
 		int coreBeta;
 		int haloAlpha;
 		int haloBeta;
 		int haloFraction;
+		int coreFraction;
+		int coreDiskTerm;
+		int haloDiskTerm;
 		int spikeLines;
 		int spikeFraction;
 		int spikeSigma;
 		int spikeLength;
 		int spikeDirs;
 		int visibleThreshold;
+		int spikeStart;
 	} photoStarShaderVars = {};
 	void initPhotoStarRendering();
 	void flushPhotoPointSources(StelPainter* sPainter);
@@ -709,6 +754,7 @@ private:
 	static constexpr float PHOTO_CORE_BETA = 3.f;
 	//! The lens halo: fraction of the light, width relative to the core, and Moffat beta
 	float photoHaloFraction = 0.05f;
+	bool flagPhotoBloom = true;
 	static constexpr float PHOTO_HALO_WIDTH_FACTOR = 4.f;
 	//! Diffraction spikes: number of spikes (0 = none), fraction of the light in them
 	int photoSpikeCount = 6;

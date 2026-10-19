@@ -137,6 +137,7 @@ void PhotographicModeDialog::createDialogContent()
 	connectDoubleProperty(ui->evDoubleSpinBox,        "StelSkyDrawer.photoExposureEV");
 	connectDoubleProperty(ui->fwhmDoubleSpinBox,      "StelSkyDrawer.photoPsfMinFwhm");
 	connectDoubleProperty(ui->seeingDoubleSpinBox,    "StelSkyDrawer.photoSeeing");
+	connectBoolProperty(ui->bloomCheckBox,            "StelSkyDrawer.flagPhotoBloom");
 
 	fillComboBoxes();
 

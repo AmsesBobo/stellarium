@@ -112,6 +112,8 @@ private:
 
 private:
 	StelTextureSP mainTex;
+	//! Texture used in the photographic mode (may be the same as mainTex)
+	StelTextureSP photoTex;
 	Vec3f color; // global color
 	double intensity;
 	double intensityFovScale; // like for constellations: reduce brightness when zooming in.
@@ -131,9 +133,9 @@ private:
 		int photoMode;
 	} shaderVars;
 
-	//! Photographic mode: luminance (cd/m^2) of a linear texture value of 1.0. It calibrates the
+	//! Photographic mode: luminance (cd/m^2) of a linear value of 1.0 in photoTex. It calibrates the
 	//! texture against measured surface brightness of the Milky Way (config: astro/milky_way_photo_luminance).
-	double photoLuminanceScale = 3.2e-3;
+	double photoLuminanceScale = 4.7e-4;
 
 	std::unique_ptr<QOpenGLVertexArrayObject> vao;
 	std::unique_ptr<QOpenGLBuffer> vbo;

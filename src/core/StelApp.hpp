@@ -558,6 +558,8 @@ private:
 	std::unique_ptr<QOpenGLShaderProgram> postProcessorProgram;
 	std::unique_ptr<QOpenGLShaderProgram> postProcessorProgramMS; // multisampled
 	std::unique_ptr<QOpenGLFramebufferObject> sceneFBO;
+	//! The lens halo ("bloom") of the photographic mode
+	std::unique_ptr<class StelPhotoBloom> photoBloom;
 	//! Whether the scene buffers have a floating-point format (needed for the photographic mode)
 	bool sceneFBOIsFloat = false;
 	GLuint sceneMultisampledFBO = 0;
@@ -571,6 +573,13 @@ private:
 		int rgbMaxValue;
 		int photoMode;
 		int photoExposure;
+		int bloomEnabled;
+		int bloomTex;
+		int bloomAmount;
+		int bloomIdentity;
+		int spikeEnabled;
+		int spikeTex;
+		int spikeAmount;
 	} postProcessorUniformLocations;
 	struct PostProcessorUniformLocationsMS
 	{

@@ -22,6 +22,7 @@
 #include "Dithering.hpp"
 #include "StelCore.hpp"
 #include "StelSkyDrawer.hpp"
+#include "StelPhotoBloom.hpp"
 #include "StelMainView.hpp"
 #include "StelSplashScreen.hpp"
 #include "StelUtils.hpp"
@@ -910,7 +911,9 @@ uniform highp float photoExposure;
 highp vec3 cameraResponse(highp vec3 lin)
 {
 	if(!photoMode) return lin;
-	highp vec3 x = max(lin * photoExposure, vec3(0));
+	// min(): guard against an overflow to infinity (possible with half floats, as on OpenGL ES);
+	// keep it finite so that mix() below cannot produce NaN (inf*0)
+	highp vec3 x = min(max(lin * photoExposure, vec3(0)), vec3(1e30));
 	const highp float knee = photoShoulderKnee;
 	highp vec3 over = max(x - vec3(knee), vec3(0));
 	highp vec3 shoulder = vec3(knee) + (1. - knee) * (vec3(1) - exp(-over / (1. - knee)));
@@ -961,10 +964,24 @@ void main()
 		makeCameraResponseShader() + R"(
 VARYING vec2 texcoord;
 uniform sampler2D tex;
+// Photographic mode: the lens halo, computed from the whole image (see StelPhotoBloom)
+uniform bool bloomEnabled;
+uniform sampler2D bloomTex;
+uniform highp float bloomAmount;   // halo fraction, relative to the light left in the image
+uniform highp float bloomIdentity; // part of the halo profile narrower than a pixel
+uniform bool spikeEnabled;
+uniform sampler2D spikeTex;
+uniform highp float spikeAmount;   // spike fraction, relative to the light left in the image
 
 void main()
 {
 	vec4 rgba = texture2D(tex, texcoord);
+	highp vec3 extra = vec3(0);
+	if (bloomEnabled)
+		extra += bloomAmount * (texture2D(bloomTex, texcoord).rgb + bloomIdentity * rgba.rgb);
+	if (spikeEnabled)
+		extra += spikeAmount * texture2D(spikeTex, texcoord).rgb;
+	rgba.rgb += extra;
 	FRAG_COLOR = vec4(dither(linearToSRGB(cameraResponse(rgba.rgb))), rgba.a);
 }
 )");
@@ -975,6 +992,13 @@ void main()
 	postProcessorUniformLocations.ditherPattern = postProcessorProgram->uniformLocation("ditherPattern");
 	postProcessorUniformLocations.photoMode     = postProcessorProgram->uniformLocation("photoMode");
 	postProcessorUniformLocations.photoExposure = postProcessorProgram->uniformLocation("photoExposure");
+	postProcessorUniformLocations.bloomEnabled  = postProcessorProgram->uniformLocation("bloomEnabled");
+	postProcessorUniformLocations.bloomTex      = postProcessorProgram->uniformLocation("bloomTex");
+	postProcessorUniformLocations.bloomAmount   = postProcessorProgram->uniformLocation("bloomAmount");
+	postProcessorUniformLocations.bloomIdentity = postProcessorProgram->uniformLocation("bloomIdentity");
+	postProcessorUniformLocations.spikeEnabled  = postProcessorProgram->uniformLocation("spikeEnabled");
+	postProcessorUniformLocations.spikeTex      = postProcessorProgram->uniformLocation("spikeTex");
+	postProcessorUniformLocations.spikeAmount   = postProcessorProgram->uniformLocation("spikeAmount");
 	postProcessorProgram->release();
 
 #if !QT_CONFIG(opengles2)
@@ -1047,7 +1071,13 @@ void StelApp::highGraphicsModeDraw()
 
 		qInfo().nospace() << "Creating scene FBO with size " << w << "x" << h;
 
-		const auto internalFormat = wantFloatScene ? GL_RGBA16F : GL_RGBA16;
+		// The photographic mode needs a large range: the Sun's disk can reach 1e10 times the
+		// saturation level, and its halo (bloom) must be computed from the full value.
+#if QT_CONFIG(opengles2)
+		const auto internalFormat = GL_RGBA16F;
+#else
+		const auto internalFormat = wantFloatScene ? GL_RGBA32F : GL_RGBA16;
+#endif
 		sceneFBOIsFloat = wantFloatScene;
 		QOpenGLFramebufferObjectFormat format;
 		format.setAttachment(QOpenGLFramebufferObject::CombinedDepthStencil);
@@ -1116,7 +1146,32 @@ void StelApp::highGraphicsModeDraw()
 		module->draw(core);
 	}
 
-	if(sceneMultisampledFBO)
+	// Photographic mode: the lens halo of the whole image (bloom)
+	bool bloomDone = false;
+	if (photoMode && skyDrawer->getFlagPhotoBloomActive())
+	{
+#if !QT_CONFIG(opengles2)
+		if (sceneMultisampledFBO)
+		{
+			// The halo needs a plain texture: resolve the multisampled scene into sceneFBO
+			const auto glh = StelOpenGL::highGraphicsFunctions();
+			GL(glh->glBindFramebuffer(GL_READ_FRAMEBUFFER, sceneMultisampledFBO));
+			GL(glh->glBindFramebuffer(GL_DRAW_FRAMEBUFFER, sceneFBO->handle()));
+			GL(glh->glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST));
+			GL(glh->glBindFramebuffer(GL_FRAMEBUFFER, sceneFBO->handle()));
+		}
+#endif
+		if (!photoBloom)
+			photoBloom.reset(new StelPhotoBloom);
+		const bool spikes = skyDrawer->getPhotoSpikeFractionEffective() > 0.f;
+		bloomDone = photoBloom->process(sceneFBO->texture(), static_cast<int>(w), static_cast<int>(h),
+		                                skyDrawer->getPhotoHaloAlpha(), StelSkyDrawer::getPhotoHaloBeta(),
+		                                spikes ? skyDrawer->getPhotoSpikeLines() : 0,
+		                                StelSkyDrawer::getPhotoSpikeAngle(), skyDrawer->getPhotoSpikeLength(),
+		                                postProcessorVAO.get());
+	}
+
+	if(sceneMultisampledFBO && !bloomDone)
 	{
 		GL(gl->glBindFramebuffer(GL_FRAMEBUFFER, targetFBO));
 		postProcessorProgramMS->bind();
@@ -1154,6 +1209,34 @@ void StelApp::highGraphicsModeDraw()
 		                                      rgbMaxValue[0], rgbMaxValue[1], rgbMaxValue[2]);
 		postProcessorProgram->setUniformValue(postProcessorUniformLocations.photoMode, photoMode);
 		postProcessorProgram->setUniformValue(postProcessorUniformLocations.photoExposure, photoExposure);
+
+		const bool haloOn = bloomDone && skyDrawer->getPhotoHaloStrength() > 0.;
+		const bool spikesOn = bloomDone && photoBloom->spikeTexture() != 0;
+		postProcessorProgram->setUniformValue(postProcessorUniformLocations.bloomEnabled, haloOn);
+		postProcessorProgram->setUniformValue(postProcessorUniformLocations.spikeEnabled, spikesOn);
+		const int bloomTexSampler = 2;
+		const int spikeTexSampler = 3;
+		if (spikesOn)
+		{
+			GL(gl->glActiveTexture(GL_TEXTURE0 + spikeTexSampler));
+			GL(gl->glBindTexture(GL_TEXTURE_2D, photoBloom->spikeTexture()));
+			GL(gl->glActiveTexture(GL_TEXTURE0));
+			const float coreFraction = skyDrawer->getPhotoCoreFraction();
+			postProcessorProgram->setUniformValue(postProcessorUniformLocations.spikeAmount,
+			                                      coreFraction > 0.f ? skyDrawer->getPhotoSpikeFractionEffective()/coreFraction : 0.f);
+		}
+		postProcessorProgram->setUniformValue(postProcessorUniformLocations.spikeTex, spikeTexSampler);
+		if (haloOn)
+		{
+			GL(gl->glActiveTexture(GL_TEXTURE0 + bloomTexSampler));
+			GL(gl->glBindTexture(GL_TEXTURE_2D, photoBloom->haloTexture()));
+			GL(gl->glActiveTexture(GL_TEXTURE0));
+			const float coreFraction = skyDrawer->getPhotoCoreFraction();
+			postProcessorProgram->setUniformValue(postProcessorUniformLocations.bloomAmount,
+			                                      coreFraction > 0.f ? static_cast<float>(skyDrawer->getPhotoHaloStrength())/coreFraction : 0.f);
+			postProcessorProgram->setUniformValue(postProcessorUniformLocations.bloomIdentity, photoBloom->identityWeight());
+		}
+		postProcessorProgram->setUniformValue(postProcessorUniformLocations.bloomTex, bloomTexSampler);
 	}
 
 	postProcessorVAO->bind();

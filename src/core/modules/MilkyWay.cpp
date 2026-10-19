@@ -79,10 +79,7 @@ void MilkyWay::init()
 
 	auto& gl = *QOpenGLContext::currentContext()->functions();
 
-	// The texture can be replaced (e.g. by a star-free one for the photographic mode).
-	// photoLuminanceScale must then be adapted to it: it is the luminance of a linear texture value of 1.0.
-	// The default calibrates Axel Mellinger's panorama: its 99.9th percentile (bright star clouds,
-	// linear value 0.21) is set to about 20.5 mag/arcsec^2 (V), i.e. 6.8e-4 cd/m^2.
+	// Texture for the normal (eye) view. It can be replaced via config.
 	const QString textureName = conf->value("astro/milky_way_texture", "milkyway.png").toString();
 	QString texturePath = StelFileMgr::findFile("textures/"+textureName);
 	if (texturePath.isEmpty())
@@ -90,11 +87,36 @@ void MilkyWay::init()
 		qWarning() << "Milky Way texture" << textureName << "not found, using milkyway.png";
 		texturePath = StelFileMgr::getInstallationDir()+"/textures/milkyway.png";
 	}
-	photoLuminanceScale = conf->value("astro/milky_way_photo_luminance", 3.2e-3).toDouble();
 	mainTex = StelApp::getInstance().getTextureManager().createTexture(texturePath);
 	mainTex->bind(0);
 	gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
 	mainTex->release();
+
+	// Texture for the photographic mode. It must be linear in surface brightness (after sRGB decoding)
+	// and free of the stars that Stellarium draws itself. photoLuminanceScale is the luminance (cd/m^2)
+	// of a linear texture value of 1.0.
+	// Default: milkyway_gaia.png, made from the Gaia Sky Milky Way cubemap (based on ESA Gaia EDR3 data),
+	// calibrated to the mean integrated starlight at the zenith at 40N (75 nW/m^2/sr in V, Masana et al.
+	// 2021, MNRAS 501, 5443) minus the ~20% contributed by Hipparcos-bright stars: 1.0 = 565 S10(V).
+	// Without it, Axel Mellinger's panorama is used: its 99.9th percentile (linear 0.21) is set to
+	// about 20.5 mag/arcsec^2 (V).
+	const QString photoTextureName = conf->value("astro/milky_way_photo_texture", "milkyway_gaia.png").toString();
+	const QString photoTexturePath = StelFileMgr::findFile("textures/"+photoTextureName);
+	if (photoTexturePath.isEmpty())
+	{
+		qWarning() << "Photographic Milky Way texture" << photoTextureName << "not found, using" << textureName;
+		photoTex = mainTex;
+		photoLuminanceScale = conf->value("astro/milky_way_photo_luminance", 3.2e-3).toDouble();
+	}
+	else
+	{
+		photoTex = (photoTexturePath == texturePath) ? mainTex
+		         : StelApp::getInstance().getTextureManager().createTexture(photoTexturePath);
+		photoTex->bind(0);
+		gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+		photoTex->release();
+		photoLuminanceScale = conf->value("astro/milky_way_photo_luminance", 4.7e-4).toDouble();
+	}
 	setFlagShow(conf->value("astro/flag_milky_way").toBool());
 	setIntensity(conf->value("astro/milky_way_intensity",1.).toDouble());
 	setSaturation(conf->value("astro/milky_way_saturation", 1.).toDouble());
@@ -344,7 +366,7 @@ void main(void)
 		renderProgram->setUniformValue(shaderVars.extinctionEnabled, drawer->getFlagHasAtmosphere() && extinction.getExtinctionCoefficient()>=0.01f);
 		renderProgram->setUniformValue(shaderVars.bortleIntensity, 1.f);
 		const int mainTexSampler = 0;
-		mainTex->bind(mainTexSampler);
+		photoTex->bind(mainTexSampler);
 		renderProgram->setUniformValue(shaderVars.mainTex, mainTexSampler);
 		renderProgram->setUniformValue(shaderVars.projectionMatrixInverse, projector->getProjectionMatrix().toQMatrix().inverted());
 		renderProgram->setUniformValue(shaderVars.brightness, QVector3D(lin.x()*k, lin.y()*k, lin.z()*k));

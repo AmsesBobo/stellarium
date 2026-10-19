@@ -1142,6 +1142,7 @@ void ConfigurationDialog::saveAllSettings()
         conf->setValue("viewing/photographic_halo_strength",            propMgr->getStelPropertyValue("StelSkyDrawer.photoHaloStrength").toDouble());
         conf->setValue("viewing/photographic_spike_count",              propMgr->getStelPropertyValue("StelSkyDrawer.photoSpikeCount").toInt());
         conf->setValue("viewing/photographic_spike_strength",           propMgr->getStelPropertyValue("StelSkyDrawer.photoSpikeStrength").toDouble());
+        conf->setValue("viewing/flag_photographic_bloom",               propMgr->getStelPropertyValue("StelSkyDrawer.flagPhotoBloom").toBool());
         conf->setValue("astro/flag_planets",                            propMgr->getStelPropertyValue("SolarSystem.planetsDisplayed").toBool());
         conf->setValue("astro/flag_planets_hints",                      propMgr->getStelPropertyValue("SolarSystem.flagHints").toBool());
         conf->setValue("astro/flag_planets_markers",                    propMgr->getStelPropertyValue("SolarSystem.flagMarkers").toBool());

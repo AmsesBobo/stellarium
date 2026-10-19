@@ -19,6 +19,7 @@
 
 
 #include "StelSkyDrawer.hpp"
+#include "StelPhotoBloom.hpp"
 #include "StelProjector.hpp"
 #include "StelFileMgr.hpp"
 
@@ -113,6 +114,7 @@ StelSkyDrawer::StelSkyDrawer(StelCore* acore) :
 	photoSpikeCount = conf->value("viewing/photographic_spike_count", 6).toInt();
 	photoSpikeCount = (photoSpikeCount<=0) ? 0 : (photoSpikeCount<=4 ? 4 : (photoSpikeCount<=6 ? 6 : 8));
 	photoSpikeFraction = qBound(0.f, conf->value("viewing/photographic_spike_strength", 0.02).toFloat(), 0.1f);
+	flagPhotoBloom = conf->value("viewing/flag_photographic_bloom", true).toBool();
 	setFlagStarMagnitudeLimit(conf->value("astro/flag_star_magnitude_limit", false).toBool());
 	setCustomStarMagnitudeLimit(conf->value("astro/star_magnitude_limit", 6.5).toDouble());
 	setFlagPlanetMagnitudeLimit(conf->value("astro/flag_planet_magnitude_limit", false).toBool());
@@ -253,6 +255,14 @@ void StelSkyDrawer::init()
 
 Vec3f StelSkyDrawer::photoColorTable[128];
 
+// For a Moffat profile M(r) with the given beta, normalized to unit integral, evaluated at the distance
+// max(0, r-R) from the edge of a disk of radius R: its integral is 1 + term*R/alpha + (beta-1)*R^2/alpha^2,
+// with term = (beta-1) sqrt(pi) Gamma(beta-1/2) / Gamma(beta). This returns that term.
+static float photoDiskTerm(float beta)
+{
+	return static_cast<float>((beta-1.) * std::sqrt(M_PI) * std::tgamma(beta-0.5) / std::tgamma(static_cast<double>(beta)));
+}
+
 void StelSkyDrawer::initPhotoStarRendering()
 {
 	// The photographic mode needs high graphics mode (OpenGL 3.3 core or GLES 3): it relies on
@@ -273,38 +283,78 @@ void StelSkyDrawer::initPhotoStarRendering()
 
 	// The profile is evaluated per pixel. Everything is in floats: a single star may record
 	// hundreds of times the saturation level, and faint stars need far finer steps than 8 bits.
+	// A bright body with a resolved disk (Moon, Sun, planets when zoomed in) uses the same profile,
+	// evaluated at the distance from the lit part of its disk (the limb, or the terminator for a body
+	// in phases), and renormalized so that its integral stays the same (see shape and vNorm).
 	const char* vsrc = R"(
 ATTRIBUTE highp vec2 corner;  // per vertex: corner of the sprite, in [-1, 1]
-ATTRIBUTE highp vec2 center;  // per star
+ATTRIBUTE highp vec2 center;  // per star: window position (for a body: center of its disk)
 ATTRIBUTE highp vec3 color;   // per star
 ATTRIBUTE highp float radius; // per star
+ATTRIBUTE highp vec4 shape;   // per star: x = disk radius (0 for stars), y = weight of the PSF core,
+                              //  z = radius of a disk with the area of the lit part, w = cos(phase angle)
+ATTRIBUTE highp vec2 sunDir;  // per star: direction towards the Sun on the screen (bodies in phases)
 uniform highp mat4 projectionMatrix;
+uniform highp float coreAlpha;
+uniform highp float coreBeta;
+uniform highp float haloAlpha;
+uniform highp float haloBeta;
+uniform highp float coreDiskTerm; // (beta-1) sqrt(pi) Gamma(beta-1/2) / Gamma(beta) of the core
+uniform highp float haloDiskTerm; // the same for the halo
+uniform highp float spikeSigma;
+uniform highp float spikeLength;
 VARYING highp vec2 vOffset;
 VARYING highp vec3 vColor;
 VARYING highp float vRadius;
+VARYING highp vec4 vNorm;  // x: core weight x norm, y: halo norm, z: spike norm, w: core weight
+VARYING highp vec4 vShape;
+VARYING highp vec2 vSunDir;
+const highp float PI_V = 3.14159265358979;
 void main(void)
 {
 	vOffset = corner * radius;
 	gl_Position = projectionMatrix * vec4(center + vOffset, 0, 1);
 	vColor = color;
 	vRadius = radius;
+	vShape = shape;
+	vSunDir = sunDir;
+	// Integral of a radial profile evaluated at max(0, r-R), relative to the plain profile:
+	// 1 + (disk term) R/alpha + (beta-1) R^2/alpha^2. The last term is the part inside the disk.
+	// With this normalization the profile at the edge of the lit part is the light spread from a
+	// disk of the same surface brightness (within a factor 2 of the exact half-plane value).
+	// Inside the lit part that light stays on the disk (it only blurs it), so it is not drawn
+	// there (see the fragment shader): full for an unresolved body, none for a large disk.
+	highp float R = shape.z;
+	highp float w = shape.y;
+	highp float cn = 1. / (1. + coreDiskTerm*R/coreAlpha + (coreBeta-1.)*R*R/(coreAlpha*coreAlpha));
+	highp float hn = 1. / (1. + haloDiskTerm*R/haloAlpha + (haloBeta-1.)*R*R/(haloAlpha*haloAlpha));
+	// A spike becomes a band as wide as the lit part
+	highp float s1 = sqrt(2.*PI_V)*spikeSigma;
+	highp float s2 = PI_V*spikeLength;
+	highp float sn = (s1*s2) / ((s1 + 2.*R) * (s2 + 2.*R));
+	vNorm = vec4(w*cn, hn, sn, w);
 }
 )";
 	const char* fsrc = R"(
 VARYING highp vec2 vOffset;
 VARYING highp vec3 vColor;
 VARYING highp float vRadius;
+VARYING highp vec4 vNorm;
+VARYING highp vec4 vShape;
+VARYING highp vec2 vSunDir;
 uniform highp float coreAlpha;
 uniform highp float coreBeta;
 uniform highp float haloAlpha;
 uniform highp float haloBeta;
-uniform highp float haloFraction;
+uniform highp float haloFraction; // 0 when the halo is applied to the whole image (bloom)
+uniform highp float coreFraction; // 1 - halo fraction - spike fraction
 uniform int spikeLines;           // number of lines through the star (spikes/2), 0 = no spikes
 uniform highp float spikeFraction;
 uniform highp float spikeSigma;   // half-width of a spike (Gaussian sigma), pixels
 uniform highp float spikeLength;  // length scale of the 1/r^2 falloff, pixels
 uniform highp vec2 spikeDirs[4];  // directions of the lines
 uniform highp float visibleThreshold; // fainter contributions cannot change a pixel
+uniform highp float spikeStart;   // with bloom: the spikes start here (the inner part comes from the image)
 const highp float PI = 3.14159265358979;
 // Moffat profile normalized to unit integral over the plane
 highp float moffat(highp float r2, highp float alpha, highp float beta)
@@ -313,35 +363,68 @@ highp float moffat(highp float r2, highp float alpha, highp float beta)
 }
 void main(void)
 {
-	highp float r2 = dot(vOffset, vOffset);
+	highp float r = length(vOffset);
+	highp float Rd = vShape.x;     // disk radius
+	highp float Rl = vShape.z;     // radius of a disk with the area of the lit part
+	highp float cosPhase = vShape.w;
+	// Coordinates along the direction to the Sun (u) and across it (v)
+	highp float u = dot(vOffset, vSunDir);
+	highp float v = dot(vOffset, vec2(-vSunDir.y, vSunDir.x));
+	// Distance from the lit part of the disk (stars: from the center). The terminator is the half
+	// ellipse u = -cos(phase) sqrt(Rd^2 - v^2); the lit part is on the sunward side of it.
+	highp float d;
+	if (Rd <= 0.)
+		d = r;
+	else if (r <= Rd)
+	{
+		highp float ut = -cosPhase * sqrt(max(0., Rd*Rd - v*v));
+		d = max(0., ut - u);
+	}
+	else if (u >= -cosPhase * r)
+		d = r - Rd;  // the nearest point of the limb is lit
+	else
+	{
+		// beyond the dark limb: distance to the nearer cusp
+		highp vec2 cusp = vec2(-cosPhase*Rd, sqrt(max(0., 1. - cosPhase*cosPhase))*Rd);
+		d = min(distance(vec2(u, v), cusp), distance(vec2(u, v), vec2(cusp.x, -cusp.y)));
+	}
+	highp float r2 = d * d;
 	highp float brightness = max(vColor.r, max(vColor.g, vColor.b));
-	highp float profile = (1. - haloFraction - spikeFraction) * moffat(r2, coreAlpha, coreBeta);
+	highp float profile = coreFraction * vNorm.x * moffat(r2, coreAlpha, coreBeta);
 	// The halo and the spikes matter only for bright stars: skip them where even their
 	// peak would stay below what can show on the screen (most stars)
-	if (brightness * haloFraction * (haloBeta - 1.) / (PI * haloAlpha * haloAlpha) > visibleThreshold)
-		profile += haloFraction * moffat(r2, haloAlpha, haloBeta);
+	if (brightness * haloFraction * vNorm.y * (haloBeta - 1.) / (PI * haloAlpha * haloAlpha) > visibleThreshold)
+		profile += haloFraction * vNorm.y * moffat(r2, haloAlpha, haloBeta);
 	// Diffraction spikes from straight edges in the aperture: thin lines whose intensity
 	// falls off like 1/r^2 along them. Each line is normalized to unit integral.
 	if (spikeLines > 0)
 	{
-		highp float lineNorm = spikeFraction / (float(spikeLines) * sqrt(2.*PI) * spikeSigma * PI * spikeLength);
+		highp float lineNorm = vNorm.z * spikeFraction / (float(spikeLines) * sqrt(2.*PI) * spikeSigma * PI * spikeLength);
 		if (brightness * lineNorm > visibleThreshold)
 		{
+			// Spikes start from the lit part: around its photocenter, as wide as it
+			highp vec2 p = vOffset - vSunDir * (Rd - Rl*Rl/max(Rd, 1e-6));
 			for (int k = 0; k < 4; ++k)
 			{
 				if (k >= spikeLines) break;
 				highp vec2 dir = spikeDirs[k];
-				highp float along = dot(vOffset, dir);
-				highp float across = dot(vOffset, vec2(-dir.y, dir.x));
-				profile += lineNorm * exp(-0.5 * across * across / (spikeSigma * spikeSigma))
-				                    / (1. + along * along / (spikeLength * spikeLength));
+				highp float acrossC = abs(dot(p, vec2(-dir.y, dir.x)));
+				highp float along = max(0., abs(dot(p, dir)) - sqrt(max(0., Rl*Rl - acrossC*acrossC)));
+				highp float across = max(0., acrossC - Rl);
+				highp float line = lineNorm * exp(-0.5 * across * across / (spikeSigma * spikeSigma))
+				                            / (1. + along * along / (spikeLength * spikeLength));
+				if (spikeStart > 0.)
+					line *= smoothstep(spikeStart - 0.5, spikeStart + 0.5, along);
+				profile += line;
 			}
 		}
 	}
+	// On the lit part (d = 0) the halo and spikes keep their peak value: the light the lens spreads
+	// stays on the disk there (the disk itself is drawn with the remaining fraction), and it fills
+	// small dark details such as crater shadows, as on a real overexposed photo.
 	// Fade the outermost part of the sprite, so that its edge never shows
-	highp float r = sqrt(r2);
-	profile *= 1. - smoothstep(0.75 * vRadius, vRadius, r);
-	FRAG_COLOR = vec4(vColor * profile, 1.);
+	profile *= 1. - smoothstep(Rd + 0.75 * (vRadius - Rd), vRadius, r);
+	FRAG_COLOR = vec4(min(vColor * profile, vec3(1e30)), 1.); // guard against overflow
 }
 )";
 
@@ -359,17 +442,23 @@ void main(void)
 	photoStarShaderVars.center = prog.attributeLocation("center");
 	photoStarShaderVars.color = prog.attributeLocation("color");
 	photoStarShaderVars.radius = prog.attributeLocation("radius");
+	photoStarShaderVars.shape = prog.attributeLocation("shape");
+	photoStarShaderVars.sunDir = prog.attributeLocation("sunDir");
 	photoStarShaderVars.coreAlpha = prog.uniformLocation("coreAlpha");
 	photoStarShaderVars.coreBeta = prog.uniformLocation("coreBeta");
 	photoStarShaderVars.haloAlpha = prog.uniformLocation("haloAlpha");
 	photoStarShaderVars.haloBeta = prog.uniformLocation("haloBeta");
 	photoStarShaderVars.haloFraction = prog.uniformLocation("haloFraction");
+	photoStarShaderVars.coreFraction = prog.uniformLocation("coreFraction");
+	photoStarShaderVars.coreDiskTerm = prog.uniformLocation("coreDiskTerm");
+	photoStarShaderVars.haloDiskTerm = prog.uniformLocation("haloDiskTerm");
 	photoStarShaderVars.spikeLines = prog.uniformLocation("spikeLines");
 	photoStarShaderVars.spikeFraction = prog.uniformLocation("spikeFraction");
 	photoStarShaderVars.spikeSigma = prog.uniformLocation("spikeSigma");
 	photoStarShaderVars.spikeLength = prog.uniformLocation("spikeLength");
 	photoStarShaderVars.spikeDirs = prog.uniformLocation("spikeDirs");
 	photoStarShaderVars.visibleThreshold = prog.uniformLocation("visibleThreshold");
+	photoStarShaderVars.spikeStart = prog.uniformLocation("spikeStart");
 
 	const GLfloat corners[] = {-1,-1,  1,-1,  1,1,  -1,-1,  1,1,  -1,1};
 	photoCornerVbo.reset(new QOpenGLBuffer(QOpenGLBuffer::VertexBuffer));
@@ -396,13 +485,19 @@ void main(void)
 	prog.setAttributeBuffer(photoStarShaderVars.center, GL_FLOAT, offsetof(PhotoStarInstance, center), 2, sizeof(PhotoStarInstance));
 	prog.setAttributeBuffer(photoStarShaderVars.color,  GL_FLOAT, offsetof(PhotoStarInstance, color),  3, sizeof(PhotoStarInstance));
 	prog.setAttributeBuffer(photoStarShaderVars.radius, GL_FLOAT, offsetof(PhotoStarInstance, radius), 1, sizeof(PhotoStarInstance));
+	prog.setAttributeBuffer(photoStarShaderVars.shape,  GL_FLOAT, offsetof(PhotoStarInstance, shape),  4, sizeof(PhotoStarInstance));
+	prog.setAttributeBuffer(photoStarShaderVars.sunDir, GL_FLOAT, offsetof(PhotoStarInstance, sunDir), 2, sizeof(PhotoStarInstance));
 	prog.enableAttributeArray(photoStarShaderVars.center);
 	prog.enableAttributeArray(photoStarShaderVars.color);
 	prog.enableAttributeArray(photoStarShaderVars.radius);
+	prog.enableAttributeArray(photoStarShaderVars.shape);
+	prog.enableAttributeArray(photoStarShaderVars.sunDir);
 	// One record per star (instance), not per vertex
 	hg->glVertexAttribDivisor(static_cast<GLuint>(photoStarShaderVars.center), 1);
 	hg->glVertexAttribDivisor(static_cast<GLuint>(photoStarShaderVars.color), 1);
 	hg->glVertexAttribDivisor(static_cast<GLuint>(photoStarShaderVars.radius), 1);
+	hg->glVertexAttribDivisor(static_cast<GLuint>(photoStarShaderVars.shape), 1);
+	hg->glVertexAttribDivisor(static_cast<GLuint>(photoStarShaderVars.sunDir), 1);
 	photoVao->release();
 	photoVbo->release();
 }
@@ -433,7 +528,11 @@ void StelSkyDrawer::flushPhotoPointSources(StelPainter* sPainter)
 	prog.setUniformValue(photoStarShaderVars.coreBeta, PHOTO_CORE_BETA);
 	prog.setUniformValue(photoStarShaderVars.haloAlpha, photoCoreAlpha*PHOTO_HALO_WIDTH_FACTOR);
 	prog.setUniformValue(photoStarShaderVars.haloBeta, PHOTO_HALO_BETA);
-	prog.setUniformValue(photoStarShaderVars.haloFraction, photoHaloFraction);
+	prog.setUniformValue(photoStarShaderVars.haloFraction, getFlagPhotoBloomActive() ? 0.f : photoHaloFraction);
+	prog.setUniformValue(photoStarShaderVars.coreFraction, getPhotoCoreFraction());
+	prog.setUniformValue(photoStarShaderVars.coreDiskTerm, photoDiskTerm(PHOTO_CORE_BETA));
+	prog.setUniformValue(photoStarShaderVars.haloDiskTerm, photoDiskTerm(PHOTO_HALO_BETA));
+	// With bloom, the halo and the inner part of the spikes come from the whole image (StelPhotoBloom)
 	const int spikeLines = (photoSpikeFraction > 0.f) ? photoSpikeCount/2 : 0;
 	prog.setUniformValue(photoStarShaderVars.spikeLines, spikeLines);
 	prog.setUniformValue(photoStarShaderVars.spikeFraction, spikeLines > 0 ? photoSpikeFraction : 0.f);
@@ -447,6 +546,7 @@ void StelSkyDrawer::flushPhotoPointSources(StelPainter* sPainter)
 	}
 	prog.setUniformValueArray(photoStarShaderVars.spikeDirs, spikeDirs, 4);
 	prog.setUniformValue(photoStarShaderVars.visibleThreshold, photoVisibleThreshold);
+	prog.setUniformValue(photoStarShaderVars.spikeStart, getFlagPhotoBloomActive() ? StelPhotoBloom::NEAR_SPIKE_LENGTH : 0.f);
 
 	photoVao->bind();
 	StelOpenGL::highGraphicsFunctions()->glDrawArraysInstanced(GL_TRIANGLES, 0, 6, static_cast<GLsizei>(nbPhotoPointSources));
@@ -672,7 +772,7 @@ bool StelSkyDrawer::computePhotoRCMag(float mag, RCMag* rcMag) const
 		rcMag->luminance = 0.f;
 		return false;
 	}
-	const float rHalo = radiusAtThreshold(flux*photoHaloFraction, photoCoreAlpha*PHOTO_HALO_WIDTH_FACTOR, PHOTO_HALO_BETA);
+	const float rHalo = getFlagPhotoBloomActive() ? 0.f : radiusAtThreshold(flux*photoHaloFraction, photoCoreAlpha*PHOTO_HALO_WIDTH_FACTOR, PHOTO_HALO_BETA);
 	// Length of the diffraction spikes: where the intensity along a spike drops to the threshold
 	float rSpike = 0.f;
 	if (spikeFraction > 0.f)
@@ -683,6 +783,9 @@ bool StelSkyDrawer::computePhotoRCMag(float mag, RCMag* rcMag) const
 		const float peak = flux*spikeFraction / (lines * std::sqrt(2.f*M_PIf) * sigma * M_PIf * length);
 		if (peak > photoVisibleThreshold)
 			rSpike = length * std::sqrt(peak/photoVisibleThreshold - 1.f);
+		// With bloom, the inner part of the spikes comes from the image
+		if (getFlagPhotoBloomActive() && rSpike <= StelPhotoBloom::NEAR_SPIKE_LENGTH)
+			rSpike = 0.f;
 	}
 	// The sprite ends where the profile fades out; leave room for that fade (see the shader)
 	rcMag->radius = qMin(PHOTO_MAX_SPRITE_RADIUS, qMax(qMax(qMax(rCore, rHalo), rSpike)/0.85f, 1.5f*photoCoreAlpha));
@@ -798,9 +901,128 @@ bool StelSkyDrawer::drawPhotoPointSource(StelPainter* sPainter, const Vec3d& v, 
 	star.center.set(static_cast<float>(win[0]), static_cast<float>(win[1]));
 	star.color = linearUnitColor * (rcMag.luminance * dim);
 	star.radius = rcMag.radius;
+	star.shape.set(0.f, 1.f, 0.f, 1.f);
+	star.sunDir.set(1.f, 0.f);
 	++nbPhotoPointSources;
 	if (nbPhotoPointSources>=maxPhotoPointSources)
 		flushPhotoPointSources(sPainter);
+	return true;
+}
+
+float StelSkyDrawer::getPhotoCoreWeight(float diskPixRadius) const
+{
+	// Same limits as the classic halo of the planets: below 3 pixels the body looks like a star
+	const float scale = StelApp::getInstance().getScreenScale();
+	const float tStart = 3.f*scale;
+	const float tStop = 6.f*scale;
+	return qBound(0.f, (tStop-diskPixRadius)/(tStop-tStart), 1.f);
+}
+
+float StelSkyDrawer::getPhotoDiskFraction(float diskPixRadius) const
+{
+	const float spikeFraction = (photoSpikeCount > 0) ? photoSpikeFraction : 0.f;
+	return (1.f - photoHaloFraction - spikeFraction) * (1.f - getPhotoCoreWeight(diskPixRadius));
+}
+
+bool StelSkyDrawer::drawPhotoBody(StelPainter* sPainter, const Vec3d& v, float diskPixRadius, float mag, const Vec3f& color,
+                                  float illuminatedFraction, const Vec3d& sunDirection)
+{
+	if (photoInstances.empty() || !photoStarShaderProgram)
+		return false;
+	const float dim = qMax(color[0], qMax(color[1], color[2]));
+	if (!(dim > 0.f))
+		return false;
+	const Vec3f linear = srgbToLinear(color/dim);
+	const float Y = 0.2126f*linear[0] + 0.7152f*linear[1] + 0.0722f*linear[2];
+	if (!(Y > 0.f))
+		return false;
+
+	// Total recorded light of the body (sum over all pixels, linear units)
+	const float flux = photoFluxMag0 * std::pow(10.f, -0.4f*mag);
+	if (!(flux > 0.f))
+		return false;
+	const float diskR = qMax(0.f, diskPixRadius);
+	const float coreWeight = getPhotoCoreWeight(diskR);
+	// A body in phases: its light comes from the lit part. For the normalization, that part counts
+	// as a disk of the same area; the shader measures the distance from the true lit shape.
+	const float k = qBound(0.f, illuminatedFraction, 1.f);
+	const float R = diskR * std::sqrt(k);
+	const float spikeFraction = (photoSpikeCount > 0) ? photoSpikeFraction : 0.f;
+
+	// How far beyond the disk edge each component stays visible (same as for stars, with the
+	// normalization of a profile spread around the disk)
+	auto wingRadius = [this, R](float componentFlux, float alpha, float beta) -> float
+	{
+		const float norm = 1.f/(1.f + photoDiskTerm(beta)*R/alpha + (beta-1.f)*R*R/(alpha*alpha));
+		const float peak = componentFlux * norm * (beta-1.f) / (M_PIf*alpha*alpha);
+		if (!(peak > photoVisibleThreshold))
+			return 0.f;
+		return alpha * std::sqrt(std::pow(peak/photoVisibleThreshold, 1.f/beta) - 1.f);
+	};
+	const float rCore = wingRadius(flux*(1.f-photoHaloFraction-spikeFraction)*coreWeight, photoCoreAlpha, PHOTO_CORE_BETA);
+	const float rHalo = getFlagPhotoBloomActive() ? 0.f : wingRadius(flux*photoHaloFraction, photoCoreAlpha*PHOTO_HALO_WIDTH_FACTOR, PHOTO_HALO_BETA);
+	float rSpike = 0.f;
+	if (spikeFraction > 0.f)
+	{
+		const float lines = static_cast<float>(photoSpikeCount/2);
+		const float sigma = photoCoreAlpha*PHOTO_SPIKE_WIDTH_FACTOR;
+		const float length = photoCoreAlpha*PHOTO_SPIKE_LENGTH_FACTOR;
+		const float s1 = std::sqrt(2.f*M_PIf)*sigma;
+		const float s2 = M_PIf*length;
+		const float norm = (s1*s2)/((s1+2.f*R)*(s2+2.f*R));
+		const float peak = flux*spikeFraction*norm / (lines * s1 * s2);
+		if (peak > photoVisibleThreshold)
+			rSpike = length * std::sqrt(peak/photoVisibleThreshold - 1.f);
+		// With bloom, the inner part of the spikes comes from the image
+		if (getFlagPhotoBloomActive() && rSpike <= StelPhotoBloom::NEAR_SPIKE_LENGTH)
+			rSpike = 0.f;
+	}
+	const float wing = qMax(qMax(rCore, rHalo), rSpike);
+	if (!(wing > 0.f))
+		return false;
+	// The spikes of the Sun can cross the whole screen
+	const auto& prj = sPainter->getProjector();
+	const float maxRadius = qMax(PHOTO_MAX_SPRITE_RADIUS, 1.5f*static_cast<float>(std::hypot(prj->getViewportWidth(), prj->getViewportHeight())));
+	const float radius = qMin(diskR + maxRadius, diskR + qMax(wing/0.85f, 1.5f*photoCoreAlpha));
+
+	// Only a body imaged on the sensor (its disk at least partly in the frame) produces this image
+	Vec3d win;
+	if (!prj->projectCheck(v, win))
+	{
+		if (!prj->project(v, win))
+			return false;
+		const double margin = static_cast<double>(diskR) + 2.;
+		if (win[0] < prj->getViewportPosX() - margin || win[0] > prj->getViewportPosX() + prj->getViewportWidth() + margin ||
+		    win[1] < prj->getViewportPosY() - margin || win[1] > prj->getViewportPosY() + prj->getViewportHeight() + margin)
+			return false;
+	}
+
+	// Direction towards the Sun on the screen
+	Vec2f sunDir(1.f, 0.f);
+	if (k < 1.f && sunDirection.normSquared() > 0.)
+	{
+		const Vec3d vn = v/v.norm();
+		Vec3d winSun;
+		if (prj->project(vn + sunDirection/sunDirection.norm()*1e-4, winSun))
+		{
+			Vec2d dir(winSun[0]-win[0], winSun[1]-win[1]);
+			const double len = dir.norm();
+			if (len > 0.)
+				sunDir.set(static_cast<float>(dir[0]/len), static_cast<float>(dir[1]/len));
+		}
+	}
+	// Illuminated fraction k = (1 + cos(phase angle))/2
+	const float cosPhase = 2.f*k - 1.f;
+
+	flushPhotoPointSources(sPainter); // keep the order of drawing
+	PhotoStarInstance& body = photoInstances[nbPhotoPointSources];
+	body.center.set(static_cast<float>(win[0]), static_cast<float>(win[1]));
+	body.color = (linear/Y) * (flux*dim);
+	body.radius = radius;
+	body.shape.set(diskR, coreWeight, R, cosPhase);
+	body.sunDir = sunDir;
+	++nbPhotoPointSources;
+	flushPhotoPointSources(sPainter);
 	return true;
 }
 
@@ -1625,6 +1847,26 @@ void StelSkyDrawer::setPhotoSpikeStrength(double fraction)
 	emit photoSpikeStrengthChanged(static_cast<double>(v));
 }
 
+void StelSkyDrawer::setFlagPhotoBloom(bool b)
+{
+	if (b == flagPhotoBloom)
+		return;
+	flagPhotoBloom = b;
+	StelApp::immediateSave("viewing/flag_photographic_bloom", b);
+	emit flagPhotoBloomChanged(b);
+}
+
+bool StelSkyDrawer::getFlagPhotoBloomActive() const
+{
+	return flagPhotoBloom && (photoHaloFraction > 0.f || getPhotoSpikeFractionEffective() > 0.f) && getFlagPhotographicModeActive();
+}
+
+float StelSkyDrawer::getPhotoCoreFraction() const
+{
+	const float spikeFraction = (photoSpikeCount > 0) ? photoSpikeFraction : 0.f;
+	return 1.f - photoHaloFraction - spikeFraction;
+}
+
 void StelSkyDrawer::resetPhotographicSettings()
 {
 	setPhotoExposureTime(20.);
@@ -1636,6 +1878,7 @@ void StelSkyDrawer::resetPhotographicSettings()
 	setPhotoHaloStrength(0.05);
 	setPhotoSpikeCount(6);
 	setPhotoSpikeStrength(0.02);
+	setFlagPhotoBloom(true);
 }
 
 float StelSkyDrawer::getPhotoSceneScale() const
