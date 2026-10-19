@@ -107,6 +107,8 @@ class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 	Q_PROPERTY(int photoMeteringMode READ getPhotoMeteringMode WRITE setPhotoMeteringMode NOTIFY photoMeteringModeChanged)
 	//! Photographic mode: show a line with the camera settings in use at the top of the screen
 	Q_PROPERTY(bool flagPhotoInfoLine READ getFlagPhotoInfoLine WRITE setFlagPhotoInfoLine NOTIFY flagPhotoInfoLineChanged)
+	//! Tone curve of the camera: 0 = linear, 1 = standard (camera JPEG), 2 = film
+	Q_PROPERTY(int photoToneCurve READ getPhotoToneCurve WRITE setPhotoToneCurve NOTIFY photoToneCurveChanged)
 	//! The exposure time in use (seconds): the set one, or the one chosen by the automatic exposure.
 	//! The change signal is only emitted when the value shown by a camera (1/3-stop steps) changes.
 	Q_PROPERTY(double photoEffectiveExposureTime READ getPhotoEffectiveExposureTime NOTIFY photoEffectiveExposureTimeChanged)
@@ -138,8 +140,31 @@ public:
 		PhotoMeteringSpot = 1,           //!< a central circle of 2.5% of the image area
 		PhotoMeteringHighlight = 2       //!< the brightest part must not saturate
 	};
-	//! The inverse of the highlight shoulder of the camera pass (for values below 1.0).
+	//! Tone curves of the camera pass (scene value after the exposure -> linear display value)
+	enum PhotoToneCurve {
+		PhotoToneLinear = 0,   //!< linear, with a soft shoulder above PHOTO_SHOULDER_KNEE (never clips)
+		PhotoToneStandard = 1, //!< like the JPEG of a camera: more contrast, clipping 3 stops above middle grey
+		PhotoToneFilm = 2      //!< like negative film: soft contrast, 6 stops of room above middle grey
+	};
+	//! Parameters of a tone curve y = x^a / (x^(a*d)*b + c) for x below the clipping point, 1 above
+	//! (T. Lottes, "Advanced Techniques and Optimization of HDR Color Pipelines", GDC 2016). It maps
+	//! middle grey (0.18) to middle grey, and the clipping point to white.
+	struct PhotoToneParams
+	{
+		float a = 1.f;   //!< contrast (slope in log-log space around middle grey)
+		float ad = 1.f;  //!< a*d, d shapes the shoulder
+		float b = 0.f;
+		float c = 1.f;
+		float clip = 1.f; //!< scene value that becomes white (saturation of the sensor)
+	};
+	//! The inverse of the highlight shoulder of the linear tone curve (for values below 1.0).
 	static float invertPhotoShoulder(float y);
+	//! The tone curve in use: scene value (after the exposure) -> linear display value 0..1
+	float photoToneCurveValue(float x) const;
+	//! The inverse of the tone curve in use (exact, by bisection): display value -> scene value
+	float photoToneCurveInverse(float y) const;
+	//! Parameters of the tone curve in use (not meaningful for PhotoToneLinear)
+	const PhotoToneParams& getPhotoToneParams() const {return photoToneParams;}
 	//! For annotations (lines, labels, markers) in the photographic mode: the linear color that has
 	//! to be written into the scene buffer so that the camera pass reproduces the given linear color
 	//! exactly, independently of the exposure.
@@ -410,6 +435,9 @@ public slots:
 	//! Set the metering mode of the automatic exposure (see PhotoMeteringMode).
 	void setPhotoMeteringMode(int mode);
 	int getPhotoMeteringMode() const {return photoMeteringMode;}
+	//! Set the tone curve of the camera (see PhotoToneCurve).
+	void setPhotoToneCurve(int curve);
+	int getPhotoToneCurve() const {return photoToneCurve;}
 	//! Show the line with the camera settings at the top of the screen.
 	void setFlagPhotoInfoLine(bool b);
 	bool getFlagPhotoInfoLine() const {return flagPhotoInfoLine;}
@@ -563,6 +591,7 @@ signals:
 	void flagPhotoAutoExposureChanged(bool b);
 	void photoMeteringModeChanged(int mode);
 	void flagPhotoInfoLineChanged(bool b);
+	void photoToneCurveChanged(int curve);
 	void photoEffectiveExposureTimeChanged(double seconds);
 
 	void extinctionCoefficientChanged(double coeff);
@@ -862,6 +891,12 @@ private:
 	bool flagPhotoAutoExposure = false;
 	int photoMeteringMode = 0;
 	bool flagPhotoInfoLine = true;
+	//! Tone curve of the camera
+	int photoToneCurve = PhotoToneStandard;
+	PhotoToneParams photoToneParams;
+	//! The inverse of the tone curve, tabulated for the annotations: scene values at display values i/(size-1)
+	std::vector<float> photoToneInverseTable;
+	void updatePhotoToneCurve();
 	//! Exposure time chosen by the automatic exposure (seconds)
 	double photoAutoExposureTime = 1./60.;
 	//! The automatic exposure jumps to the metered value at its first reading

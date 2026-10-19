@@ -908,6 +908,11 @@ QByteArray makeCameraResponseShader()
 	       QByteArray::number(StelSkyDrawer::PHOTO_SHOULDER_KNEE, 'f', 6) + ";\n" + R"(
 uniform bool photoMode;
 uniform highp float photoExposure;
+// Tone curve: 0 = linear with a soft shoulder; otherwise y = x^a / (x^(a*d)*b + c) up to the
+// clipping point (white above). photoTone = (a, a*d, b, c), see StelSkyDrawer::PhotoToneParams
+uniform int photoToneCurve;
+uniform highp vec4 photoTone;
+uniform highp float photoToneClip;
 
 highp vec3 cameraResponse(highp vec3 lin)
 {
@@ -915,12 +920,31 @@ highp vec3 cameraResponse(highp vec3 lin)
 	// min(): guard against an overflow to infinity (possible with half floats, as on OpenGL ES);
 	// keep it finite so that mix() below cannot produce NaN (inf*0)
 	highp vec3 x = min(max(lin * photoExposure, vec3(0)), vec3(1e30));
+	if (photoToneCurve != 0)
+	{
+		// Each channel separately, as in a camera: bright colored light turns white when it saturates
+		highp vec3 xc = min(x, vec3(photoToneClip));
+		highp vec3 y = pow(xc, vec3(photoTone.x)) / (pow(xc, vec3(photoTone.y)) * photoTone.z + photoTone.w);
+		return mix(min(y, vec3(1)), vec3(1), step(vec3(photoToneClip), x));
+	}
 	const highp float knee = photoShoulderKnee;
 	highp vec3 over = max(x - vec3(knee), vec3(0));
 	highp vec3 shoulder = vec3(knee) + (1. - knee) * (vec3(1) - exp(-over / (1. - knee)));
 	return mix(x, shoulder, step(vec3(knee), x));
 }
 )";
+}
+}
+
+namespace
+{
+//! The tone curve of the photographic mode, for the camera stage (see makeCameraResponseShader())
+void setPhotoToneUniforms(QOpenGLShaderProgram& program, const StelSkyDrawer& drawer)
+{
+	const StelSkyDrawer::PhotoToneParams& p = drawer.getPhotoToneParams();
+	program.setUniformValue("photoToneCurve", drawer.getPhotoToneCurve());
+	program.setUniformValue("photoTone", p.a, p.ad, p.b, p.c);
+	program.setUniformValue("photoToneClip", p.clip);
 }
 }
 
@@ -1230,6 +1254,7 @@ void StelApp::highGraphicsModeDraw()
 		postProcessorProgramMS->setUniformValue(postProcessorUniformLocationsMS.numMultiSamples, numMultiSamples);
 		postProcessorProgramMS->setUniformValue(postProcessorUniformLocationsMS.photoMode, photoMode);
 		postProcessorProgramMS->setUniformValue(postProcessorUniformLocationsMS.photoExposure, photoExposure);
+		setPhotoToneUniforms(*postProcessorProgramMS, *skyDrawer);
 	}
 	else
 	{
@@ -1249,6 +1274,7 @@ void StelApp::highGraphicsModeDraw()
 		                                      rgbMaxValue[0], rgbMaxValue[1], rgbMaxValue[2]);
 		postProcessorProgram->setUniformValue(postProcessorUniformLocations.photoMode, photoMode);
 		postProcessorProgram->setUniformValue(postProcessorUniformLocations.photoExposure, photoExposure);
+		setPhotoToneUniforms(*postProcessorProgram, *skyDrawer);
 
 		const bool haloOn = bloomDone && skyDrawer->getPhotoHaloStrength() > 0.;
 		const bool spikesOn = bloomDone && photoBloom->spikeTexture() != 0;
