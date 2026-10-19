@@ -4496,6 +4496,22 @@ void Planet::draw3dModel(StelCore* core, StelProjector::ModelViewTranformP trans
 	const bool photoMode = skyDrawer->getFlagPhotographicModeActive() && !drawOnlyRing;
 	float photoDiskPixRadius = 0.f;
 	float photoDiskFraction = 1.f;
+	// Photographic mode: color of the extinction (linear RGB, unit luminance). From the spectral transmission
+	// of the atmosphere model if available; otherwise the classic approximation; neutral if switched off.
+	Vec3f photoExtinctionTint(1.f);
+	if (photoMode && skyDrawer->getFlagPhotoExtinctionColor() && extinctedMag > 0.f)
+	{
+		if (skyDrawer->getFlagPhotoExtinctionColorActive())
+			photoExtinctionTint = skyDrawer->getPhotoExtinctionTint(getAltAzPosGeometric(core));
+		else
+		{
+			const Vec3f lin = srgbToLinear(isSun ? Vec3f(1.f, powf(0.75f, extinctedMag), powf(0.42f, 0.9f*extinctedMag))
+			                                     : Vec3f(1.f, magFactorGreen, magFactorBlue));
+			const float Y = 0.2126f*lin[0] + 0.7152f*lin[1] + 0.0722f*lin[2];
+			if (Y > 0.f)
+				photoExtinctionTint = lin/Y;
+		}
+	}
 	if (photoMode)
 	{
 		const double pixPerRad = static_cast<double>(core->getProjection(StelCore::FrameJ2000)->getPixelPerRadAtCenter());
@@ -4636,20 +4652,14 @@ void Planet::draw3dModel(StelCore* core, StelProjector::ModelViewTranformP trans
 			const double omega = M_PI*angRad*angRad*static_cast<double>(oneMinusOblateness);
 			const double extinctionFactor = std::pow(10., -0.4*static_cast<double>(extinctedMag));
 			const double sceneScale = static_cast<double>(skyDrawer->getPhotoSceneScale());
-			// Extinction reddening as in the classic rendering, but at unit luminance (the extinction
-			// itself comes from the magnitude)
-			auto unitTint = [](const Vec3f& srgbTint) -> Vec3f {
-				const Vec3f lin = srgbToLinear(srgbTint);
-				const float Y = 0.2126f*lin[0] + 0.7152f*lin[1] + 0.0722f*lin[2];
-				return Y > 0.f ? lin/Y : Vec3f(1.f);
-			};
+			// The color of the extinction at unit luminance (the extinction itself comes from the magnitude)
+			const Vec3f tint = photoExtinctionTint;
 			if (isSun)
 			{
 				// Without the eclipse factor: during an eclipse the Moon covers the disk.
 				// 0.806: mean of the limb darkening of planet.frag over the disk, a0 + 2/3 a1 + 1/2 a2, luminance weighted.
 				const double E = 2.54e-6*std::pow(10., -0.4*static_cast<double>(getVMagnitude(core)));
 				const double S = E/(omega*0.806*static_cast<double>(getPhotoTextureMean()));
-				const Vec3f tint = unitTint(Vec3f(1.f, powf(0.75f, extinctedMag), powf(0.42f, 0.9f*extinctedMag)));
 				photoSunScale = tint * static_cast<float>(S*extinctionFactor*sceneScale*static_cast<double>(photoDiskFraction));
 				sPainter.setColor(1.f, 1.f, 1.f);
 			}
@@ -4663,7 +4673,6 @@ void Planet::draw3dModel(StelCore* core, StelProjector::ModelViewTranformP trans
 				const double E = 2.54e-6*std::pow(10., -0.4*static_cast<double>(getPhotoSunlitMagnitude(core)));
 				const double denominator = omega*shading*static_cast<double>(getPhotoTextureMean());
 				const double S = denominator > 0. ? E/denominator : 0.;
-				const Vec3f tint = unitTint(Vec3f(1.f, magFactorGreen, magFactorBlue));
 				photoDiffuse = tint * static_cast<float>(S*extinctionFactor*sceneScale*static_cast<double>(photoDiskFraction));
 				photoAmbient = Vec3f(0.f);
 				if (isMoon && currentLocationIsEarth)
@@ -4736,11 +4745,7 @@ void Planet::draw3dModel(StelCore* core, StelProjector::ModelViewTranformP trans
 		if (allowPhotoPSF)
 		{
 			StelPainter sPainter(core->getProjection(StelCore::FrameJ2000));
-			Vec3f color;
-			if (isSun)
-				color.set(haloColor[0], powf(0.75f, extinctedMag) * haloColor[1], powf(0.42f, 0.9f*extinctedMag) * haloColor[2]);
-			else
-				color.set(haloColor[0], magFactorGreen * haloColor[1], magFactorBlue * haloColor[2]);
+			const Vec3f color = StelSkyDrawer::photoTintedColor(haloColor, photoExtinctionTint);
 			const Vec3d pos = getJ2000EquatorialPos(core);
 			if (isSun)
 				skyDrawer->drawPhotoBody(&sPainter, pos, photoDiskPixRadius, photoMag, color);

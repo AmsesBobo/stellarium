@@ -381,6 +381,7 @@ void main()
 			StelOpenGL::globalShaderPrefix(StelOpenGL::FRAGMENT_SHADER) +
 			projector->getUnProjectShader() +
 			extinction.getForwardTransformShader() +
+			StelSkyDrawer::getPhotoExtinctionShader() +
 			R"(
 VARYING highp vec3 ndcPos;
 uniform sampler2D mainTex;
@@ -408,13 +409,17 @@ void main(void)
 	vec2 texc = vec2(modelLongitude/(2.*PI), modelZenithAngle/PI);
 
 	float extinctionFactor;
+	vec3 extinctionColor = vec3(1); // photographic mode: color of the extinction
 	if(extinctionEnabled)
 	{
 		vec3 worldPos = winPosToWorldPos(winPos.x, winPos.y, ok);
 		vec3 altAzViewDir = worldPosToAltAzPos(worldPos);
 		float mag = extinctionMagnitude(altAzViewDir);
 		if (photoMode)
+		{
 			extinctionFactor = pow(10., -0.4*mag); // physical extinction; light pollution is part of the sky luminance
+			extinctionColor = photoExtinctionTint(normalize(altAzViewDir).z);
+		}
 		else
 			extinctionFactor=pow(0.4, mag) * (1.1-bortleIntensity*0.1); // Drop of one magnitude: factor 2.5 or 40%, and further reduced by light pollution.
 	}
@@ -425,7 +430,7 @@ void main(void)
 
 	if (photoMode)
 	{
-		FRAG_COLOR = vec4(texture2D(photoTex, texc).r * brightness * extinctionFactor, 1);
+		FRAG_COLOR = vec4(texture2D(photoTex, texc).r * brightness * extinctionColor * extinctionFactor, 1);
 		return;
 	}
     vec4 color = texture2D(mainTex, texc)*vec4(brightness,1)*extinctionFactor;
@@ -488,6 +493,7 @@ void main(void)
 		renderProgram->setUniformValue(shaderVars.lambdaSun, GLfloat(lambdaSun));
 		projector->setUnProjectUniforms(*renderProgram);
 		extinction.setForwardTransformUniforms(*renderProgram);
+		drawer->setPhotoExtinctionUniforms(*renderProgram, 2);
 		glf.glEnable(GL_BLEND);
 		glf.glBlendFunc(GL_ONE,GL_ONE);
 		bindVAO();

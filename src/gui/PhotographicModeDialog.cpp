@@ -161,6 +161,7 @@ void PhotographicModeDialog::createDialogContent()
 	connectBoolProperty(ui->bloomCheckBox,            "StelSkyDrawer.flagPhotoBloom");
 	connectBoolProperty(ui->autoExposureCheckBox,     "StelSkyDrawer.flagPhotoAutoExposure");
 	connectBoolProperty(ui->infoLineCheckBox,         "StelSkyDrawer.flagPhotoInfoLine");
+	connectBoolProperty(ui->extinctionColorCheckBox,  "StelSkyDrawer.flagPhotoExtinctionColor");
 
 	fillComboBoxes();
 
