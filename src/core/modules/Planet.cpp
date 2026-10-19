@@ -2549,6 +2549,54 @@ double Planet::getRotObliquity(double JDE) const
 		return static_cast<double>(re.obliquity);
 }
 
+// Photographic mode: the fraction of a body's disk that is not hidden by the landscape.
+// The camera only records light that reaches the lens: a body behind a hill or a tree
+// produces no halo and no diffraction spikes, a body half behind the horizon gives half.
+// The landscape is drawn over the disk anyway, but the halo and the spikes reach far into
+// the free sky and must be dimmed here.
+// altAz: apparent direction of the body (with refraction, as drawn), angularRadius in radians.
+static float photoLandscapeVisibility(const Vec3d& altAz, double angularRadius)
+{
+	static LandscapeMgr* lmgr = GETSTELMODULE(LandscapeMgr);
+	if (!lmgr)
+		return 1.f;
+	Landscape* landscape = lmgr->getCurrentLandscape();
+	if (!landscape)
+		return 1.f;
+	// How strongly the landscape covers the sky: it may be fading in or out, or partly transparent
+	const float transparency = lmgr->getFlagLandscapeUseTransparency() ? static_cast<float>(lmgr->getLandscapeTransparency()) : 0.f;
+	const float strength = landscape->getEffectiveLandFadeValue() * (1.f - qBound(0.f, transparency, 1.f));
+	if (!(strength > 0.f))
+		return 1.f;
+
+	Vec3d c = altAz;
+	c.normalize();
+	// Two directions perpendicular to the line of sight, to sample the disk
+	Vec3d e1 = (std::fabs(c[2]) < 0.9) ? Vec3d(0., 0., 1.)^c : Vec3d(1., 0., 0.)^c;
+	e1.normalize();
+	const Vec3d e2 = c^e1;
+
+	// Evenly spread samples over the disk (sunflower pattern, equal areas). A small disk is
+	// sampled at its center only; a large one (Sun, Moon) also shows partial covering,
+	// e.g. by the branches of a tree when the landscape image has transparent parts.
+	const int n = (angularRadius > 0.5*M_PI_180) ? 25 : (angularRadius > 0.02*M_PI_180 ? 7 : 1);
+	const double goldenAngle = M_PI*(3.-std::sqrt(5.));
+	float opacity = 0.f;
+	for (int i=0; i<n; ++i)
+	{
+		Vec3d dir = c;
+		if (n > 1)
+		{
+			const double r = angularRadius*std::sqrt((i+0.5)/n);
+			const double a = i*goldenAngle;
+			dir = c + (e1*std::cos(a) + e2*std::sin(a))*std::tan(r);
+			dir.normalize();
+		}
+		opacity += qBound(0.f, landscape->getOpacity(dir), 1.f);
+	}
+	return qBound(0.f, 1.f - strength*opacity/static_cast<float>(n), 1.f);
+}
+
 // Find out if p casts a shadow onto thisPlanet
 static bool willCastShadow(const Planet* thisPlanet, const Planet* p, const Planet* sun)
 {
@@ -4675,6 +4723,16 @@ void Planet::draw3dModel(StelCore* core, StelProjector::ModelViewTranformP trans
 			if (obj.angle(par)*M_180_PI <= getParent()->getSpheroidAngularRadius(core))
 				allowPhotoPSF = false;
 		}
+		// Only the light that is not blocked by the landscape reaches the camera
+		float photoMag = vMagnitudeWithExtinction;
+		if (allowPhotoPSF)
+		{
+			const float visible = photoLandscapeVisibility(getAltAzPosAuto(core), getSpheroidAngularRadius(core)*M_PI_180);
+			if (visible <= 0.f)
+				allowPhotoPSF = false;
+			else if (visible < 1.f)
+				photoMag -= 2.5f*std::log10(visible);
+		}
 		if (allowPhotoPSF)
 		{
 			StelPainter sPainter(core->getProjection(StelCore::FrameJ2000));
@@ -4685,7 +4743,7 @@ void Planet::draw3dModel(StelCore* core, StelProjector::ModelViewTranformP trans
 				color.set(haloColor[0], magFactorGreen * haloColor[1], magFactorBlue * haloColor[2]);
 			const Vec3d pos = getJ2000EquatorialPos(core);
 			if (isSun)
-				skyDrawer->drawPhotoBody(&sPainter, pos, photoDiskPixRadius, vMagnitudeWithExtinction, color);
+				skyDrawer->drawPhotoBody(&sPainter, pos, photoDiskPixRadius, photoMag, color);
 			else
 			{
 				// The light comes from the lit part: direction towards the Sun in the sky, and the illuminated fraction
@@ -4694,7 +4752,7 @@ void Planet::draw3dModel(StelCore* core, StelProjector::ModelViewTranformP trans
 				s.normalize();
 				const Vec3d sunDirection = s - p*(s*p);
 				const float k = static_cast<float>(getPhase(core->getObserverHeliocentricEclipticPos()));
-				skyDrawer->drawPhotoBody(&sPainter, pos, photoDiskPixRadius, vMagnitudeWithExtinction, color, k, sunDirection);
+				skyDrawer->drawPhotoBody(&sPainter, pos, photoDiskPixRadius, photoMag, color, k, sunDirection);
 			}
 		}
 		return;

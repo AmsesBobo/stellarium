@@ -80,8 +80,10 @@ void PhotographicModeDialog::fillComboBoxes()
 	{
 		const QSignalBlocker blocker(ui->exposureTimeComboBox);
 		ui->exposureTimeComboBox->clear();
-		for (const double t : exposureTimes)
-			ui->exposureTimeComboBox->addItem(exposureTimeText(t), t);
+		// All camera lists run from bright (top) to dark (bottom): scrolling the mouse wheel up,
+		// or pressing the up arrow key, makes the picture brighter.
+		for (auto it = exposureTimes.crbegin(); it != exposureTimes.crend(); ++it)
+			ui->exposureTimeComboBox->addItem(exposureTimeText(*it), *it);
 	}
 	{
 		const QSignalBlocker blocker(ui->apertureComboBox);
@@ -92,8 +94,8 @@ void PhotographicModeDialog::fillComboBoxes()
 	{
 		const QSignalBlocker blocker(ui->isoComboBox);
 		ui->isoComboBox->clear();
-		for (const double iso : isoValues)
-			ui->isoComboBox->addItem(QString::number(qRound(iso)), iso);
+		for (auto it = isoValues.crbegin(); it != isoValues.crend(); ++it)
+			ui->isoComboBox->addItem(QString::number(qRound(*it)), *it);
 	}
 	{
 		const QSignalBlocker blocker(ui->spikesComboBox);
@@ -107,11 +109,16 @@ void PhotographicModeDialog::fillComboBoxes()
 
 void PhotographicModeDialog::selectNearest(QComboBox* comboBox, const QVector<double>& values, double value)
 {
+	// The order of the items in the list may differ from the order of the values
+	Q_UNUSED(values)
 	int best = 0;
 	double bestDistance = 1e300;
-	for (int i=0; i<values.size(); ++i)
+	for (int i=0; i<comboBox->count(); ++i)
 	{
-		const double distance = std::fabs(std::log(values.at(i)) - std::log(value));
+		const double item = comboBox->itemData(i).toDouble();
+		if (!(item > 0.) || !(value > 0.))
+			continue;
+		const double distance = std::fabs(std::log(item) - std::log(value));
 		if (distance < bestDistance)
 		{
 			bestDistance = distance;
