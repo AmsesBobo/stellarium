@@ -277,6 +277,7 @@ void main()
 			projector->getUnProjectShader() +
 			core->getAberrationShader() +
 			extinction.getForwardTransformShader() +
+			StelSkyDrawer::getPhotoExtinctionShader() +
 			makeSaturationShader()+
 			R"(
 VARYING highp vec3 ndcPos;
@@ -305,13 +306,17 @@ void main(void)
 	vec2 texc = vec2(modelLongitude/(2.*PI), modelZenithAngle/PI);
 
 	float extinctionFactor;
+	vec3 extinctionColor = vec3(1); // photographic mode: color of the extinction
 	if(extinctionEnabled)
 	{
 		vec3 worldPos = winPosToWorldPos(winPos.x, winPos.y, ok);
 		vec3 altAzViewDir = worldPosToAltAzPos(worldPos);
 		float mag = extinctionMagnitude(altAzViewDir);
 		if (photoMode)
+		{
 			extinctionFactor = pow(10., -0.4*mag); // physical extinction; light pollution is part of the sky luminance
+			extinctionColor = photoExtinctionTint(normalize(altAzViewDir).z);
+		}
 		else
 			extinctionFactor=pow(0.3, mag) * (1.1-bortleIntensity*0.1); // drop of one magnitude: should be factor 2.5 or 40%. We take 30%, it looks more realistic.
 	}
@@ -320,7 +325,7 @@ void main(void)
 		extinctionFactor = 1.;
 	}
 
-    vec4 color = texture2D(mainTex, texc)*vec4(brightness,1)*extinctionFactor;
+    vec4 color = texture2D(mainTex, texc)*vec4(brightness*extinctionColor,1)*extinctionFactor;
 	if(saturation != 1.0)
 		color.rgb = saturate(color.rgb, saturation);
 	FRAG_COLOR = color;
@@ -374,6 +379,7 @@ void main(void)
 		core->setAberrationUniforms(*renderProgram);
 		projector->setUnProjectUniforms(*renderProgram);
 		extinction.setForwardTransformUniforms(*renderProgram);
+		drawer->setPhotoExtinctionUniforms(*renderProgram, 1);
 		auto& glf = *QOpenGLContext::currentContext()->functions();
 		glf.glEnable(GL_BLEND);
 		glf.glBlendFunc(GL_ONE,GL_ONE);

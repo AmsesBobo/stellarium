@@ -52,10 +52,24 @@
 #include <QGuiApplication>
 #include <QFontMetrics>
 #include <QLocale>
+#include <QDir>
+
+#ifndef GL_RGBA16F
+#define GL_RGBA16F 0x881A
+#endif
 
 // The 0.025 corresponds to the maximum eye resolution in degree
 #define EYE_RESOLUTION (0.25f)
 #define MAX_LINEAR_RADIUS 8.f
+
+namespace
+{
+//! Encode a linear value (0..1) with the sRGB transfer function
+float encodeSRGB(float c)
+{
+	return c <= 0.0031308f ? 12.92f*c : 1.055f*std::pow(c, 1.f/2.4f) - 0.055f;
+}
+}
 
 StelSkyDrawer::StelSkyDrawer(StelCore* acore) :
 	core(acore),
@@ -124,6 +138,14 @@ StelSkyDrawer::StelSkyDrawer(StelCore* acore) :
 	flagPhotoInfoLine = conf->value("viewing/flag_photographic_info_line", true).toBool();
 	photoToneCurve = qBound(0, conf->value("viewing/photographic_tone_curve", static_cast<int>(PhotoToneStandard)).toInt(), 2);
 	updatePhotoToneCurve();
+	flagPhotoExtinctionColor = conf->value("viewing/flag_photographic_extinction_color", true).toBool();
+	{
+		const QString path = StelFileMgr::findFile("atmosphere/lightweight-extinction.dat");
+		if (!path.isEmpty() && atmosphereTransmission.load(path))
+			qInfo() << "Photographic mode: extinction colors from" << QDir::toNativeSeparators(path);
+		else
+			qWarning() << "Photographic mode: no atmosphere/lightweight-extinction.dat, extinction colors are approximated";
+	}
 	setFlagStarMagnitudeLimit(conf->value("astro/flag_star_magnitude_limit", false).toBool());
 	setCustomStarMagnitudeLimit(conf->value("astro/star_magnitude_limit", 6.5).toDouble());
 	setFlagPlanetMagnitudeLimit(conf->value("astro/flag_planet_magnitude_limit", false).toBool());
@@ -668,6 +690,8 @@ void StelSkyDrawer::update(double)
 		// A saturated (white) sky hides everything
 		photoVisibleThreshold = (nextOnScreen > skyOnScreen) ? (nextOnScreen - skyOnScreen) / exposure : 1e30f;
 	}
+
+	updatePhotoExtinction();
 
 	// update limit mag
 	limitMagnitude = computeLimitMagnitude();
@@ -1881,6 +1905,138 @@ float StelSkyDrawer::photoToneCurveInverse(float y) const
 	return 0.5f*(lo+hi);
 }
 
+// ---- Extinction colors ----
+
+void StelSkyDrawer::updatePhotoExtinction()
+{
+	const double k = static_cast<double>(extinction.getExtinctionCoefficient());
+	photoExtinctionActive = flagPhotoExtinctionColor && getFlagPhotographicModeActive() && getFlagHasAtmosphere()
+	                        && k >= 0.01 && atmosphereTransmission.isLoaded()
+	                        && core->getCurrentLocation().planetName == QStringLiteral("Earth");
+	if (!photoExtinctionActive)
+		return;
+	const double altitude = static_cast<double>(core->getCurrentLocation().altitude);
+	if (altitude == photoExtinctionAltitude && k == photoExtinctionCoefficient && !photoExtinctionTints.empty())
+		return;
+	photoExtinctionAltitude = altitude;
+	photoExtinctionCoefficient = k;
+
+	// The table has its own amount of aerosols etc. Scale its optical depths so that white light loses
+	// as much towards the zenith as the extinction coefficient says (k magnitudes per airmass at the site):
+	// the brightness keeps following the coefficient, the table gives the color.
+	const double zenith = atmosphereTransmission.zenithMagnitude(altitude);
+	const double depthScale = zenith > 1e-4 ? k/zenith : 1.;
+	const double sinMin = atmosphereTransmission.horizonSine(altitude);
+	photoExtinctionSinMin = static_cast<float>(sinMin);
+	constexpr int size = 256;
+	photoExtinctionTints.assign(size, Vec3f(1.f));
+	// From the zenith down: very close to the horizon of the observer hardly any light passes;
+	// there the last good color is kept.
+	Vec3f last(1.f);
+	for (int i = size-1; i >= 0; --i)
+	{
+		const double u = static_cast<double>(i)/(size-1);
+		const double s = sinMin + (1.-sinMin)*u*u;
+		const Vec3d t = atmosphereTransmission.transmission(altitude, std::asin(std::clamp(s, -1., 1.)), depthScale);
+		const double Y = 0.2126*t[0] + 0.7152*t[1] + 0.0722*t[2];
+		if (Y > 1e-7)
+			last = Vec3f(static_cast<float>(t[0]/Y), static_cast<float>(t[1]/Y), static_cast<float>(t[2]/Y));
+		photoExtinctionTints[static_cast<size_t>(i)] = last;
+	}
+	photoExtinctionTextureDirty = true;
+}
+
+void StelSkyDrawer::setFlagPhotoExtinctionColor(bool b)
+{
+	if (b == flagPhotoExtinctionColor)
+		return;
+	flagPhotoExtinctionColor = b;
+	StelApp::immediateSave("viewing/flag_photographic_extinction_color", b);
+	emit flagPhotoExtinctionColorChanged(b);
+}
+
+Vec3f StelSkyDrawer::getPhotoExtinctionTint(const Vec3d& altAzGeometric) const
+{
+	if (!photoExtinctionActive || photoExtinctionTints.size() < 2)
+		return Vec3f(1.f);
+	const double z = altAzGeometric[2] / altAzGeometric.norm();
+	const double sinMin = static_cast<double>(photoExtinctionSinMin);
+	const double u = std::sqrt(std::clamp((z - sinMin)/(1. - sinMin), 0., 1.));
+	const double f = u * static_cast<double>(photoExtinctionTints.size() - 1);
+	const size_t i = qMin(static_cast<size_t>(f), photoExtinctionTints.size() - 2);
+	const float t = static_cast<float>(f - static_cast<double>(i));
+	return photoExtinctionTints[i]*(1.f-t) + photoExtinctionTints[i+1]*t;
+}
+
+Vec3f StelSkyDrawer::photoTintedColor(const Vec3f& srgbColor, const Vec3f& linearTint)
+{
+	const float dim = qMax(srgbColor[0], qMax(srgbColor[1], srgbColor[2]));
+	if (!(dim > 0.f))
+		return srgbColor;
+	const Vec3f lin = srgbToLinear(srgbColor/dim);
+	Vec3f tinted(lin[0]*linearTint[0], lin[1]*linearTint[1], lin[2]*linearTint[2]);
+	const float m = qMax(tinted[0], qMax(tinted[1], tinted[2]));
+	if (!(m > 0.f))
+		return srgbColor;
+	tinted /= m;
+	return Vec3f(encodeSRGB(tinted[0]), encodeSRGB(tinted[1]), encodeSRGB(tinted[2])) * dim;
+}
+
+QByteArray StelSkyDrawer::getPhotoExtinctionShader()
+{
+	return QByteArray(R"(
+uniform sampler2D photoExtinctionTintTex;
+uniform bool photoExtinctionColorEnabled;
+uniform highp float photoExtinctionSinMin;
+// Color of the atmospheric extinction (linear RGB at unit luminance), see StelSkyDrawer::getPhotoExtinctionTint()
+highp vec3 photoExtinctionTint(highp float sinAltitude)
+{
+	if (!photoExtinctionColorEnabled)
+		return vec3(1);
+	highp float u = sqrt(clamp((sinAltitude - photoExtinctionSinMin)/(1. - photoExtinctionSinMin), 0., 1.));
+	return texture2D(photoExtinctionTintTex, vec2((u*255. + 0.5)/256., 0.5)).rgb;
+}
+)");
+}
+
+void StelSkyDrawer::setPhotoExtinctionUniforms(QOpenGLShaderProgram& program, int textureUnit)
+{
+	const bool enabled = photoExtinctionActive && photoExtinctionTints.size() == 256;
+	program.setUniformValue("photoExtinctionColorEnabled", enabled);
+	program.setUniformValue("photoExtinctionSinMin", photoExtinctionSinMin);
+	program.setUniformValue("photoExtinctionTintTex", textureUnit);
+	if (!enabled)
+		return;
+	auto& gl = *QOpenGLContext::currentContext()->functions();
+	gl.glActiveTexture(GL_TEXTURE0 + static_cast<GLenum>(textureUnit));
+	if (!photoExtinctionTexture)
+	{
+		GLuint tex = 0;
+		gl.glGenTextures(1, &tex);
+		photoExtinctionTexture = tex;
+		photoExtinctionTextureDirty = true;
+	}
+	gl.glBindTexture(GL_TEXTURE_2D, photoExtinctionTexture);
+	if (photoExtinctionTextureDirty)
+	{
+		std::vector<float> data(4*photoExtinctionTints.size());
+		for (size_t i=0; i<photoExtinctionTints.size(); ++i)
+		{
+			data[4*i+0] = photoExtinctionTints[i][0];
+			data[4*i+1] = photoExtinctionTints[i][1];
+			data[4*i+2] = photoExtinctionTints[i][2];
+			data[4*i+3] = 1.f;
+		}
+		gl.glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, static_cast<GLsizei>(photoExtinctionTints.size()), 1, 0, GL_RGBA, GL_FLOAT, data.data());
+		gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		photoExtinctionTextureDirty = false;
+	}
+	gl.glActiveTexture(GL_TEXTURE0);
+}
+
 void StelSkyDrawer::setPhotoToneCurve(int curve)
 {
 	curve = qBound(0, curve, 2);
@@ -1998,6 +2154,7 @@ void StelSkyDrawer::resetPhotographicSettings()
 	setFlagPhotoAutoExposure(false);
 	setPhotoMeteringMode(0);
 	setPhotoToneCurve(PhotoToneStandard);
+	setFlagPhotoExtinctionColor(true);
 }
 
 float StelSkyDrawer::getPhotoSceneScale() const

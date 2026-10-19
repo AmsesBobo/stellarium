@@ -25,6 +25,7 @@
 #include "StelTextureTypes.hpp"
 #include "VecMath.hpp"
 #include "StelPhotoMeter.hpp"
+#include "StelAtmosphereTransmission.hpp"
 
 #include <memory>
 #include <QObject>
@@ -109,6 +110,10 @@ class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 	Q_PROPERTY(bool flagPhotoInfoLine READ getFlagPhotoInfoLine WRITE setFlagPhotoInfoLine NOTIFY flagPhotoInfoLineChanged)
 	//! Tone curve of the camera: 0 = linear, 1 = standard (camera JPEG), 2 = film
 	Q_PROPERTY(int photoToneCurve READ getPhotoToneCurve WRITE setPhotoToneCurve NOTIFY photoToneCurveChanged)
+	//! Photographic mode: color the extinction of stars, planets, Sun, Moon, Milky Way and zodiacal light with the
+	//! spectral transmission of the atmosphere model (atmosphere/lightweight-extinction.dat). The amount of the
+	//! extinction still follows the extinction coefficient.
+	Q_PROPERTY(bool flagPhotoExtinctionColor READ getFlagPhotoExtinctionColor WRITE setFlagPhotoExtinctionColor NOTIFY flagPhotoExtinctionColorChanged)
 	//! The exposure time in use (seconds): the set one, or the one chosen by the automatic exposure.
 	//! The change signal is only emitted when the value shown by a camera (1/3-stop steps) changes.
 	Q_PROPERTY(double photoEffectiveExposureTime READ getPhotoEffectiveExposureTime NOTIFY photoEffectiveExposureTimeChanged)
@@ -197,11 +202,23 @@ public:
 	//! @param bVindex the source B-V index (into the private colorTable. This is not the astronomical B-V value.)
 	//! @param checkInScreen whether source in screen should be checked to avoid unnecessary drawing.
 	//! @param twinkleFactor allows height-dependent twinkling. Recommended value: min(1,1-0.9*sin(altitude)). Allowed values [0..1]
+	//! @param photoTint photographic mode: the color of the extinction (see getPhotoExtinctionTint()), or nullptr
 	//! @return true if the source was actually visible and drawn
-	bool drawPointSource(StelPainter* sPainter, const Vec3d& v, const RCMag &rcMag, int bVindex, bool checkInScreen=false, float twinkleFactor=1.0f)
+	bool drawPointSource(StelPainter* sPainter, const Vec3d& v, const RCMag &rcMag, int bVindex, bool checkInScreen=false, float twinkleFactor=1.0f, const Vec3f* photoTint=nullptr)
 	{
 		if (getFlagPhotographicModeActive())
+		{
+			if (photoTint)
+			{
+				// Tinted color, again at unit luminance (the brightness comes from the magnitude)
+				const Vec3f& c = photoColorTable[bVindex];
+				const Vec3f tinted(c[0]*(*photoTint)[0], c[1]*(*photoTint)[1], c[2]*(*photoTint)[2]);
+				const float Y = 0.2126f*tinted[0] + 0.7152f*tinted[1] + 0.0722f*tinted[2];
+				if (Y > 0.f)
+					return drawPhotoPointSource(sPainter, v, rcMag, tinted/Y, 1.f, checkInScreen);
+			}
 			return drawPhotoPointSource(sPainter, v, rcMag, photoColorTable[bVindex], 1.f, checkInScreen);
+		}
 		return drawPointSource(sPainter, v, rcMag, colorTable[bVindex], checkInScreen, twinkleFactor);
 	}
 
@@ -438,6 +455,22 @@ public slots:
 	//! Set the tone curve of the camera (see PhotoToneCurve).
 	void setPhotoToneCurve(int curve);
 	int getPhotoToneCurve() const {return photoToneCurve;}
+	//! Switch the extinction colors of the photographic mode on or off.
+	void setFlagPhotoExtinctionColor(bool b);
+	bool getFlagPhotoExtinctionColor() const {return flagPhotoExtinctionColor;}
+	//! Whether the extinction colors come from the transmission table now: switched on, photographic mode,
+	//! atmosphere with extinction, table loaded, observer on the Earth.
+	bool getFlagPhotoExtinctionColorActive() const {return photoExtinctionActive;}
+	//! The color of the extinction towards the given direction (normalized geometric alt-azimuthal vector):
+	//! linear RGB at unit luminance, so that it changes the color but not the brightness, which comes from
+	//! the magnitude with extinction. (1,1,1) when the extinction colors are not active.
+	Vec3f getPhotoExtinctionTint(const Vec3d& altAzGeometric) const;
+	//! A display (sRGB) color with a linear tint applied, keeping its largest channel (which callers use for dimming).
+	static Vec3f photoTintedColor(const Vec3f& srgbColor, const Vec3f& linearTint);
+	//! GLSL code: vec3 photoExtinctionTint(float sinAltitude), the tint of getPhotoExtinctionTint() for shaders.
+	static QByteArray getPhotoExtinctionShader();
+	//! Set the uniforms of getPhotoExtinctionShader(), with the table bound to the given texture unit.
+	void setPhotoExtinctionUniforms(class QOpenGLShaderProgram& program, int textureUnit);
 	//! Show the line with the camera settings at the top of the screen.
 	void setFlagPhotoInfoLine(bool b);
 	bool getFlagPhotoInfoLine() const {return flagPhotoInfoLine;}
@@ -592,6 +625,7 @@ signals:
 	void photoMeteringModeChanged(int mode);
 	void flagPhotoInfoLineChanged(bool b);
 	void photoToneCurveChanged(int curve);
+	void flagPhotoExtinctionColorChanged(bool b);
 	void photoEffectiveExposureTimeChanged(double seconds);
 
 	void extinctionCoefficientChanged(double coeff);
@@ -897,6 +931,18 @@ private:
 	//! The inverse of the tone curve, tabulated for the annotations: scene values at display values i/(size-1)
 	std::vector<float> photoToneInverseTable;
 	void updatePhotoToneCurve();
+	//! Extinction colors: the transmission table, and the tint as a function of the sine of the altitude
+	//! (photoExtinctionTints[i] at sin(alt) = sinMin + (1-sinMin) (i/(N-1))^2, dense near the horizon)
+	bool flagPhotoExtinctionColor = true;
+	bool photoExtinctionActive = false;
+	StelAtmosphereTransmission atmosphereTransmission;
+	std::vector<Vec3f> photoExtinctionTints;
+	float photoExtinctionSinMin = 0.f;
+	double photoExtinctionAltitude = -1e9;
+	double photoExtinctionCoefficient = -1.;
+	unsigned int photoExtinctionTexture = 0;
+	bool photoExtinctionTextureDirty = true;
+	void updatePhotoExtinction();
 	//! Exposure time chosen by the automatic exposure (seconds)
 	double photoAutoExposureTime = 1./60.;
 	//! The automatic exposure jumps to the metered value at its first reading

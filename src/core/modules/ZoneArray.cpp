@@ -441,6 +441,7 @@ void SpecialZoneArray<Star>::draw(StelPainter* sPainter, int index, bool isInsid
 
 	const Extinction& extinction=core->getSkyDrawer()->getExtinction();
 	const bool withExtinction=drawer->getFlagHasAtmosphere() && extinction.getExtinctionCoefficient()>=0.01f;
+	const bool photoExtinctionColor = withExtinction && drawer->getFlagPhotoExtinctionColorActive();
 	
 	// Allow artificial cutoff:
 	// find the (integer) mag at which is just bright enough to be drawn.
@@ -545,11 +546,19 @@ void SpecialZoneArray<Star>::draw(StelPainter* sPainter, int index, bool isInsid
 
 		int extinctedMagIndex = magIndex;
 		float twinkleFactor=1.0f; // allow height-dependent twinkle.
+		Vec3f photoTint;
+		const Vec3f* photoTintPtr = nullptr;
 		if (withExtinction)
 		{
 			Vec3d altAz(v);
 			altAz.normalize();
 			core->j2000ToAltAzInPlaceNoRefraction(&altAz);
+			if (photoExtinctionColor)
+			{
+				// Photographic mode: the color of the extinction (the atmosphere takes the blue first)
+				photoTint = drawer->getPhotoExtinctionTint(altAz);
+				photoTintPtr = &photoTint;
+			}
 			float extMagShift=0.0f;
 			extinction.forward(altAz, &extMagShift);
 			extinctedMagIndex += static_cast<int>(extMagShift/0.05f); // 0.05 mag MagStepIncrement
@@ -559,7 +568,7 @@ void SpecialZoneArray<Star>::draw(StelPainter* sPainter, int index, bool isInsid
 			twinkleFactor=qMin(1.0, 1.0-0.9*altAz[2]); // suppress twinkling in higher altitudes. Keep 0.1 twinkle amount in zenith.
 		}
 
-		if (drawer->drawPointSource(sPainter, v, *tmpRcmag, s->getBVIndex(), !isInsideViewport, twinkleFactor) && core->getFlagClearSky() && s->hasName() && extinctedMagIndex < maxMagStarName && s->hasComponentID()<=1)
+		if (drawer->drawPointSource(sPainter, v, *tmpRcmag, s->getBVIndex(), !isInsideViewport, twinkleFactor, photoTintPtr) && core->getFlagClearSky() && s->hasName() && extinctedMagIndex < maxMagStarName && s->hasComponentID()<=1)
 		{
 			const float offset = tmpRcmag->radius*0.7f;
 			const Vec3f color = StelSkyDrawer::indexToColor(s->getBVIndex())*0.75f;
