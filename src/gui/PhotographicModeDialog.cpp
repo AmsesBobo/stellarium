@@ -225,6 +225,7 @@ void PhotographicModeDialog::createDialogContent()
 	connectBoolProperty(ui->aberrationsCheckBox,      "StelSkyDrawer.flagPhotoAberrations");
 	connectBoolProperty(ui->lensFlareCheckBox,        "StelSkyDrawer.flagPhotoLensFlare");
 	connectBoolProperty(ui->starTrailsCheckBox,       "StelSkyDrawer.flagPhotoStarTrails");
+	connectBoolProperty(ui->zoomWholeMillimetersCheckBox, "StelSkyDrawer.flagPhotoZoomWholeMillimeters");
 
 	fillComboBoxes();
 

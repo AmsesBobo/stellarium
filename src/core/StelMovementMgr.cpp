@@ -32,6 +32,7 @@
 #include "StelTranslator.hpp"
 #include "StelPainter.hpp"
 #include "StelProjector.hpp"
+#include "StelSkyDrawer.hpp"
 #include "LabelMgr.hpp"
 #include "Planet.hpp"
 #include "Orbit.hpp"
@@ -579,7 +580,11 @@ void StelMovementMgr::handleMouseWheel(QWheelEvent* event)
 	{
 		const double zoomFactor = exp(-mouseZoomSpeed * numSteps / 60.);
 		const float zoomDuration = 0.2f;
-		zoomTo(getAimFov() * zoomFactor, zoomDuration);
+		double aimFov = getAimFov() * zoomFactor;
+		// Photographic mode may step the focal length of the lens in whole millimeters
+		if (const StelSkyDrawer* skyDrawer = core->getSkyDrawer())
+			aimFov = skyDrawer->getPhotoWheelZoomFov(getAimFov(), aimFov);
+		zoomTo(aimFov, zoomDuration);
 	}
 	event->accept();
 }

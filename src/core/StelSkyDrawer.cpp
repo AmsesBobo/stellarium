@@ -156,6 +156,7 @@ StelSkyDrawer::StelSkyDrawer(StelCore* acore) :
 	setPhotoFocusDistance(conf->value("viewing/photographic_focus_distance", 0.0).toDouble());
 	flagPhotoStarTrails = conf->value("viewing/flag_photographic_star_trails", true).toBool();
 	photoSensorFormat = qBound(static_cast<int>(PhotoSensorFullFrame), conf->value("viewing/photographic_sensor_format", static_cast<int>(PhotoSensorFullFrame)).toInt(), static_cast<int>(PhotoSensorAPSC));
+	flagPhotoZoomWholeMillimeters = conf->value("viewing/flag_photographic_zoom_whole_millimeters", false).toBool();
 	photoNoise = qBound(static_cast<int>(PhotoNoiseOff), conf->value("viewing/photographic_noise", static_cast<int>(PhotoNoiseImage)).toInt(), static_cast<int>(PhotoNoisePixel));
 	updatePhotoWhiteBalanceMatrix();
 	{
@@ -2500,6 +2501,43 @@ void StelSkyDrawer::setPhotoFocalLength(double millimeters)
 	core->getMovementMgr()->zoomTo(getPhotoFovForFocalLength(millimeters/1000.), 0.5f);
 }
 
+void StelSkyDrawer::setFlagPhotoZoomWholeMillimeters(bool b)
+{
+	if (b == flagPhotoZoomWholeMillimeters)
+		return;
+	flagPhotoZoomWholeMillimeters = b;
+	// Turning it on sets the lens to the nearest whole focal length right away
+	if (b && getFlagPhotographicModeActive())
+	{
+		const double mm = std::round(1000.*getPhotoFocalLengthForFov(core->getMovementMgr()->getAimFov()));
+		if (mm >= 1.)
+			setPhotoFocalLength(mm);
+	}
+	StelApp::immediateSave("viewing/flag_photographic_zoom_whole_millimeters", b);
+	emit flagPhotoZoomWholeMillimetersChanged(b);
+}
+
+double StelSkyDrawer::getPhotoWheelZoomFov(double currentFov, double targetFov) const
+{
+	if (!flagPhotoZoomWholeMillimeters || !getFlagPhotographicModeActive())
+		return targetFov;
+	const double current = 1000.*getPhotoFocalLengthForFov(currentFov);
+	const double target = 1000.*getPhotoFocalLengthForFov(targetFov);
+	if (!(current > 0.) || !(target > 0.) || !std::isfinite(target))
+		return targetFov;
+	// The nearest whole millimeter, but at least the next one in the direction of the zoom, so that every
+	// step of the wheel (also the small steps of a touchpad) changes the lens. The tolerance keeps a lens
+	// already at a whole focal length (up to rounding) from counting as between two.
+	constexpr double tolerance = 0.01;
+	double mm = std::round(target);
+	if (targetFov < currentFov)       // zoom in: longer focal length
+		mm = qMax(mm, std::floor(current + tolerance) + 1.);
+	else if (targetFov > currentFov)  // zoom out: shorter focal length
+		mm = qMin(mm, std::ceil(current - tolerance) - 1.);
+	mm = qMax(mm, 1.);
+	return getPhotoFovForFocalLength(mm/1000.);
+}
+
 void StelSkyDrawer::setPhotoSensorFormat(int format)
 {
 	const int f = qBound(static_cast<int>(PhotoSensorFullFrame), format, static_cast<int>(PhotoSensorAPSC));
@@ -3582,6 +3620,7 @@ void StelSkyDrawer::resetPhotographicSettings()
 	setFlagPhotoStarTrails(true);
 	setPhotoNoise(PhotoNoiseImage);
 	setPhotoSensorFormat(PhotoSensorFullFrame);
+	setFlagPhotoZoomWholeMillimeters(false);
 }
 
 float StelSkyDrawer::getPhotoSceneScale() const
