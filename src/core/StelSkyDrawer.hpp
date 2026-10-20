@@ -217,6 +217,16 @@ public:
 		float seed = 0.f;        //!< changes every frame (the noise of a new exposure)
 	};
 	PhotoNoiseParams getPhotoNoiseParams(const StelProjector& prj) const;
+	//! The mean luminance <Y> (linear, unit = white) of a texture and the mean of its square <Y^2>, measured on
+	//! the GPU from its mipmaps. <Y^2>/<Y> is the typical luminance of the lit parts, whatever their share of the
+	//! image. Used to calibrate images of nebulae in the photographic mode. Returns false on failure.
+	//! It must be called with the GL context current; it restores the bound framebuffer and viewport.
+	//! @param power the texture values are raised to this power first (see PHOTO_DSO_DESTRETCH)
+	bool photoTextureStatistics(class StelTexture& texture, float power, float& mean, float& meanSquare);
+	//! Images of nebulae are processed pictures: their contrast is compressed ("stretched") to show the faint
+	//! parts. In the photographic mode their values are raised to this power, which gives back a part of the
+	//! real contrast (the core of M42 is some 4 magnitudes brighter than its outer parts, not 2).
+	static constexpr float PHOTO_DSO_DESTRETCH = 1.5f;
 	//! The sensor in use: diagonal and pitch of a photosite (m)
 	double getPhotoSensorDiagonal() const {return photoSensorFormat == PhotoSensorAPSC ? PHOTO_SENSOR_DIAGONAL_APSC : PHOTO_SENSOR_DIAGONAL;}
 	double getPhotoSensorPitch() const {return photoSensorFormat == PhotoSensorAPSC ? PHOTO_SENSOR_PITCH_APSC : PHOTO_SENSOR_PITCH;}
@@ -1204,6 +1214,11 @@ private:
 	int photoNoise = PhotoNoiseImage;
 	//! Sensor format
 	int photoSensorFormat = PhotoSensorFullFrame;
+	//! Measuring the mean of textures (see photoTextureMeanLuminance())
+	std::unique_ptr<class QOpenGLShaderProgram> photoTextureMeanProgram;
+	std::unique_ptr<class QOpenGLFramebufferObject> photoTextureMeanFbo;
+	std::unique_ptr<QOpenGLVertexArrayObject> photoTextureMeanVao;
+	bool photoTextureMeanTried = false;
 	unsigned int photoNoiseFrame = 0;
 	//! Precomputed each frame in update(): star trails are drawn (long enough to show)
 	bool photoTrailsActive = false;

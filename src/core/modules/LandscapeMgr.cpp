@@ -666,6 +666,71 @@ void LandscapeMgr::update(double deltaTime)
 
 	// extra colorful sunrise/sunset management.
 	landscape->setTint(landscapeTint);
+	landscape->setPhotoFogBrightness(-1.f);
+
+	// Photographic mode: the landscape in physical units, so that it follows the exposure like the sky.
+	// The texture is the reflectance of the ground (linear light: a grey card of 18% shows as 0.18 on a
+	// daylight photo exposed for middle grey). Its luminance is reflectance x illuminance / pi, and the
+	// camera records luminance x scene scale. The illuminance comes from
+	// - the Sun and the Moon: their light (magnitude with extinction, color of the extinction), on the
+	//   upright and sloping faces of a landscape, not only on level ground; none when they stand behind it,
+	// - the sky: luminance x pi (this includes twilight, moonlit sky, airglow and light pollution).
+	if (drawer->getFlagPhotographicModeActive())
+	{
+		const double sceneScale = static_cast<double>(drawer->getPhotoSceneScale());
+		const bool withAtmosphere = atmosphere->getFlagShow();
+		// illuminance (lux) of a source of the given magnitude: 2.54e-6 lux for V = 0
+		auto illuminance = [](double mag) { return 2.54e-6 * std::pow(10., -0.4*mag); };
+		// Faces in all directions: about 0.6 sin(h) + 0.3 cos(h) of the light on a surface facing the source
+		auto exposure = [](double sinAlt) {
+			return sinAlt > 0. ? 0.6*sinAlt + 0.3*std::sqrt(1. - sinAlt*sinAlt) : 0.;
+		};
+		Vec3d light(0.);
+		{
+			const double eclipseFactor = ssystem->getSolarEclipseFactor(core).first;
+			const float mag = sun->getVMagnitudeWithExtinction(core, sun->getVMagnitude(core, eclipseFactor));
+			const double direct = illuminance(static_cast<double>(mag)) * exposure(sunPos[2])
+			                      * (1. - static_cast<double>(landscape->getOpacity(sunPos)));
+			const Vec3f tint = drawer->getPhotoExtinctionTint(sunPos);
+			light += Vec3d(tint[0], tint[1], tint[2]) * direct;
+		}
+		if (currentIsEarth)
+		{
+			const float mag = moon->getVMagnitudeWithExtinction(core);
+			const double direct = illuminance(static_cast<double>(mag)) * exposure(moonPos[2])
+			                      * (1. - static_cast<double>(landscape->getOpacity(moonPos)));
+			const Vec3f tint = drawer->getPhotoExtinctionTint(moonPos);
+			light += Vec3d(tint[0], tint[1], tint[2]) * direct;
+		}
+		double skyLight = 0.;
+		if (withAtmosphere)
+		{
+			skyLight = M_PI * static_cast<double>(atmosphere->getAverageLuminance());
+			// blue sky light by day (blue shadows), neutral at night
+			const Vec3d skyTint = sunPos[2] > -0.1 ? Vec3d(0.86, 1.0, 1.26) : Vec3d(1.);
+			light += skyTint * skyLight;
+		}
+		// The values for the shaders: they take sRGB-encoded brightness (colorToShader() decodes it)
+		auto encode = [](double x) {
+			x = qMax(0., x);
+			return static_cast<float>(x <= 0.0031308 ? 12.92*x : 1.055*std::pow(x, 1./2.4) - 0.055);
+		};
+		const Vec3d value = light * (sceneScale/M_PI);
+		const double luminance = 0.2126*value[0] + 0.7152*value[1] + 0.0722*value[2];
+		const float b = encode(luminance);
+		Vec3f tint(1.f);
+		if (b > 0.f)
+			tint.set(encode(value[0])/b, encode(value[1])/b, encode(value[2])/b);
+		// Lights of the illumination layer (windows, street lamps, with their glow painted around them): the
+		// texture averages a small bright lamp over a texel, so a few cd/m^2 for full white (a lamp still
+		// saturates in a long exposure, and the bloom adds its halo)
+		const double lightsLuminance = 3.;
+		const float lights = encode(lightscapeBrightness * lightsLuminance * sceneScale);
+		landscape->setBrightness(static_cast<double>(b), static_cast<double>(lights));
+		landscape->setTint(tint);
+		// The fog near the horizon: lit like the landscape, about a third as bright as a white surface
+		landscape->setPhotoFogBrightness(encode(0.3 * (0.2126*light[0] + 0.7152*light[1] + 0.0722*light[2]) * sceneScale/M_PI));
+	}
 
 	messageFader.update(static_cast<int>(deltaTime*1000));
 }

@@ -46,6 +46,8 @@
 #include <QOpenGLContext>
 #include <QOpenGLVertexArrayObject>
 #include <QOpenGLShaderProgram>
+#include <QOpenGLFramebufferObject>
+#include <QOpenGLExtraFunctions>
 #include <QVector2D>
 #include <QOpenGLBuffer>
 #include <QStringList>
@@ -2576,6 +2578,99 @@ StelSkyDrawer::PhotoNoiseParams StelSkyDrawer::getPhotoNoiseParams(const StelPro
 	p.hotProbability = qMin(1.f, 1.f - std::pow(1.f - PHOTO_HOT_PIXEL_FRACTION, p.sites));
 	p.seed = static_cast<float>(photoNoiseFrame) + 0.5f;
 	return p;
+}
+
+bool StelSkyDrawer::photoTextureStatistics(StelTexture& texture, float power, float& mean, float& meanSquare)
+{
+	mean = meanSquare = -1.f;
+	if (!photoTextureMeanTried)
+	{
+		photoTextureMeanTried = true;
+		// One fragment that averages 32 x 32 samples of a coarse mipmap level (each the mean of many texels)
+		const char* vsrc = R"(
+void main(void)
+{
+	// a triangle that covers the 1 x 1 viewport
+	gl_Position = vec4(float((gl_VertexID & 1) * 4 - 1), float((gl_VertexID >> 1) * 4 - 1), 0., 1.);
+}
+)";
+		const char* fsrc = R"(
+uniform sampler2D tex;
+uniform highp float lod;
+uniform highp float power;
+void main(void)
+{
+	highp vec3 sum = vec3(0.);
+	highp float sum2 = 0.;
+	for (int j = 0; j < 32; ++j)
+		for (int i = 0; i < 32; ++i)
+		{
+			highp vec3 c = pow(max(textureLod(tex, (vec2(float(i), float(j)) + 0.5) / 32., lod).rgb, vec3(0.)), vec3(power));
+			highp float y = dot(c, vec3(0.2126, 0.7152, 0.0722));
+			sum += c;
+			sum2 += y*y;
+		}
+	FRAG_COLOR = vec4(sum / 1024., sum2 / 1024.);
+}
+)";
+		auto program = std::make_unique<QOpenGLShaderProgram>();
+		if (program->addShaderFromSourceCode(QOpenGLShader::Vertex, StelOpenGL::globalShaderPrefix(StelOpenGL::VERTEX_SHADER) + vsrc) &&
+		    program->addShaderFromSourceCode(QOpenGLShader::Fragment, StelOpenGL::globalShaderPrefix(StelOpenGL::FRAGMENT_SHADER) + fsrc) &&
+		    StelPainter::linkProg(program.get(), "photographic texture mean"))
+		{
+			photoTextureMeanProgram = std::move(program);
+			photoTextureMeanFbo.reset(new QOpenGLFramebufferObject(1, 1, QOpenGLFramebufferObject::NoAttachment, GL_TEXTURE_2D, GL_RGBA32F));
+			photoTextureMeanVao.reset(new QOpenGLVertexArrayObject);
+			photoTextureMeanVao->create();
+			if (!photoTextureMeanFbo->isValid())
+				photoTextureMeanProgram.reset();
+		}
+	}
+	if (!photoTextureMeanProgram)
+		return false;
+	int w = 0, h = 0;
+	if (!texture.getDimensions(w, h) || w <= 0 || h <= 0)
+		return false;
+
+	auto& gl = *QOpenGLContext::currentContext()->extraFunctions();
+	GLint previousFbo = 0;
+	GLint viewport[4] = {0, 0, 0, 0};
+	gl.glGetIntegerv(GL_FRAMEBUFFER_BINDING, &previousFbo);
+	gl.glGetIntegerv(GL_VIEWPORT, viewport);
+	GLint previousVao = 0;
+	gl.glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &previousVao);
+	const GLboolean blend = gl.glIsEnabled(GL_BLEND);
+	const GLboolean scissor = gl.glIsEnabled(GL_SCISSOR_TEST);
+	const GLboolean depth = gl.glIsEnabled(GL_DEPTH_TEST);
+	gl.glDisable(GL_BLEND);
+	gl.glDisable(GL_SCISSOR_TEST);
+	gl.glDisable(GL_DEPTH_TEST);
+
+	photoTextureMeanFbo->bind();
+	gl.glViewport(0, 0, 1, 1);
+	texture.bind(0);
+	photoTextureMeanProgram->bind();
+	photoTextureMeanProgram->setUniformValue("tex", 0);
+	photoTextureMeanProgram->setUniformValue("power", power);
+	// The mipmap level where 32 samples cover the image. The squares are of averaged texels, so <Y^2> comes out
+	// somewhat smaller than for the full resolution: good enough for a calibration.
+	photoTextureMeanProgram->setUniformValue("lod", qMax(0.f, std::log2(static_cast<float>(qMax(w, h))/32.f)));
+	photoTextureMeanVao->bind();
+	gl.glDrawArrays(GL_TRIANGLES, 0, 3);
+	gl.glBindVertexArray(static_cast<GLuint>(previousVao));
+	float pixel[4] = {0.f, 0.f, 0.f, 0.f};
+	gl.glReadPixels(0, 0, 1, 1, GL_RGBA, GL_FLOAT, pixel);
+	photoTextureMeanProgram->release();
+
+	gl.glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(previousFbo));
+	gl.glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
+	if (blend) gl.glEnable(GL_BLEND);
+	if (scissor) gl.glEnable(GL_SCISSOR_TEST);
+	if (depth) gl.glEnable(GL_DEPTH_TEST);
+
+	mean = 0.2126f*pixel[0] + 0.7152f*pixel[1] + 0.0722f*pixel[2];
+	meanSquare = pixel[3];
+	return std::isfinite(mean) && std::isfinite(meanSquare);
 }
 
 void StelSkyDrawer::setFlagPhotoStarTrails(bool b)

@@ -105,6 +105,9 @@ public:
 
         //! Set a tint to render the landscape. Useful for low-sun scenes
         void setTint(Vec3f color){landscapeTint=color;}
+	//! Photographic mode: the brightness of the fog layer (as given to colorToShader()), set by the LandscapeMgr.
+	//! A negative value gives the usual fog brightness, which follows the landscape brightness.
+	void setPhotoFogBrightness(float b) {photoFogBrightness = b;}
 
 	//! Returns the current brightness level
 	double getBrightness() const { return static_cast<double>(landscapeBrightness); }
@@ -235,6 +238,9 @@ protected:
 	float landscapeBrightness;  //!< brightness [0..1] to draw the landscape. Computed by the LandscapeMgr.
 	Vec3f landscapeTint;   //!< color tint to draw the landscape (daylight texture only). Nice for sunrise/sunset.
 	float lightScapeBrightness; //!< can be used to draw nightscape texture (e.g. city light pollution), if available. Computed by the LandscapeMgr.
+	float photoFogBrightness = -1.f; //!< photographic mode: brightness of the fog (see setPhotoFogBrightness())
+	//! Brightness of the fog layer (before the faders)
+	float fogBrightness() const {return photoFogBrightness >= 0.f ? photoFogBrightness : 0.1f+0.1f*landscapeBrightness;}
 	bool validLandscape;   //!< was a landscape loaded properly?
 	LinearFader landFader; //!< Used to slowly fade in/out landscape painting.
 	LinearFader fogFader;  //!< Used to slowly fade in/out fog painting.
