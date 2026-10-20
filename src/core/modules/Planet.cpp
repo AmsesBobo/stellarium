@@ -4693,6 +4693,19 @@ void Planet::draw3dModel(StelCore* core, StelProjector::ModelViewTranformP trans
 			photoDraw = true;
 		}
 
+		// Photographic mode: a star trail or a defocused lens spreads the disk. It is drawn into an image of its
+		// own, which is then put into the scene spread out (see StelSkyDrawer::beginPhotoBodyImage()); labels,
+		// lines and markers are drawn elsewhere and stay sharp. Not for OBJ models (they use a shadow buffer).
+		bool photoBodyImage = false;
+		if (photoMode && !(ssm->getFlagUseObjModels() && (!objModelPath.isEmpty() || isMoon)))
+		{
+			double outerRadius = getSpheroidAngularRadius(core)*M_PI_180;
+			if (rings)
+				outerRadius = qMax(outerRadius, std::atan2(rings->getSize()*sphereScale, getJ2000EquatorialPos(core).norm()));
+			const double pixPerRad = static_cast<double>(core->getProjection(StelCore::FrameJ2000)->getPixelPerRadAtCenter());
+			photoBodyImage = skyDrawer->beginPhotoBodyImage(getJ2000EquatorialPos(core), static_cast<float>(outerRadius*pixPerRad));
+		}
+
 		if (!survey || survey.colors->getInterstate() < 1.0f)
 		{
 			bool drawingModel = ssm->getFlagUseObjModels() && (!objModelPath.isEmpty() || isMoon);
@@ -4707,6 +4720,8 @@ void Planet::draw3dModel(StelCore* core, StelProjector::ModelViewTranformP trans
 			drawSurvey(light, core, &sPainter);
 			drawSphere(light, &sPainter, screenRd, true);
 		}
+		if (photoBodyImage)
+			skyDrawer->endPhotoBodyImage();
 		photoDraw = false;
 
 
