@@ -950,13 +950,68 @@ highp float vignetting(highp vec2 fragCoord)
 	return c2 * sqrt(c2) * optical;
 }
 
+// Sensor noise (see StelSkyDrawer::getPhotoNoiseParams()), in electrons of one photosite
+uniform bool photoNoise;
+uniform highp float photoNoiseWhite;   // electrons at saturation (white)
+uniform highp float photoNoiseRead2;   // read noise variance (e^2)
+uniform highp float photoNoiseDark;    // mean dark signal over the exposure (e)
+uniform highp float photoNoiseSites;   // photosites per screen pixel
+uniform highp float photoNoiseHotProb; // probability of a hot photosite in a screen pixel
+uniform highp float photoNoiseHot;     // mean dark signal of a hot photosite (e)
+uniform highp float photoNoiseSeed;    // a new value every frame
+
+// Four pseudo-random numbers in [0, 1) from a position (hash without sine, after D. Hoskins)
+highp vec4 noiseHash(highp vec3 p)
+{
+	highp vec4 p4 = fract(vec4(p.xyzx) * vec4(0.1031, 0.1030, 0.0973, 0.1099));
+	p4 += dot(p4, p4.wzxy + 33.33);
+	return fract((p4.xxyz + p4.yzzw) * p4.zywx);
+}
+// The signal of the sensor (1.0 = saturated) with its noise, per color channel:
+// - photon (shot) noise: the photons arrive at random, Poisson statistics, variance = number of electrons
+// - read noise of the electronics, and the noise of the dark current (thermal electrons)
+// - hot pixels: a few photosites with a much larger dark current, always at the same place on the sensor
+// A color sensor has a Bayer mosaic: of the photosites in a pixel 1/4 see red, 1/2 green, 1/4 blue, so red and
+// blue are noisier. The mean dark signal is removed by the camera (black level from masked photosites).
+highp vec3 sensorNoise(highp vec3 sensor, highp vec2 fragCoord)
+{
+	const highp float TWO_PI = 6.28318530718;
+	highp vec3 sites = max(vec3(0.25, 0.5, 0.25) * photoNoiseSites, vec3(1.));
+	highp vec3 electrons = max(sensor, vec3(0.)) * photoNoiseWhite;
+	// standard deviation of the mean over the photosites of each channel
+	highp vec3 sigma = sqrt((electrons + photoNoiseDark + photoNoiseRead2) / sites);
+	highp vec4 h = noiseHash(vec3(floor(fragCoord), photoNoiseSeed));
+	// Box-Muller: normally distributed numbers. The hash has steps of about 1e-4 (float precision),
+	// so very small values are not reliable: limit them (the tail is cut at about 4.3 sigma)
+	highp float r1 = sqrt(-2. * log(max(h.x, 1e-4)));
+	highp float r2 = sqrt(-2. * log(max(h.z, 1e-4)));
+	highp vec3 g = vec3(r1 * cos(TWO_PI * h.y), r1 * sin(TWO_PI * h.y), r2 * cos(TWO_PI * h.w));
+	highp vec3 e = electrons + sigma * g;
+	// Hot pixels (a fixed pattern of the sensor)
+	highp vec4 hp = noiseHash(vec3(floor(fragCoord), 4099.37));
+	// A small probability from two numbers (one alone is too coarse for that, see above)
+	highp float q = sqrt(photoNoiseHotProb);
+	if (hp.x < q && hp.w < q)
+	{
+		highp float hot = photoNoiseHot * -log(max(hp.y, 1e-4)); // exponential distribution of the dark currents
+		highp vec3 channel = hp.z < 0.25 ? vec3(1., 0., 0.) : (hp.z < 0.75 ? vec3(0., 1., 0.) : vec3(0., 0., 1.));
+		e += channel * hot / sites;
+	}
+	return e / photoNoiseWhite;
+}
+
 highp vec3 cameraResponse(highp vec3 lin)
 {
 	if(!photoMode) return lin;
 	// min(): guard against an overflow to infinity (possible with half floats, as on OpenGL ES);
 	// keep it finite so that mix() below cannot produce NaN (inf*0)
 	highp float v = photoVignetting ? vignetting(gl_FragCoord.xy) : 1.;
-	highp vec3 x = min(max((photoWhiteBalance * lin) * (photoExposure * v), vec3(0)), vec3(1e30));
+	// The light on the sensor (the vignetting takes photons away); in manual mode the exposure compensation
+	// (photoExposure) acts afterwards, like brightening the raw file: it does not add photons
+	highp vec3 sensor = min(max(lin, vec3(0)), vec3(1e30)) * v;
+	if (photoNoise)
+		sensor = sensorNoise(sensor, gl_FragCoord.xy);
+	highp vec3 x = min(max((photoWhiteBalance * sensor) * photoExposure, vec3(0)), vec3(1e30));
 	if (photoToneCurve != 0)
 	{
 		// Each channel separately, as in a camera: bright colored light turns white when it saturates
@@ -991,6 +1046,15 @@ void setPhotoToneUniforms(QOpenGLShaderProgram& program, const StelSkyDrawer& dr
 	program.setUniformValue("photoTone", p.a, p.ad, p.b, p.c);
 	program.setUniformValue("photoToneClip", p.clip);
 	program.setUniformValue("photoWhiteBalance", QMatrix3x3(drawer.getPhotoWhiteBalanceMatrix()));
+	const StelSkyDrawer::PhotoNoiseParams noise = drawer.getPhotoNoiseParams(prj);
+	program.setUniformValue("photoNoise", noise.enabled);
+	program.setUniformValue("photoNoiseWhite", noise.white);
+	program.setUniformValue("photoNoiseRead2", noise.read2);
+	program.setUniformValue("photoNoiseDark", noise.dark);
+	program.setUniformValue("photoNoiseSites", noise.sites);
+	program.setUniformValue("photoNoiseHotProb", noise.hotProbability);
+	program.setUniformValue("photoNoiseHot", noise.hot);
+	program.setUniformValue("photoNoiseSeed", noise.seed);
 }
 }
 
@@ -1219,6 +1283,10 @@ void StelApp::highGraphicsModeDraw()
 	{
 		module->draw(core);
 	}
+
+	// Photographic mode: halo and spikes of the bright bodies, over everything (also the landscape)
+	if (photoMode)
+		core->getSkyDrawer()->drawDeferredPhotoBodies(core);
 
 	// Photographic mode: the lens halo of the whole image (bloom)
 	bool bloomDone = false;

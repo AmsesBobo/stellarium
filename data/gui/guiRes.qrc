@@ -2,6 +2,8 @@
     <qresource prefix="/graphicGui">
         <file>bbtAstroCalc-off.png</file>
         <file>bbtAstroCalc-on.png</file>
+        <file>bbtCamera-off.png</file>
+        <file>bbtCamera-on.png</file>
         <file>bbtHelp-off.png</file>
         <file>bbtHelp-on.png</file>
         <file>bbtLocation-off.png</file>

@@ -35,7 +35,8 @@ class PhotographicModeDialog : public StelDialog
 	Q_OBJECT
 
 public:
-	PhotographicModeDialog();
+	//! @param parent the graphics widget of the main view (needed when created early, as in StelGui::init())
+	PhotographicModeDialog(QObject* parent = nullptr);
 	~PhotographicModeDialog() override;
 
 public slots:
@@ -49,6 +50,8 @@ private slots:
 	void updateCameraWidgets();
 	//! Show the current star image settings in the widgets
 	void updateStarWidgets();
+	//! Show the focal length of the lens for the current field of view
+	void updateFocalLength();
 
 private:
 	Ui_PhotographicModeDialogForm *ui;

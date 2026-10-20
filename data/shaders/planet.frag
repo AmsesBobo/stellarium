@@ -72,6 +72,29 @@ uniform highp vec3 lightDirection;
 #ifdef IS_MOON
     uniform sampler2D earthShadow;
     uniform mediump float eclipsePush;
+
+    // Photographic mode: the light that reaches the Moon in the Earth's shadow, relative to full sunlight.
+    // shadowPos is the coordinate of the shadow texture: 0 at the center of the umbra, 0.594 at its edge,
+    // 1 at the outer edge of the penumbra.
+    // Penumbra: the visible part of the solar disk. Umbra: only light refracted by the Earth's atmosphere,
+    // about 1e-5 at the center and 2e-4 at the edge (10 to 12 magnitudes, as in Planet::getVMagnitude()),
+    // with the color of the shadow texture (copper red, the turquoise band of ozone at the edge).
+    highp vec3 photoEclipseLight(highp float shadowPos)
+    {
+        const highp float UMBRA_EDGE = 0.594;
+        const highp float REFRACTED_CENTER = 1.0e-5;
+        const highp float REFRACTED_EDGE = 2.0e-4;
+        highp vec3 tint = srgbToLinear(texture2D(earthShadow, vec2(min(shadowPos, UMBRA_EDGE), 0.5)).rgb);
+        highp float Y = dot(tint, vec3(0.2126, 0.7152, 0.0722));
+        tint = Y > 0. ? tint / Y : vec3(1.);
+        if (shadowPos < UMBRA_EDGE)
+        {
+            highp float u = shadowPos / UMBRA_EDGE;
+            return exp(mix(log(REFRACTED_CENTER), log(REFRACTED_EDGE), u*u)) * tint;
+        }
+        highp float direct = (shadowPos - UMBRA_EDGE) / (1. - UMBRA_EDGE);
+        return vec3(direct) + REFRACTED_EDGE * (1. - direct) * tint;
+    }
     uniform sampler2D normalMap;
     uniform sampler2D horizonMap;
 
@@ -428,7 +451,12 @@ void main()
         lum *= lum;
     }
     //final lighting color
-    mediump vec4 litColor = vec4(lum * final_illumination * diffuseLight + ambientLight, 1.0);
+    highp vec3 eclipseLight = vec3(final_illumination);
+#ifdef IS_MOON
+    if (photoMode && final_illumination < 0.9999)
+        eclipseLight = photoEclipseLight(final_illumination);
+#endif
+    highp vec4 litColor = vec4(lum * eclipseLight * diffuseLight + ambientLight, 1.0);
 
     //apply texture-colored rimlight
     //litColor.xyz = clamp( litColor.xyz + vec3(outgas), 0.0, 1.0);
@@ -475,11 +503,10 @@ void main()
     }
     finalColor *= litColor;
 #ifdef IS_MOON
-    if(final_illumination < 0.9999)
+    // The legacy, display-referred eclipse coloring (in the photographic mode see photoEclipseLight())
+    if(final_illumination < 0.9999 && !photoMode)
     {
-        // In the photographic mode the colors are far above 1: do the (legacy, display-referred)
-        // mixing on colors scaled to the usual range, and scale back afterwards.
-        highp float photoK = photoMode ? max(max(diffuseLight.r, max(diffuseLight.g, diffuseLight.b)), 1e-30) : 1.0;
+        highp float photoK = 1.0;
         finalColor.rgb /= photoK;
         lowp vec4 shadowColor = texture2D(earthShadow, vec2(final_illumination, 0.5));
         // FIXME: this should be calculated properly in linear space as

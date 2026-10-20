@@ -29,7 +29,6 @@
 #include "AtmosphereDialog.hpp"
 #include "SkylightDialog.hpp"
 #include "TonemappingDialog.hpp"
-#include "PhotographicModeDialog.hpp"
 #include "GreatRedSpotDialog.hpp"
 #include "ConfigureDSOColorsDialog.hpp"
 #include "ConfigureOrbitColorsDialog.hpp"
@@ -132,8 +131,6 @@ ViewDialog::~ViewDialog()
 	skylightDialog = nullptr;
 	delete tonemappingDialog;
 	tonemappingDialog = nullptr;
-	delete photographicModeDialog;
-	photographicModeDialog = nullptr;
 	delete greatRedSpotDialog;
 	greatRedSpotDialog = nullptr;
 	delete configureDSOColorsDialog;
@@ -1987,9 +1984,10 @@ void ViewDialog::showSkylightDialog()
 
 void ViewDialog::showPhotographicModeDialog()
 {
-	if (photographicModeDialog == nullptr)
-		photographicModeDialog = new PhotographicModeDialog();
-	photographicModeDialog->setVisible(true);
+	// The camera settings window belongs to the main window (it has a button on the left bar, see StelGui)
+	StelAction* action = StelApp::getInstance().getStelActionManager()->findAction("actionShow_PhotographicMode_Window_Global");
+	if (action)
+		action->setChecked(true);
 }
 
 void ViewDialog::showTonemappingDialog()

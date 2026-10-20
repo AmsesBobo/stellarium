@@ -95,8 +95,9 @@ class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 	Q_PROPERTY(double photoSeeing READ getPhotoSeeing WRITE setPhotoSeeing NOTIFY photoSeeingChanged)
 	//! Fraction of a star's light that the lens scatters into a wide, faint halo (0 ... 0.3).
 	Q_PROPERTY(double photoHaloStrength READ getPhotoHaloStrength WRITE setPhotoHaloStrength NOTIFY photoHaloStrengthChanged)
-	//! Number of diffraction spikes on stars (0 = none, 4, 6 or 8).
-	Q_PROPERTY(int photoSpikeCount READ getPhotoSpikeCount WRITE setPhotoSpikeCount NOTIFY photoSpikeCountChanged)
+	//! Number of blades of the lens diaphragm (0 = round aperture, 4 ... 9). The straight edges of the stopped
+	//! down aperture make diffraction spikes: as many as blades for an even number, twice as many for an odd one.
+	Q_PROPERTY(int photoApertureBlades READ getPhotoApertureBlades WRITE setPhotoApertureBlades NOTIFY photoApertureBladesChanged)
 	//! Fraction of a star's light that goes into the diffraction spikes (0 ... 0.1).
 	Q_PROPERTY(double photoSpikeStrength READ getPhotoSpikeStrength WRITE setPhotoSpikeStrength NOTIFY photoSpikeStrengthChanged)
 	//! Photographic mode: apply the lens halo to the whole image ("bloom") instead of drawing it with each star.
@@ -127,6 +128,21 @@ class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 	Q_PROPERTY(bool flagPhotoAberrations READ getFlagPhotoAberrations WRITE setFlagPhotoAberrations NOTIFY flagPhotoAberrationsChanged)
 	//! Lens: strength of the off-axis aberrations (1 = a typical fast lens; 0 ... 3)
 	Q_PROPERTY(double photoAberrationStrength READ getPhotoAberrationStrength WRITE setPhotoAberrationStrength NOTIFY photoAberrationStrengthChanged)
+	//! Lens: reflections inside the lens ("ghosts") of bright sources such as the Sun and the Moon
+	Q_PROPERTY(bool flagPhotoLensFlare READ getFlagPhotoLensFlare WRITE setFlagPhotoLensFlare NOTIFY flagPhotoLensFlareChanged)
+	//! Lens: strength of the reflections (1 = single-layer coated lens, less for multi-coating; 0 ... 3)
+	Q_PROPERTY(double photoLensFlareStrength READ getPhotoLensFlareStrength WRITE setPhotoLensFlareStrength NOTIFY photoLensFlareStrengthChanged)
+	//! Lens: the distance the lens is focused at (meters). 0 = infinity (stars sharp). A negative value means
+	//! the focus ring turned beyond the infinity mark, by the same amount (dioptres) as focusing at that distance.
+	Q_PROPERTY(double photoFocusDistance READ getPhotoFocusDistance WRITE setPhotoFocusDistance NOTIFY photoFocusDistanceChanged)
+	//! Star trails: the camera stands on a fixed tripod, so during the exposure the stars and planets move
+	//! with the diurnal motion and draw arcs around the celestial pole
+	Q_PROPERTY(bool flagPhotoStarTrails READ getFlagPhotoStarTrails WRITE setFlagPhotoStarTrails NOTIFY flagPhotoStarTrailsChanged)
+	//! Sensor noise (see PhotoNoise): off, as in the whole picture on the screen, or as in a 100% view of the sensor
+	Q_PROPERTY(int photoNoise READ getPhotoNoise WRITE setPhotoNoise NOTIFY photoNoiseChanged)
+	//! Sensor format (see PhotoSensorFormat): full frame or APS-C. It sets the focal length for the field of view
+	//! (and so the depth of field), and the light the sensor collects for the picture (and so the noise).
+	Q_PROPERTY(int photoSensorFormat READ getPhotoSensorFormat WRITE setPhotoSensorFormat NOTIFY photoSensorFormatChanged)
 	//! The exposure time in use (seconds): the set one, or the one chosen by the automatic exposure.
 	//! The change signal is only emitted when the value shown by a camera (1/3-stop steps) changes.
 	Q_PROPERTY(double photoEffectiveExposureTime READ getPhotoEffectiveExposureTime NOTIFY photoEffectiveExposureTimeChanged)
@@ -143,6 +159,8 @@ class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 public:
 	//! The camera pass of the photographic mode is linear up to this value, then rolls off smoothly towards 1.0.
 	static constexpr float PHOTO_SHOULDER_KNEE = 0.8f;
+	//! Most lines of diffraction spikes through a star (9 blades: 18 spikes)
+	static constexpr int PHOTO_MAX_SPIKE_LINES = 9;
 	//! Middle grey of the reflected-light meter calibration (scene units)
 	static constexpr double PHOTO_MIDDLE_GREY = 0.18;
 	//! Range of exposure times of the automatic exposure (seconds), as in a camera
@@ -164,6 +182,48 @@ public:
 		PhotoWBCustom = 7,      //!< photoWhiteBalanceKelvin
 		PhotoWBNeutral = 8      //!< D65: no correction, the colors as rendered (display white)
 	};
+	//! Sensor noise: how the noise is shown
+	enum PhotoNoise {
+		PhotoNoiseOff = 0,    //!< no noise
+		PhotoNoiseImage = 1,  //!< the whole picture on the screen: a screen pixel collects the light of all photosites in it
+		PhotoNoisePixel = 2   //!< a 100% view ("pixel peeping"): one photosite per screen pixel
+	};
+	//! Sensor model (a modern full frame sensor of 24 megapixels): pitch of a photosite (m), its full well
+	//! (electrons) at the base ISO, the read noise before and after the ISO amplifier (electrons, the latter
+	//! at the base ISO), dark current (electrons per second at 20 degrees C, doubling every 6 degrees),
+	//! hot pixels (fraction of the photosites and their mean dark current), warming of the sensor above the air.
+	//! For another pitch (APS-C) the full well and the dark current scale with the area of the photosite,
+	//! the read noise stays the same per photosite.
+	static constexpr double PHOTO_SENSOR_PITCH = 6.0e-6;
+	static constexpr float PHOTO_SENSOR_FULL_WELL = 50000.f;
+	static constexpr float PHOTO_SENSOR_BASE_ISO = 100.f;
+	static constexpr float PHOTO_READ_NOISE_UPSTREAM = 1.5f;
+	static constexpr float PHOTO_READ_NOISE_DOWNSTREAM = 15.f;
+	static constexpr float PHOTO_DARK_CURRENT = 0.05f;
+	static constexpr float PHOTO_DARK_DOUBLING = 6.f;
+	static constexpr float PHOTO_HOT_PIXEL_FRACTION = 2e-5f;
+	static constexpr float PHOTO_HOT_PIXEL_CURRENT = 20.f;
+	static constexpr float PHOTO_SENSOR_WARMING = 4.f;
+	//! What the camera stage needs for the noise (see StelApp)
+	struct PhotoNoiseParams
+	{
+		bool enabled = false;
+		float white = 1.f;       //!< electrons of one photosite at saturation (white) at the current ISO
+		float read2 = 0.f;       //!< variance of the read noise of one photosite (electrons^2)
+		float dark = 0.f;        //!< mean dark signal of one photosite over the exposure (electrons)
+		float sites = 1.f;       //!< photosites per screen pixel
+		float hotProbability = 0.f; //!< probability that a screen pixel holds a hot photosite
+		float hot = 0.f;         //!< mean dark signal of a hot photosite over the exposure (electrons)
+		float seed = 0.f;        //!< changes every frame (the noise of a new exposure)
+	};
+	PhotoNoiseParams getPhotoNoiseParams(const StelProjector& prj) const;
+	//! The sensor in use: diagonal and pitch of a photosite (m)
+	double getPhotoSensorDiagonal() const {return photoSensorFormat == PhotoSensorAPSC ? PHOTO_SENSOR_DIAGONAL_APSC : PHOTO_SENSOR_DIAGONAL;}
+	double getPhotoSensorPitch() const {return photoSensorFormat == PhotoSensorAPSC ? PHOTO_SENSOR_PITCH_APSC : PHOTO_SENSOR_PITCH;}
+	//! The focal length (m) of a lens that gives the field of view fov (degrees, as StelMovementMgr) on the sensor in use
+	double getPhotoFocalLengthForFov(double fov) const;
+	//! The field of view (degrees, as StelMovementMgr) of a lens of the focal length f (m) on the sensor in use
+	double getPhotoFovForFocalLength(double f) const;
 	//! Lens model: the lens is wide open at this f-number (optical vignetting is strongest there)
 	static constexpr float PHOTO_LENS_MAX_APERTURE = 1.4f;
 	//! Optical vignetting: offset of the pupil image against the lens barrel in the corner of the frame,
@@ -173,6 +233,24 @@ public:
 	static constexpr float PHOTO_COMA_LENGTH = 0.006f;
 	//! Astigmatism: length of the line image in the corner, wide open, as a fraction of the diagonal (scales with 1/N)
 	static constexpr float PHOTO_ASTIGMATISM_LENGTH = 0.004f;
+	//! Sensor formats
+	enum PhotoSensorFormat {
+		PhotoSensorFullFrame = 0, //!< 36 x 24 mm
+		PhotoSensorAPSC = 1       //!< 23.5 x 15.6 mm (crop factor 1.53, as Nikon, Sony, Fujifilm, Pentax)
+	};
+	//! Sensor diagonals (m). The diagonal of the view is the diagonal of the sensor, which gives the focal length
+	//! of the lens: f = (sensor diagonal) x (focal length in pixels) / (diagonal of the view in pixels).
+	static constexpr double PHOTO_SENSOR_DIAGONAL = 0.043267;      //!< full frame
+	static constexpr double PHOTO_SENSOR_DIAGONAL_APSC = 0.028207; //!< APS-C
+	//! Both sensors have 24 megapixels (6000 x 4000): pitch of a photosite (m)
+	static constexpr double PHOTO_SENSOR_PITCH_APSC = 3.92e-6;
+	//! Focus: the closest focus distance of the lens (meters)
+	static constexpr double PHOTO_FOCUS_MIN_DISTANCE = 0.3;
+	//! Focus: how far the focus ring turns beyond the infinity mark, as a distance (meters, see photoFocusDistance)
+	static constexpr double PHOTO_FOCUS_BEYOND_INFINITY = 30.;
+	//! Focus: brightness change from the center to the edge of a defocused star image from the spherical
+	//! aberration of the lens, wide open (it scales with 1/N^2 and the aberration strength)
+	static constexpr float PHOTO_SPHERICAL_ABERRATION = 0.6f;
 	//! The lens model for the given projection: center of the image (optical axis), half diagonal and focal length
 	//! (all in window pixels), relative pupil size (1 = wide open) and the aberration lengths in the corner (pixels)
 	struct PhotoLens
@@ -184,6 +262,12 @@ public:
 		float coma = 0.f;
 		float astigmatism = 0.f;
 		bool vignetting = false;
+		//! Defocus: radius of the blur disk of a star (the image of the aperture), pixels. Positive when the
+		//! lens is focused nearer than infinity (the image of the star lies in front of the sensor), negative
+		//! beyond infinity (behind the sensor). 0 = in focus.
+		float defocus = 0.f;
+		//! Defocus: relative brightness change from the center to the edge of the blur disk (spherical aberration)
+		float sphericalAberration = 0.f;
 	};
 	PhotoLens getPhotoLens(const StelProjector& prj) const;
 	//! Time constant of the smooth adaptation of the automatic white balance (seconds)
@@ -489,9 +573,11 @@ public slots:
 	//! Set the fraction of a star's light in the lens halo (0 ... 0.3).
 	void setPhotoHaloStrength(double fraction);
 	double getPhotoHaloStrength() const {return static_cast<double>(photoHaloFraction);}
-	//! Set the number of diffraction spikes (0, 4, 6 or 8; other values are rounded to these).
-	void setPhotoSpikeCount(int count);
-	int getPhotoSpikeCount() const {return photoSpikeCount;}
+	//! Set the number of diaphragm blades (0 = round aperture, 4 ... 9).
+	void setPhotoApertureBlades(int blades);
+	int getPhotoApertureBlades() const {return photoApertureBlades;}
+	//! Number of diffraction spikes the diaphragm makes (0, or the blades, or twice the blades if odd)
+	int getPhotoSpikeCount() const {return 2*getPhotoSpikeLines();}
 	//! Set the fraction of a star's light in the diffraction spikes (0 ... 0.1).
 	void setPhotoSpikeStrength(double fraction);
 	double getPhotoSpikeStrength() const {return static_cast<double>(photoSpikeFraction);}
@@ -511,6 +597,30 @@ public slots:
 	int getPhotoToneCurve() const {return photoToneCurve;}
 	void setFlagPhotoVignetting(bool b);
 	bool getFlagPhotoVignetting() const {return flagPhotoVignetting;}
+	void setFlagPhotoLensFlare(bool b);
+	bool getFlagPhotoLensFlare() const {return flagPhotoLensFlare;}
+	void setPhotoLensFlareStrength(double s);
+	double getPhotoLensFlareStrength() const {return static_cast<double>(photoLensFlareStrength);}
+	//! Set the distance the lens is focused at (meters; 0 = infinity, negative = beyond infinity, see photoFocusDistance)
+	void setPhotoFocusDistance(double meters);
+	double getPhotoFocusDistance() const {return photoFocusDistance;}
+	void setFlagPhotoStarTrails(bool b);
+	bool getFlagPhotoStarTrails() const {return flagPhotoStarTrails;}
+	//! Set how the sensor noise is shown (see PhotoNoise)
+	void setPhotoNoise(int mode);
+	int getPhotoNoise() const {return photoNoise;}
+	//! The focal length (meters) of the camera lens with the field of the given projection (on the sensor in use)
+	double getPhotoFocalLength(const StelProjector& prj) const;
+	//! Set the sensor format (see PhotoSensorFormat). The lens stays: the field of view changes as when the lens
+	//! is put on the other camera.
+	void setPhotoSensorFormat(int format);
+	int getPhotoSensorFormat() const {return photoSensorFormat;}
+	//! Zoom the view to the field of a lens of the given focal length (millimeters) on the sensor in use
+	void setPhotoFocalLength(double millimeters);
+	//! Photographic mode: a bright body whose light can be reflected inside the lens (see StelPhotoLensFlare).
+	//! It may lie outside the frame. Collected while drawing, the ghosts are drawn by drawDeferredPhotoBodies().
+	//! @param v position (J2000 frame), @param mag magnitude (with extinction and landscape), @param color display color
+	void addPhotoGhostSource(const Vec3d& v, float mag, const Vec3f& color);
 	void setFlagPhotoAberrations(bool b);
 	bool getFlagPhotoAberrations() const {return flagPhotoAberrations;}
 	void setPhotoAberrationStrength(double s);
@@ -557,6 +667,8 @@ public slots:
 	static double photoNominalExposureTime(double seconds);
 	//! Text of an exposure time, e.g. "1/125 s", "2.5 s" or "4 min".
 	static QString photoExposureTimeText(double seconds);
+	//! A focus distance as on the scale of a lens (see photoFocusDistance)
+	static QString photoFocusDistanceText(double meters);
 	//! Automatic exposure: use a reading of the exposure meter. Called by StelApp once per frame.
 	//! @param deltaTime time since the last call, seconds (for the smooth adaptation)
 	void applyPhotoMeterReading(const StelPhotoMeter::Reading& reading, double deltaTime);
@@ -579,12 +691,16 @@ public slots:
 	static float getPhotoHaloBeta() {return PHOTO_HALO_BETA;}
 	//! Fraction of the light that stays in the PSF core (the rest goes into the halo and the spikes)
 	float getPhotoCoreFraction() const;
-	//! Fraction of the light in the diffraction spikes (0 without spikes)
-	float getPhotoSpikeFractionEffective() const {return photoSpikeCount > 0 ? photoSpikeFraction : 0.f;}
-	//! Diffraction spikes: number of lines (spikes/2), direction of the first line on the screen (radians), length scale (pixels)
-	int getPhotoSpikeLines() const {return photoSpikeCount/2;}
+	//! Fraction of the light in the diffraction spikes (0 without spikes). It depends on the aperture:
+	//! wide open the diaphragm is round and makes no spikes; its edges become straight when stopping down.
+	float getPhotoSpikeFractionEffective() const;
+	//! How much the diaphragm is a polygon with straight edges: 0 wide open, 1 two stops down and more
+	float getPhotoApertureStraightness() const;
+	//! Diffraction spikes: number of lines through a star (spikes/2), direction of the first line on the
+	//! screen (radians), length scale (pixels; it grows with the f-number like the diffraction pattern)
+	int getPhotoSpikeLines() const {return photoApertureBlades <= 0 ? 0 : ((photoApertureBlades % 2) ? photoApertureBlades : photoApertureBlades/2);}
 	static float getPhotoSpikeAngle() {return PHOTO_SPIKE_ANGLE;}
-	float getPhotoSpikeLength() const {return photoCoreAlpha*PHOTO_SPIKE_LENGTH_FACTOR;}
+	float getPhotoSpikeLength() const;
 	//! Photographic mode: weight of the PSF core for a body whose disk has the given radius in pixels.
 	//! 1 for an unresolved body (drawn like a star), falling to 0 as the disk becomes resolved.
 	float getPhotoCoreWeight(float diskPixRadius) const;
@@ -599,6 +715,9 @@ public slots:
 	//! @param illuminatedFraction for a body in phases: its light comes from the lit part, so the image is
 	//!        spread around a smaller disk shifted towards the Sun (no glow around the dark limb)
 	//! @param sunDirection direction towards the Sun in the sky (J2000, perpendicular to v), used with illuminatedFraction
+	//! Draw the halo and the spikes of the bright bodies of this frame (see drawPhotoBody()). StelApp calls
+	//! this after all modules, so that the lens effects also cover the landscape.
+	void drawDeferredPhotoBodies(StelCore* core);
 	bool drawPhotoBody(StelPainter* sPainter, const Vec3d& v, float diskPixRadius, float mag, const Vec3f& color,
 	                   float illuminatedFraction = 1.f, const Vec3d& sunDirection = Vec3d(0.));
 
@@ -695,7 +814,7 @@ signals:
 	void photoPsfMinFwhmChanged(double pixels);
 	void photoSeeingChanged(double arcsec);
 	void photoHaloStrengthChanged(double fraction);
-	void photoSpikeCountChanged(int count);
+	void photoApertureBladesChanged(int blades);
 	void photoSpikeStrengthChanged(double fraction);
 	void flagPhotoBloomChanged(bool b);
 	void flagPhotoAutoExposureChanged(bool b);
@@ -707,6 +826,12 @@ signals:
 	void photoWhiteBalanceKelvinChanged(double kelvin);
 	void flagPhotoVignettingChanged(bool b);
 	void flagPhotoAberrationsChanged(bool b);
+	void flagPhotoLensFlareChanged(bool b);
+	void photoLensFlareStrengthChanged(double s);
+	void photoFocusDistanceChanged(double meters);
+	void flagPhotoStarTrailsChanged(bool b);
+	void photoNoiseChanged(int mode);
+	void photoSensorFormatChanged(int format);
 	void photoAberrationStrengthChanged(double s);
 	void photoEffectiveExposureTimeChanged(double seconds);
 
@@ -893,8 +1018,11 @@ private:
 		float radius;   //!< sprite radius in pixels (the profile fades out smoothly towards it)
 		Vec4f shape;    //!< x: disk radius (0 for a star), y: weight of the PSF core, z: radius of a disk with the area of the lit part, w: cos(phase angle)
 		Vec2f sunDir;   //!< direction towards the Sun on the screen (bodies in phases)
+		Vec4f trail;    //!< star trail: offsets (pixels) of the image at the start (xy) and the end (zw) of the exposure from its position at mid-exposure
+		Vec3f trailStart; //!< star trail: light at the start of the exposure relative to mid-exposure (extinction: brightness and color), per channel
+		Vec3f trailEnd;   //!< the same at the end of the exposure
 	};
-	static_assert(sizeof(PhotoStarInstance) == 48, "PhotoStarInstance must be tightly packed");
+	static_assert(sizeof(PhotoStarInstance) == 88, "PhotoStarInstance must be tightly packed");
 	//! Point sources per batch in the photographic mode. Far more stars are visible on a photo
 	//! than to the eye, so batches are large to keep the number of draw calls low.
 	constexpr static unsigned int maxPhotoPointSources=16384;
@@ -918,6 +1046,9 @@ private:
 		int radius;
 		int shape;
 		int sunDir;
+		int trail;
+		int trailStart;
+		int trailEnd;
 		int coreAlpha;
 		int coreBeta;
 		int haloAlpha;
@@ -937,9 +1068,27 @@ private:
 		int lensCorner;
 		int comaLength;
 		int astigLength;
+		int defocusRadius;
+		int defocusArea;
+		int defocusSign;
+		int defocusSA;
+		int defocusEdge;
+		int coreFwhm;
+		int apertureBlades;
+		int apertureStraightness;
+		int apertureRotation;
+		int lensPupil;
+		int lensShift;
+		int lensVignetting;
 	} photoStarShaderVars = {};
 	void initPhotoStarRendering();
-	void flushPhotoPointSources(StelPainter* sPainter);
+	//! What a batch of the photographic point sources draws: everything, only the PSF core
+	//! (bright bodies, in their place among the other objects) or only the halo and the spikes
+	//! (bright bodies, after the landscape: they arise in the lens and lie over everything)
+	enum PhotoBatchMode { PhotoBatchAll, PhotoBatchCoreOnly, PhotoBatchWingsOnly };
+	void flushPhotoPointSources(StelPainter* sPainter, PhotoBatchMode mode = PhotoBatchAll);
+	//! Halo and spikes of bright bodies, drawn by drawDeferredPhotoBodies()
+	std::vector<PhotoStarInstance> photoDeferredBodies;
 
 	//! Precomputed each frame in update(): total recorded light (linear units) of a magnitude-0 star
 	float photoFluxMag0 = 0.f;
@@ -959,12 +1108,14 @@ private:
 	float photoHaloFraction = 0.05f;
 	bool flagPhotoBloom = true;
 	static constexpr float PHOTO_HALO_WIDTH_FACTOR = 4.f;
-	//! Diffraction spikes: number of spikes (0 = none), fraction of the light in them
-	int photoSpikeCount = 6;
+	//! Diffraction spikes: blades of the diaphragm (0 = round), fraction of the light in the spikes (stopped down)
+	int photoApertureBlades = 6;
 	float photoSpikeFraction = 0.02f;
-	//! Spike profile: width (sigma) and core length of the 1/r^2 falloff, relative to the core alpha
+	//! Spike profile: width (sigma) and core length of the 1/r^2 falloff, relative to the core alpha.
+	//! The core length is for f/8 (PHOTO_SPIKE_REFERENCE_APERTURE) and scales with the f-number.
 	static constexpr float PHOTO_SPIKE_WIDTH_FACTOR = 0.5f;
 	static constexpr float PHOTO_SPIKE_LENGTH_FACTOR = 2.f;
+	static constexpr float PHOTO_SPIKE_REFERENCE_APERTURE = 8.f;
 	//! Orientation of the spikes on the sensor (one spike points straight up)
 	static constexpr float PHOTO_SPIKE_ANGLE = static_cast<float>(M_PI/2.);
 	static constexpr float PHOTO_HALO_BETA = 1.5f;
@@ -1042,6 +1193,50 @@ private:
 	bool flagPhotoVignetting = true;
 	bool flagPhotoAberrations = true;
 	float photoAberrationStrength = 1.f;
+	//! Lens reflections
+	bool flagPhotoLensFlare = true;
+	float photoLensFlareStrength = 1.f;
+	//! Focus distance (meters; 0 = infinity, negative = beyond infinity)
+	double photoFocusDistance = 0.;
+	//! Star trails
+	bool flagPhotoStarTrails = true;
+	//! Sensor noise
+	int photoNoise = PhotoNoiseImage;
+	//! Sensor format
+	int photoSensorFormat = PhotoSensorFullFrame;
+	unsigned int photoNoiseFrame = 0;
+	//! Precomputed each frame in update(): star trails are drawn (long enough to show)
+	bool photoTrailsActive = false;
+	//! Precomputed each frame in update(): angle the sky turns during the exposure (radians), the axis of the
+	//! diurnal rotation in view (eye) coordinates, and the rotations from mid-exposure to its start and end
+	double photoTrailAngle = 0.;
+	Vec3d photoTrailAxisView;
+	Mat4d photoTrailToStart;
+	Mat4d photoTrailToEnd;
+	//! Precomputed each frame in update(): view (eye) coordinates -> geometric altitude/azimuth, for the extinction along the trails
+	StelProjector::ModelViewTranformP photoTrailAltAzTransform;
+	bool photoTrailExtinction = false;
+	//! The light of a source in the given direction (view coordinates) after the extinction, relative to its light
+	//! in the direction viewRef: brightness and color (photographic extinction color), per channel
+	Vec3f photoTrailExtinctionFactor(const Vec3d& view, const Vec3d& viewRef) const;
+	//! Star trail of a point source at v (frame of the projector) whose image lies at win: the offsets of the image
+	//! at the start and the end of the exposure (see PhotoStarInstance::trail). Returns its length (pixels), 0 = none.
+	//! A source whose trailed image cannot show (its light is spread too thinly) gives -1.
+	//! @param flux total recorded light of the source, @param diskRadius radius of its disk (pixels; a trail
+	//! shorter than the disk is not drawn)
+	float computePhotoTrail(const StelProjector& prj, const Vec3d& v, const Vec3d& win, float flux, float diskRadius, PhotoStarInstance& instance) const;
+	//! Area of the image of the aperture (disk or polygon of the blades) in units of its radius squared
+	float getPhotoApertureShapeArea() const;
+	//! Visibility and size of the core of a defocused point source (or of a small body) of the given core flux:
+	//! the radius of its blur disk is R (pixels). Returns the sprite radius needed, 0 if it cannot show.
+	float photoDefocusCoreRadius(float coreFlux, float R) const;
+	//! FWHM of the PSF core (pixels)
+	float photoCoreFwhm() const {return 2.f*photoCoreAlpha*std::sqrt(std::pow(2.f, 1.f/PHOTO_CORE_BETA) - 1.f);}
+	//! Half width of the blurred edge of a defocused star image (pixels)
+	float photoDefocusEdge() const {return qMax(0.5f, 0.6f*photoCoreFwhm());}
+	struct PhotoGhostSource { Vec3d v; float mag; Vec3f color; };
+	std::vector<PhotoGhostSource> photoGhostSources;
+	std::unique_ptr<class StelPhotoLensFlare> photoLensFlare;
 	//! The lens of the current frame (window coordinates), for the sprite sizes
 	PhotoLens photoLensCache;
 	bool photoLensAberrations = false;

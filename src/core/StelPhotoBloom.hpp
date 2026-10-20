@@ -54,7 +54,7 @@ public:
 	//! @param haloBeta Moffat beta of the halo
 	//! @param vao a vertex array object with a full screen quad (2D vertices in [-1,1], attribute 0)
 	//! @return true if the halo image (see haloTexture()) was computed
-	//! @param spikeLines number of lines through each point (spikes/2); 0 for no spikes
+	//! @param spikeLines number of lines through each point (spikes/2, at most 9); 0 for no spikes
 	//! @param spikeAngle direction of the first line on the screen, radians
 	//! @param spikeLength length scale l of the spike profile, pixels
 	bool process(GLuint sceneTexture, int w, int h, float haloAlpha, float haloBeta,

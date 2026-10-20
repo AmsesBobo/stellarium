@@ -321,7 +321,8 @@ Planet::Planet(const QString& englishName,
 		QString horizonMapFile = StelFileMgr::findFile("textures/"+horizonMapName, StelFileMgr::File);
 		if (!horizonMapFile.isEmpty())
 		{
-			horizonMap = texMan.createTextureThread(horizonMapFile, StelTexture::Params().enableMipmapGen().setWrapMode(GL_REPEAT), false);
+			const auto params = StelTexture::Params().enableMipmapGen().setWrapMode(GL_REPEAT).useLinearSRGB();
+			horizonMap = texMan.createTextureThread(horizonMapFile, params, false);
 			horizonMapFileOrig = horizonMapFile;
 		}
 	}
@@ -391,10 +392,11 @@ void Planet::resetTextures()
 
 	// restore normal map
 	if (!normalMapFileOrig.isEmpty())
-		normalMap = texMan.createTextureThread(normalMapFileOrig, StelTexture::Params().enableMipmapGen().setWrapMode(GL_REPEAT));
+		normalMap = texMan.createTextureThread(normalMapFileOrig, StelTexture::Params().enableMipmapGen().setWrapMode(GL_REPEAT).useLinearSRGB());
 
+	// The normal and horizon maps hold data, not colors: no sRGB decoding (as in the constructor)
 	if (!horizonMapFileOrig.isEmpty())
-		horizonMap = texMan.createTextureThread(horizonMapFileOrig, StelTexture::Params().enableMipmapGen().setWrapMode(GL_REPEAT));
+		horizonMap = texMan.createTextureThread(horizonMapFileOrig, StelTexture::Params().enableMipmapGen().setWrapMode(GL_REPEAT).useLinearSRGB());
 }
 
 void Planet::replaceTexture(const QString &texName)
@@ -3939,7 +3941,10 @@ void Planet::draw(StelCore* core, float maxMagLabels, const QFont& planetNameFon
 	const StelProjectorP prj = core->getProjection(transfo);
 	const double screenRd = (getAngularRadius(core))*M_PI_180*static_cast<double>(prj->getPixelPerRadAtCenter());
 	// enlarge if this is sun with its huge halo (in the photographic mode, its diffraction spikes can cross the screen)
-	const double viewportBufferSz = englishName==L1S("Sun") ? screenRd+(core->getSkyDrawer()->getFlagPhotographicModeActive() ? 2000. : 125.) : screenRd;
+	// In the photographic mode the Sun and the Moon can also make reflections in the lens from outside the frame
+	const bool photoActive = core->getSkyDrawer()->getFlagPhotographicModeActive();
+	const double viewportBufferSz = englishName==L1S("Sun") ? screenRd+(photoActive ? 2000. : 125.)
+	                              : (photoActive && englishName==L1S("Moon")) ? screenRd+2000. : screenRd;
 	const double viewport_left = prj->getViewportPosX();
 	const double viewport_bottom = prj->getViewportPosY();
 	const double viewport_width = prj->getViewportWidth();
@@ -4747,6 +4752,9 @@ void Planet::draw3dModel(StelCore* core, StelProjector::ModelViewTranformP trans
 			StelPainter sPainter(core->getProjection(StelCore::FrameJ2000));
 			const Vec3f color = StelSkyDrawer::photoTintedColor(haloColor, photoExtinctionTint);
 			const Vec3d pos = getJ2000EquatorialPos(core);
+			// Bright bodies may make reflections inside the lens, even from outside the frame
+			if (photoMag < 3.f)
+				skyDrawer->addPhotoGhostSource(pos, photoMag, color);
 			if (isSun)
 				skyDrawer->drawPhotoBody(&sPainter, pos, photoDiskPixRadius, photoMag, color);
 			else

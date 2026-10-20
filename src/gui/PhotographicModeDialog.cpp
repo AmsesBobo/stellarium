@@ -23,13 +23,39 @@
 #include "StelApp.hpp"
 #include "StelCore.hpp"
 #include "StelSkyDrawer.hpp"
+#include "StelMovementMgr.hpp"
 #include "StelTranslator.hpp"
 
 #include <QComboBox>
 #include <QSpinBox>
 #include <QDoubleSpinBox>
 #include <QSignalBlocker>
+#include <QSlider>
+#include <QPushButton>
 #include <cmath>
+
+namespace
+{
+// The focus ring: the slider position p (-100 ... 1000) gives the focus in dioptres, 1/distance.
+// Quadratic, so that the ring is fine near infinity (p = 0), where the stars are nearly sharp:
+// p = 1000 is the closest focus (0.3 m), p = -100 the end stop beyond infinity.
+constexpr double FOCUS_SLIDER_MAX = 1000.;
+double focusDistanceFromSlider(int p)
+{
+	if (p == 0)
+		return 0.;
+	const double x = std::fabs(p)/FOCUS_SLIDER_MAX;
+	const double dioptres = x*x/StelSkyDrawer::PHOTO_FOCUS_MIN_DISTANCE;
+	return (p > 0 ? 1. : -1.)/dioptres;
+}
+int focusSliderFromDistance(double meters)
+{
+	if (meters == 0.)
+		return 0;
+	const double x = std::sqrt(StelSkyDrawer::PHOTO_FOCUS_MIN_DISTANCE/std::fabs(meters));
+	return (meters > 0. ? 1 : -1) * qRound(FOCUS_SLIDER_MAX*x);
+}
+}
 
 // Standard values in 1/3-stop steps, as found on camera dials
 const QVector<double> PhotographicModeDialog::exposureTimes = {
@@ -45,7 +71,7 @@ const QVector<double> PhotographicModeDialog::isoValues = {
 	50, 64, 80, 100, 125, 160, 200, 250, 320, 400, 500, 640, 800, 1000, 1250, 1600, 2000, 2500,
 	3200, 4000, 5000, 6400, 8000, 10000, 12800, 16000, 20000, 25600, 51200, 102400, 204800 };
 
-PhotographicModeDialog::PhotographicModeDialog() : StelDialog("PhotographicMode")
+PhotographicModeDialog::PhotographicModeDialog(QObject* parent) : StelDialog("PhotographicMode", parent)
 {
 	ui = new Ui_PhotographicModeDialogForm;
 }
@@ -101,10 +127,13 @@ void PhotographicModeDialog::fillComboBoxes()
 	{
 		const QSignalBlocker blocker(ui->spikesComboBox);
 		ui->spikesComboBox->clear();
-		ui->spikesComboBox->addItem(qc_("None", "diffraction spikes"), 0);
-		ui->spikesComboBox->addItem(QString::number(4), 4);
-		ui->spikesComboBox->addItem(QString::number(6), 6);
-		ui->spikesComboBox->addItem(QString::number(8), 8);
+		// Diaphragm blades, with the number of spikes they make (twice the blades for an odd number)
+		ui->spikesComboBox->addItem(q_("Round (no spikes)"), 0);
+		for (int blades = 4; blades <= 9; ++blades)
+		{
+			const int spikes = (blades % 2) ? 2*blades : blades;
+			ui->spikesComboBox->addItem(QString("%1 (%2)").arg(blades).arg(q_("%1 spikes").arg(spikes)), blades);
+		}
 	}
 	{
 		const QSignalBlocker blocker(ui->meteringComboBox);
@@ -119,6 +148,19 @@ void PhotographicModeDialog::fillComboBoxes()
 		ui->toneCurveComboBox->addItem(q_("Linear"), StelSkyDrawer::PhotoToneLinear);
 		ui->toneCurveComboBox->addItem(q_("Standard (camera)"), StelSkyDrawer::PhotoToneStandard);
 		ui->toneCurveComboBox->addItem(q_("Film"), StelSkyDrawer::PhotoToneFilm);
+	}
+	{
+		const QSignalBlocker blocker(ui->sensorComboBox);
+		ui->sensorComboBox->clear();
+		ui->sensorComboBox->addItem(q_("Full frame (36 x 24 mm)"), StelSkyDrawer::PhotoSensorFullFrame);
+		ui->sensorComboBox->addItem(q_("APS-C (23.5 x 15.6 mm)"), StelSkyDrawer::PhotoSensorAPSC);
+	}
+	{
+		const QSignalBlocker blocker(ui->noiseComboBox);
+		ui->noiseComboBox->clear();
+		ui->noiseComboBox->addItem(q_("Off"), StelSkyDrawer::PhotoNoiseOff);
+		ui->noiseComboBox->addItem(q_("Whole picture"), StelSkyDrawer::PhotoNoiseImage);
+		ui->noiseComboBox->addItem(q_("100% view"), StelSkyDrawer::PhotoNoisePixel);
 	}
 	{
 		const QSignalBlocker blocker(ui->whiteBalanceComboBox);
@@ -181,6 +223,8 @@ void PhotographicModeDialog::createDialogContent()
 	connectBoolProperty(ui->extinctionColorCheckBox,  "StelSkyDrawer.flagPhotoExtinctionColor");
 	connectBoolProperty(ui->vignettingCheckBox,       "StelSkyDrawer.flagPhotoVignetting");
 	connectBoolProperty(ui->aberrationsCheckBox,      "StelSkyDrawer.flagPhotoAberrations");
+	connectBoolProperty(ui->lensFlareCheckBox,        "StelSkyDrawer.flagPhotoLensFlare");
+	connectBoolProperty(ui->starTrailsCheckBox,       "StelSkyDrawer.flagPhotoStarTrails");
 
 	fillComboBoxes();
 
@@ -225,6 +269,26 @@ void PhotographicModeDialog::createDialogContent()
 		drawer->setPhotoWhiteBalanceKelvin(kelvin);
 	});
 	connect(drawer, &StelSkyDrawer::photoWhiteBalanceChanged,          this, &PhotographicModeDialog::updateCameraWidgets);
+	connect(ui->noiseComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this, drawer](int index)
+	{
+		if (index >= 0)
+			drawer->setPhotoNoise(ui->noiseComboBox->itemData(index).toInt());
+	});
+	connect(drawer, &StelSkyDrawer::photoNoiseChanged,                 this, &PhotographicModeDialog::updateCameraWidgets);
+	// Sensor and lens
+	connect(ui->sensorComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this, drawer](int index)
+	{
+		if (index >= 0)
+			drawer->setPhotoSensorFormat(ui->sensorComboBox->itemData(index).toInt());
+	});
+	connect(drawer, &StelSkyDrawer::photoSensorFormatChanged,          this, &PhotographicModeDialog::updateCameraWidgets);
+	ui->focalLengthSpinBox->setStepType(QAbstractSpinBox::AdaptiveDecimalStepType);
+	connect(ui->focalLengthSpinBox, QOverload<int>::of(&QSpinBox::valueChanged), this, [drawer](int mm)
+	{
+		drawer->setPhotoFocalLength(mm);
+	});
+	// The field of view changes while zooming: show the focal length of the field aimed at
+	connect(StelApp::getInstance().getCore()->getMovementMgr(), &StelMovementMgr::currentFovChanged, this, &PhotographicModeDialog::updateFocalLength);
 	// Lens: percent in the dialog, factor in the property
 	connect(ui->aberrationStrengthSpinBox, QOverload<int>::of(&QSpinBox::valueChanged), this, [drawer](int percent)
 	{
@@ -232,7 +296,23 @@ void PhotographicModeDialog::createDialogContent()
 	});
 	connect(drawer, &StelSkyDrawer::photoAberrationStrengthChanged,    this, &PhotographicModeDialog::updateCameraWidgets);
 	connect(drawer, &StelSkyDrawer::flagPhotoAberrationsChanged,       this, &PhotographicModeDialog::updateCameraWidgets);
+	connect(ui->lensFlareStrengthSpinBox, QOverload<int>::of(&QSpinBox::valueChanged), this, [drawer](int percent)
+	{
+		drawer->setPhotoLensFlareStrength(percent/100.);
+	});
+	connect(drawer, &StelSkyDrawer::photoLensFlareStrengthChanged,     this, &PhotographicModeDialog::updateCameraWidgets);
+	connect(drawer, &StelSkyDrawer::flagPhotoLensFlareChanged,         this, &PhotographicModeDialog::updateCameraWidgets);
 	connect(drawer, &StelSkyDrawer::photoWhiteBalanceKelvinChanged,    this, &PhotographicModeDialog::updateCameraWidgets);
+	// Focus ring
+	connect(ui->focusSlider, &QSlider::valueChanged, this, [drawer](int p)
+	{
+		drawer->setPhotoFocusDistance(focusDistanceFromSlider(p));
+	});
+	connect(ui->focusInfinityPushButton, &QPushButton::clicked, this, [drawer]()
+	{
+		drawer->setPhotoFocusDistance(0.);
+	});
+	connect(drawer, &StelSkyDrawer::photoFocusDistanceChanged,         this, &PhotographicModeDialog::updateCameraWidgets);
 	connect(drawer, &StelSkyDrawer::flagPhotoAutoExposureChanged,      this, &PhotographicModeDialog::updateCameraWidgets);
 	connect(drawer, &StelSkyDrawer::photoMeteringModeChanged,          this, &PhotographicModeDialog::updateCameraWidgets);
 	connect(drawer, &StelSkyDrawer::photoEffectiveExposureTimeChanged, this, &PhotographicModeDialog::updateCameraWidgets);
@@ -249,11 +329,11 @@ void PhotographicModeDialog::createDialogContent()
 	connect(ui->spikesComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this, drawer](int index)
 	{
 		if (index >= 0)
-			drawer->setPhotoSpikeCount(ui->spikesComboBox->itemData(index).toInt());
+			drawer->setPhotoApertureBlades(ui->spikesComboBox->itemData(index).toInt());
 	});
 	connect(drawer, &StelSkyDrawer::photoHaloStrengthChanged,  this, &PhotographicModeDialog::updateStarWidgets);
 	connect(drawer, &StelSkyDrawer::photoSpikeStrengthChanged, this, &PhotographicModeDialog::updateStarWidgets);
-	connect(drawer, &StelSkyDrawer::photoSpikeCountChanged,    this, &PhotographicModeDialog::updateStarWidgets);
+	connect(drawer, &StelSkyDrawer::photoApertureBladesChanged, this, &PhotographicModeDialog::updateStarWidgets);
 
 	connect(ui->resetPushButton, &QPushButton::clicked, drawer, &StelSkyDrawer::resetPhotographicSettings);
 
@@ -284,6 +364,15 @@ void PhotographicModeDialog::updateCameraWidgets()
 		ui->toneCurveComboBox->setCurrentIndex(qMax(0, ui->toneCurveComboBox->findData(drawer->getPhotoToneCurve())));
 	}
 	{
+		const QSignalBlocker blocker(ui->sensorComboBox);
+		ui->sensorComboBox->setCurrentIndex(qMax(0, ui->sensorComboBox->findData(drawer->getPhotoSensorFormat())));
+	}
+	updateFocalLength();
+	{
+		const QSignalBlocker blocker(ui->noiseComboBox);
+		ui->noiseComboBox->setCurrentIndex(qMax(0, ui->noiseComboBox->findData(drawer->getPhotoNoise())));
+	}
+	{
 		const QSignalBlocker blocker(ui->whiteBalanceComboBox);
 		ui->whiteBalanceComboBox->setCurrentIndex(qMax(0, ui->whiteBalanceComboBox->findData(drawer->getPhotoWhiteBalance())));
 		const QSignalBlocker blocker2(ui->whiteBalanceKelvinSpinBox);
@@ -298,6 +387,20 @@ void PhotographicModeDialog::updateCameraWidgets()
 		ui->aberrationStrengthSpinBox->setEnabled(drawer->getFlagPhotoAberrations());
 		ui->aberrationStrengthLabel->setEnabled(drawer->getFlagPhotoAberrations());
 	}
+	{
+		const QSignalBlocker blocker(ui->lensFlareStrengthSpinBox);
+		ui->lensFlareStrengthSpinBox->setValue(qRound(100.*drawer->getPhotoLensFlareStrength()));
+		ui->lensFlareStrengthSpinBox->setEnabled(drawer->getFlagPhotoLensFlare());
+		ui->lensFlareStrengthLabel->setEnabled(drawer->getFlagPhotoLensFlare());
+	}
+	{
+		const QSignalBlocker blocker(ui->focusSlider);
+		const double s = drawer->getPhotoFocusDistance();
+		// keep the slider where the user put it if it gives the same distance (rounding)
+		if (focusDistanceFromSlider(ui->focusSlider->value()) != s)
+			ui->focusSlider->setValue(focusSliderFromDistance(s));
+		ui->focusValueLabel->setText(StelSkyDrawer::photoFocusDistanceText(s));
+	}
 
 	// Exposure value at ISO 100, the usual way photographers compare exposures.
 	// In manual mode the compensation brightens the picture, i.e. acts like a lower EV.
@@ -305,6 +408,17 @@ void PhotographicModeDialog::updateCameraWidgets()
 	const double ev100 = std::log2(n*n/t) - std::log2(iso/100.) - (autoExposure ? 0. : drawer->getPhotoExposureEV());
 	ui->exposureValueLabel->setText(QString("%1: EV<sub>100</sub> = %2")
 	                                .arg(q_("Exposure value"), QLocale().toString(ev100, 'f', 1)));
+}
+
+void PhotographicModeDialog::updateFocalLength()
+{
+	// (not while the user is typing a value)
+	if (!dialog || ui->focalLengthSpinBox->hasFocus())
+		return;
+	const StelCore* core = StelApp::getInstance().getCore();
+	const StelSkyDrawer* drawer = core->getSkyDrawer();
+	const QSignalBlocker blocker(ui->focalLengthSpinBox);
+	ui->focalLengthSpinBox->setValue(qRound(1000.*drawer->getPhotoFocalLengthForFov(core->getMovementMgr()->getAimFov())));
 }
 
 void PhotographicModeDialog::updateStarWidgets()
@@ -320,8 +434,8 @@ void PhotographicModeDialog::updateStarWidgets()
 	}
 	{
 		const QSignalBlocker blocker(ui->spikesComboBox);
-		const int index = ui->spikesComboBox->findData(drawer->getPhotoSpikeCount());
+		const int index = ui->spikesComboBox->findData(drawer->getPhotoApertureBlades());
 		ui->spikesComboBox->setCurrentIndex(qMax(0, index));
 	}
-	ui->spikeStrengthDoubleSpinBox->setEnabled(drawer->getPhotoSpikeCount() > 0);
+	ui->spikeStrengthDoubleSpinBox->setEnabled(drawer->getPhotoApertureBlades() > 0);
 }

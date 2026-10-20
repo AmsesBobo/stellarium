@@ -37,7 +37,6 @@ class AddRemoveLandscapesDialog;
 class AtmosphereDialog;
 class SkylightDialog;
 class TonemappingDialog;
-class PhotographicModeDialog;
 class GreatRedSpotDialog;
 class ConfigureDSOColorsDialog;
 class ConfigureOrbitColorsDialog;
@@ -147,7 +146,6 @@ private:
 	AtmosphereDialog * atmosphereDialog;
 	SkylightDialog * skylightDialog;
 	TonemappingDialog * tonemappingDialog;
-	PhotographicModeDialog * photographicModeDialog = nullptr;
 	GreatRedSpotDialog * greatRedSpotDialog;
 	ConfigureDSOColorsDialog * configureDSOColorsDialog;
 	ConfigureOrbitColorsDialog * configureOrbitColorsDialog;
