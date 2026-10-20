@@ -49,6 +49,7 @@
 #include "ViewDialog.hpp"
 #include "ShortcutsDialog.hpp"
 #include "AstroCalcDialog.hpp"
+#include "PhotographicModeDialog.hpp"
 #include "ObsListDialog.hpp"
 
 #include <QDebug>
@@ -207,6 +208,11 @@ StelGui::~StelGui()
 		delete astroCalcDialog;
 		astroCalcDialog = nullptr;
 	}
+	if (photographicModeDialog)
+	{
+		delete photographicModeDialog;
+		photographicModeDialog = nullptr;
+	}
 	if (obsListDialog)
 	{
 		delete obsListDialog;
@@ -236,6 +242,7 @@ void StelGui::init(QGraphicsWidget *atopLevelGraphicsWidget)
 	scriptConsole = new ScriptConsole(atopLevelGraphicsWidget);
 #endif
 	astroCalcDialog = new AstroCalcDialog(atopLevelGraphicsWidget);
+	photographicModeDialog = new PhotographicModeDialog(atopLevelGraphicsWidget);
 	obsListDialog = new ObsListDialog(atopLevelGraphicsWidget);
 
 	///////////////////////////////////////////////////////////////////////
@@ -270,6 +277,7 @@ void StelGui::init(QGraphicsWidget *atopLevelGraphicsWidget)
 	actionsMgr->addAction("actionShow_Shortcuts_Window_Global", windowsGroup, N_("Shortcuts window"), shortcutsDialog, "visible", "F7", "", true);
 	actionsMgr->addAction("actionShow_AstroCalc_Window_Global", windowsGroup, N_("Astronomical calculations window"), astroCalcDialog, "visible", "F10", "", true);
 	actionsMgr->addAction("actionShow_ObsList_Window_Global", windowsGroup, N_("Observing list"), obsListDialog, "visible", "Alt+B", "", true);
+	actionsMgr->addAction("actionShow_PhotographicMode_Window_Global", windowsGroup, N_("Camera settings window (photographic mode)"), photographicModeDialog, "visible", "F8", "", true);
 
         QString miscGroup = N_("Miscellaneous");
         actionsMgr->addAction("actionQuit_Global", miscGroup, N_("Quit"), this, "quit()", "Ctrl+Q", "Ctrl+X");
@@ -316,6 +324,7 @@ void StelGui::init(QGraphicsWidget *atopLevelGraphicsWidget)
 	addButtonOnLeftBar("bbtLocation", "actionShow_Location_Window_Global");
 	addButtonOnLeftBar("bbtTime", "actionShow_DateTime_Window_Global");
 	addButtonOnLeftBar("bbtSky", "actionShow_SkyView_Window_Global");
+	addButtonOnLeftBar("bbtCamera", "actionShow_PhotographicMode_Window_Global");
 	addButtonOnLeftBar("bbtSearch", "actionShow_Search_Window_Global");
 	addButtonOnLeftBar("bbtSettings", "actionShow_Configuration_Window_Global");
 	addButtonOnLeftBar("bbtAstroCalc", "actionShow_AstroCalc_Window_Global");

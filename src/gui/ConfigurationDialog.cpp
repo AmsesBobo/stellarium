@@ -1141,7 +1141,7 @@ void ConfigurationDialog::saveAllSettings()
         conf->setValue("viewing/photographic_psf_min_fwhm",             propMgr->getStelPropertyValue("StelSkyDrawer.photoPsfMinFwhm").toDouble());
         conf->setValue("viewing/photographic_seeing",                   propMgr->getStelPropertyValue("StelSkyDrawer.photoSeeing").toDouble());
         conf->setValue("viewing/photographic_halo_strength",            propMgr->getStelPropertyValue("StelSkyDrawer.photoHaloStrength").toDouble());
-        conf->setValue("viewing/photographic_spike_count",              propMgr->getStelPropertyValue("StelSkyDrawer.photoSpikeCount").toInt());
+        conf->setValue("viewing/photographic_aperture_blades",          propMgr->getStelPropertyValue("StelSkyDrawer.photoApertureBlades").toInt());
         conf->setValue("viewing/photographic_spike_strength",           propMgr->getStelPropertyValue("StelSkyDrawer.photoSpikeStrength").toDouble());
         conf->setValue("viewing/flag_photographic_bloom",               propMgr->getStelPropertyValue("StelSkyDrawer.flagPhotoBloom").toBool());
         conf->setValue("astro/flag_planets",                            propMgr->getStelPropertyValue("SolarSystem.planetsDisplayed").toBool());

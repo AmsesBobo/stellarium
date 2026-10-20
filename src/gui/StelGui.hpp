@@ -42,6 +42,7 @@ class SearchDialog;
 class ViewDialog;
 class ShortcutsDialog;
 class AstroCalcDialog;
+class PhotographicModeDialog;
 class ObsListDialog;
 #ifdef ENABLE_SCRIPT_CONSOLE
 class ScriptConsole;
@@ -384,6 +385,8 @@ private:
 	ScriptConsole* scriptConsole;
 #endif
 	AstroCalcDialog* astroCalcDialog;
+	//! The camera settings of the photographic mode
+	PhotographicModeDialog* photographicModeDialog = nullptr;
 	ObsListDialog* obsListDialog;
 
 	bool flagShowFlipButtons;

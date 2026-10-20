@@ -20,6 +20,7 @@
 
 #include "StelSkyDrawer.hpp"
 #include "StelPhotoBloom.hpp"
+#include "StelPhotoLensFlare.hpp"
 #include "StelProjector.hpp"
 #include "StelFileMgr.hpp"
 
@@ -39,6 +40,8 @@
 #include "LabelMgr.hpp"
 #include "Landscape.hpp"
 #include "StelPropertyMgr.hpp"
+#include "StelObserver.hpp"
+#include "Planet.hpp"
 
 #include <QOpenGLContext>
 #include <QOpenGLVertexArrayObject>
@@ -130,8 +133,9 @@ StelSkyDrawer::StelSkyDrawer(StelCore* acore) :
 	photoMinFwhmPixels = qBound(0.8f, conf->value("viewing/photographic_psf_min_fwhm", 2.0).toFloat(), 10.f);
 	photoSeeingArcsec = qBound(0.f, conf->value("viewing/photographic_seeing", 3.0).toFloat(), 60.f);
 	photoHaloFraction = qBound(0.f, conf->value("viewing/photographic_halo_strength", 0.05).toFloat(), 0.3f);
-	photoSpikeCount = conf->value("viewing/photographic_spike_count", 6).toInt();
-	photoSpikeCount = (photoSpikeCount<=0) ? 0 : (photoSpikeCount<=4 ? 4 : (photoSpikeCount<=6 ? 6 : 8));
+	// Diaphragm blades; older settings stored the number of spikes, which is the same for even numbers
+	photoApertureBlades = conf->value("viewing/photographic_aperture_blades", conf->value("viewing/photographic_spike_count", 6)).toInt();
+	photoApertureBlades = (photoApertureBlades<=0) ? 0 : qBound(4, photoApertureBlades, 9);
 	photoSpikeFraction = qBound(0.f, conf->value("viewing/photographic_spike_strength", 0.02).toFloat(), 0.1f);
 	flagPhotoBloom = conf->value("viewing/flag_photographic_bloom", true).toBool();
 	flagPhotoAutoExposure = conf->value("viewing/flag_photographic_auto_exposure", false).toBool();
@@ -145,6 +149,12 @@ StelSkyDrawer::StelSkyDrawer(StelCore* acore) :
 	flagPhotoVignetting = conf->value("viewing/flag_photographic_vignetting", true).toBool();
 	flagPhotoAberrations = conf->value("viewing/flag_photographic_aberrations", true).toBool();
 	photoAberrationStrength = qBound(0.f, conf->value("viewing/photographic_aberration_strength", 1.0).toFloat(), 3.f);
+	flagPhotoLensFlare = conf->value("viewing/flag_photographic_lens_flare", true).toBool();
+	photoLensFlareStrength = qBound(0.f, conf->value("viewing/photographic_lens_flare_strength", 1.0).toFloat(), 3.f);
+	setPhotoFocusDistance(conf->value("viewing/photographic_focus_distance", 0.0).toDouble());
+	flagPhotoStarTrails = conf->value("viewing/flag_photographic_star_trails", true).toBool();
+	photoSensorFormat = qBound(static_cast<int>(PhotoSensorFullFrame), conf->value("viewing/photographic_sensor_format", static_cast<int>(PhotoSensorFullFrame)).toInt(), static_cast<int>(PhotoSensorAPSC));
+	photoNoise = qBound(static_cast<int>(PhotoNoiseOff), conf->value("viewing/photographic_noise", static_cast<int>(PhotoNoiseImage)).toInt(), static_cast<int>(PhotoNoisePixel));
 	updatePhotoWhiteBalanceMatrix();
 	{
 		const QString path = StelFileMgr::findFile("atmosphere/lightweight-extinction.dat");
@@ -332,6 +342,10 @@ ATTRIBUTE highp float radius; // per star
 ATTRIBUTE highp vec4 shape;   // per star: x = disk radius (0 for stars), y = weight of the PSF core,
                               //  z = radius of a disk with the area of the lit part, w = cos(phase angle)
 ATTRIBUTE highp vec2 sunDir;  // per star: direction towards the Sun on the screen (bodies in phases)
+ATTRIBUTE highp vec4 trail;   // per star: offsets of the image at the start (xy) and at the end (zw) of the exposure
+                              //  from its position at mid-exposure (diurnal motion), pixels; 0 = no trail
+ATTRIBUTE highp vec3 trailStart; // per star: light at the start of the exposure relative to mid-exposure (extinction)
+ATTRIBUTE highp vec3 trailEnd;   // per star: the same at the end
 uniform highp mat4 projectionMatrix;
 uniform highp float coreAlpha;
 uniform highp float coreBeta;
@@ -350,13 +364,78 @@ VARYING highp vec2 vSunDir;
 VARYING highp vec3 vLens;  // lens model: x = distance from the image center / half diagonal, yz = radial direction
 uniform highp vec2 lensCenter;
 uniform highp float lensCorner;
+uniform highp float defocusRadius; // radius of the blur disk of a defocused star (pixels), 0 = in focus
+uniform highp float defocusArea;   // area of the image of the aperture, in units of its radius squared
+uniform highp float lensPupil;     // optical vignetting (see StelSkyDrawer::getPhotoLens())
+uniform highp float lensShift;
+uniform highp float lensVignetting; // 1 = on
+VARYING highp vec3 vDefocus; // x: 1 = defocused image, y: radius of the blur disk, z: 1 / its area (pixels)
+VARYING highp vec4 vTrail;     // the trail (see the attribute)
+VARYING highp vec3 vTrailInfo; // x: number of straight segments, y: approximate length (pixels), z: 1 = trailed
+VARYING highp vec3 vTrailLogStart; // log of the extinction factors at the start and the end of the exposure
+VARYING highp vec3 vTrailLogEnd;
 const highp float PI_V = 3.14159265358979;
+// Area of the intersection of two circles with radii r1, r2 and the distance d of their centers
+highp float circleOverlap(highp float r1, highp float r2, highp float d)
+{
+	if (d >= r1 + r2) return 0.;
+	if (d <= abs(r2 - r1)) return PI_V * min(r1, r2) * min(r1, r2);
+	highp float a1 = r1*r1 * acos(clamp((d*d + r1*r1 - r2*r2) / (2.*d*r1), -1., 1.));
+	highp float a2 = r2*r2 * acos(clamp((d*d + r2*r2 - r1*r1) / (2.*d*r2), -1., 1.));
+	highp float k = (-d + r1 + r2) * (d + r1 - r2) * (d - r1 + r2) * (d + r1 + r2);
+	return a1 + a2 - 0.5 * sqrt(max(k, 0.));
+}
 void main(void)
 {
-	vOffset = corner * radius;
+	// A star trail is the quadratic curve through the positions at the start (A), the middle (0) and the end (B)
+	// of the exposure. The sprite is a box around it (along the chord and across), with the radius of the
+	// stationary image added on all sides.
+	vTrail = trail;
+	vTrailLogStart = log(max(trailStart, vec3(1e-9)));
+	vTrailLogEnd = log(max(trailEnd, vec3(1e-9)));
+	highp vec2 A = trail.xy;
+	highp vec2 B = trail.zw;
+	highp float trailLength = length(A) + length(B);
+	vTrailInfo = vec3(1., trailLength, 0.);
+	if (trailLength > 0.5)
+	{
+		highp vec2 C = -0.5 * (A + B); // control point: the curve passes through 0 at its middle
+		// Enough straight segments that they stay within a quarter pixel of the curve (its sagitta / K^2)
+		highp float sagitta = length(0.5 * (A + B));
+		vTrailInfo = vec3(clamp(ceil(sqrt(sagitta / 0.25)), 1., 16.), trailLength, 1.);
+		highp vec2 chord = B - A;
+		highp float chordLength = length(chord);
+		highp vec2 e = chordLength > 1e-3 ? chord / chordLength : vec2(1., 0.);
+		highp vec2 n = vec2(-e.y, e.x);
+		highp vec3 pe = vec3(dot(A, e), dot(B, e), dot(C, e));
+		highp vec3 pn = vec3(dot(A, n), dot(B, n), dot(C, n));
+		highp float e0 = min(min(pe.x, pe.y), min(pe.z, 0.));
+		highp float e1 = max(max(pe.x, pe.y), max(pe.z, 0.));
+		highp float n0 = min(min(pn.x, pn.y), min(pn.z, 0.));
+		highp float n1 = max(max(pn.x, pn.y), max(pn.z, 0.));
+		vOffset = e * (0.5*(e0 + e1) + corner.x * (0.5*(e1 - e0) + radius))
+		        + n * (0.5*(n0 + n1) + corner.y * (0.5*(n1 - n0) + radius));
+	}
+	else
+		vOffset = corner * radius;
 	highp vec2 fromCenter = center - lensCenter;
 	highp float dist = length(fromCenter);
 	vLens = vec3(dist / lensCorner, dist > 0. ? fromCenter / dist : vec2(1., 0.));
+	// Out of focus, a star (or a body smaller than the blur) becomes an image of the aperture. Off axis the lens
+	// barrel cuts it (the "cat's eye" of the optical vignetting): its light is spread over the smaller area,
+	// the light lost there is the vignetting of the camera stage.
+	highp float b = abs(defocusRadius);
+	highp float Reff = 0.;
+	bool defocused = b > 0. && shape.x < b;
+	vDefocus = vec3(0.);
+	if (defocused)
+	{
+		Reff = sqrt(b*b + shape.z*shape.z);
+		highp float cut = 1.;
+		if (lensVignetting > 0.5)
+			cut = circleOverlap(lensPupil, 1., lensShift * vLens.x) / (PI_V * lensPupil * lensPupil);
+		vDefocus = vec3(1., Reff, 1. / (max(cut, 1e-3) * defocusArea * Reff * Reff));
+	}
 	gl_Position = projectionMatrix * vec4(center + vOffset, 0, 1);
 	vColor = color;
 	vRadius = radius;
@@ -368,14 +447,19 @@ void main(void)
 	// disk of the same surface brightness (within a factor 2 of the exact half-plane value).
 	// Inside the lit part that light stays on the disk (it only blurs it), so it is not drawn
 	// there (see the fragment shader): full for an unresolved body, none for a large disk.
-	highp float R = shape.z;
+	// A defocused image: the halo and the spikes spread around its blur disk.
+	// A trailed image is a point source moving along the trail (its halo is integrated along it, unit integral).
+	bool trailed = trailLength > 0.5;
+	highp float R = defocused ? Reff : shape.z;
+	highp float Rs = defocused ? Reff : (trailed ? 0. : shape.z);
+	highp float Rh = trailed ? 0. : R;
 	highp float w = shape.y;
 	highp float cn = 1. / (1. + coreDiskTerm*R/coreAlpha + (coreBeta-1.)*R*R/(coreAlpha*coreAlpha));
-	highp float hn = 1. / (1. + haloDiskTerm*R/haloAlpha + (haloBeta-1.)*R*R/(haloAlpha*haloAlpha));
+	highp float hn = 1. / (1. + haloDiskTerm*Rh/haloAlpha + (haloBeta-1.)*Rh*Rh/(haloAlpha*haloAlpha));
 	// A spike becomes a band as wide as the lit part
 	highp float s1 = sqrt(2.*PI_V)*spikeSigma;
 	highp float s2 = PI_V*spikeLength;
-	highp float sn = (s1*s2) / ((s1 + 2.*R) * (s2 + 2.*R));
+	highp float sn = (s1*s2) / ((s1 + 2.*Rs) * (s2 + 2.*Rs));
 	vNorm = vec4(w*cn, hn, sn, w);
 }
 )";
@@ -399,9 +483,24 @@ uniform int spikeLines;           // number of lines through the star (spikes/2)
 uniform highp float spikeFraction;
 uniform highp float spikeSigma;   // half-width of a spike (Gaussian sigma), pixels
 uniform highp float spikeLength;  // length scale of the 1/r^2 falloff, pixels
-uniform highp vec2 spikeDirs[4];  // directions of the lines
+uniform highp vec2 spikeDirs[9];  // directions of the lines (up to PHOTO_MAX_SPIKE_LINES)
 uniform highp float visibleThreshold; // fainter contributions cannot change a pixel
 uniform highp float spikeStart;   // with bloom: the spikes start here (the inner part comes from the image)
+VARYING highp vec3 vDefocus;
+VARYING highp vec4 vTrail;
+VARYING highp vec3 vTrailInfo;
+VARYING highp vec3 vTrailLogStart;
+VARYING highp vec3 vTrailLogEnd;
+uniform highp float defocusSign;  // -1: the image of the aperture is inverted (the rays crossed before the sensor)
+uniform highp float defocusSA;    // spherical aberration: > 0 bright rim, < 0 bright center
+uniform highp float defocusEdge;  // half width of the blurred edge of the disk (pixels)
+uniform highp float coreFwhm;     // FWHM of the PSF core (pixels)
+uniform int apertureBlades;       // 0 = round
+uniform highp float apertureStraightness;
+uniform highp float apertureRotation;
+uniform highp float lensPupil;
+uniform highp float lensShift;
+uniform highp float lensVignetting;
 const highp float PI = 3.14159265358979;
 // Moffat profile normalized to unit integral over the plane
 highp float moffat(highp float r2, highp float alpha, highp float beta)
@@ -440,6 +539,62 @@ highp float aberratedCore(highp vec2 offset)
 	}
 	return sum / float(K);
 }
+// The Moffat profiles (beta 3: core, beta 1.5: halo) of a point source moving uniformly along a straight
+// segment of length L (u: along the segment from its start, v: across), i.e. integrated along it. Exact; unit integral.
+highp float segmentG3(highp float x, highp float A)
+{
+	highp float s = A + x*x;
+	highp float rA = sqrt(A);
+	return x / (4.*A*s*s) + 3.*x / (8.*A*A*s) + 3. / (8.*A*A*rA) * atan(x / rA);
+}
+highp float moffatSegment3(highp float u, highp float v, highp float L, highp float alpha)
+{
+	if (L < 1e-3 * alpha)
+		return moffat(u*u + v*v, alpha, 3.);
+	highp float a2 = alpha * alpha;
+	highp float A = a2 + v*v;
+	return 2.*a2*a2 / (PI*L) * (segmentG3(u, A) - segmentG3(u - L, A));
+}
+highp float moffatSegment15(highp float u, highp float v, highp float L, highp float alpha)
+{
+	if (L < 1e-3 * alpha)
+		return moffat(u*u + v*v, alpha, 1.5);
+	highp float A = alpha*alpha + v*v;
+	highp float w = u - L;
+	return 0.5*alpha / (PI*L) * (u / (A*sqrt(A + u*u)) - w / (A*sqrt(A + w*w)));
+}
+// A defocused point source: the image of the aperture (disk, or polygon of the blades) of radius R,
+// cut by the lens barrel off axis (cat's eye), with the edge blurred by the PSF core and the aberrations.
+// Unit integral (vDefocus.z is 1 / area).
+highp float defocusDisk(highp vec2 p, highp float R)
+{
+	highp vec2 q = defocusSign * p / R;
+	highp float r = length(q);
+	highp float shape = r;
+	if (apertureBlades >= 3 && apertureStraightness > 0.)
+	{
+		highp float n = float(apertureBlades);
+		highp float sector = 2.*PI/n;
+		highp float d = mod(atan(q.y, q.x) - apertureRotation, sector) - 0.5*sector; // angle from the normal of the nearest edge
+		shape = mix(r, r * cos(d) / cos(PI/n), apertureStraightness);
+	}
+	highp float sd = shape - 1.;
+	if (lensVignetting > 0.5)
+	{
+		// the lens barrel: radius 1/pupil, shifted with the distance from the image center
+		highp vec2 barrel = -vLens.yz * (lensShift * vLens.x / lensPupil);
+		sd = max(sd, length(q - barrel) - 1./lensPupil);
+	}
+	highp float rho = vLens.x;
+	highp float coma = 0.5 * comaLength * rho;
+	highp float astig = 0.5 * astigLength * rho * rho;
+	highp float edge = sqrt(defocusEdge*defocusEdge + coma*coma + astig*astig);
+	highp float coverage = 1. - smoothstep(-edge, edge, sd * R);
+	// Spherical aberration: the zones of the lens focus at slightly different distances, so the light is
+	// not spread evenly; on one side of the focus the rim is bright, on the other the center
+	highp float sa = max(0., 1. + defocusSA * (r*r - 0.5));
+	return coverage * sa * vDefocus.z;
+}
 void main(void)
 {
 	highp float r = length(vOffset);
@@ -470,14 +625,115 @@ void main(void)
 	highp float r2 = d * d;
 	highp float brightness = max(vColor.r, max(vColor.g, vColor.b));
 	highp float profile;
-	if (Rd <= 0. && (comaLength > 0. || astigLength > 0.) && vLens.x > 0.05)
+	// Where the halo and the spikes start: the lit part, or the blur disk of a defocused image
+	highp vec2 spikeP = vOffset - vSunDir * (Rd - Rl*Rl/max(Rd, 1e-6)); // from the photocenter of the lit part
+	highp float spikeR = Rl;
+	if (vDefocus.x > 0.5)
+	{
+		highp float Reff = vDefocus.y;
+		highp float rp = length(spikeP);
+		// A blur disk smaller than the PSF core only widens the core
+		highp float t = smoothstep(0.5, 2.0, Reff / coreFwhm);
+		highp float core = 0.;
+		if (t < 1.)
+		{
+			highp float k = 1.6 * Reff / coreFwhm;
+			highp float alphaWide = coreAlpha * sqrt(1. + k*k);
+			core += (1. - t) * moffat(rp*rp, alphaWide, coreBeta);
+		}
+		if (t > 0.)
+			core += t * defocusDisk(spikeP, Reff);
+		profile = coreFraction * vNorm.w * core;
+		highp float dh = max(0., rp - Reff);
+		r2 = dh * dh;
+		spikeR = Reff;
+	}
+	else if (Rd <= 0. && (comaLength > 0. || astigLength > 0.) && vLens.x > 0.05)
 		profile = coreFraction * vNorm.x * aberratedCore(vOffset);
 	else
 		profile = coreFraction * vNorm.x * moffat(r2, coreAlpha, coreBeta);
 	// The halo and the spikes matter only for bright stars: skip them where even their
 	// peak would stay below what can show on the screen (most stars)
-	if (brightness * haloFraction * vNorm.y * (haloBeta - 1.) / (PI * haloAlpha * haloAlpha) > visibleThreshold)
-		profile += haloFraction * vNorm.y * moffat(r2, haloAlpha, haloBeta);
+	bool showHalo = brightness * haloFraction * vNorm.y * (haloBeta - 1.) / (PI * haloAlpha * haloAlpha) > visibleThreshold;
+	highp float haloProfile = -1.; // < 0: the halo of the stationary image
+	highp vec3 trailTint = vec3(1.); // the extinction along the trail
+	highp float fadeDistance = r;
+	highp float trailLength = 0.;
+	highp vec2 trailNormal = vec2(0.);
+	// Star trail: during the exposure the image moves along an arc around the celestial pole. The trailed image
+	// is the stationary one integrated along the arc: straight segments of equal exposure time, each integrated exactly.
+	if (vTrailInfo.z > 0.5)
+	{
+		highp vec2 A = vTrail.xy;
+		highp vec2 B = vTrail.zw;
+		highp vec2 C = -0.5 * (A + B);
+		highp vec2 p = spikeP; // from the photocenter
+		int K = int(vTrailInfo.x + 0.5);
+		highp float invK = 1. / float(K);
+		highp float Rdf = vDefocus.x > 0.5 ? vDefocus.y : 0.;
+		// a small blur disk only widens the core, as for the stationary image
+		highp float kd = 1.6 * Rdf / coreFwhm;
+		highp float alphaCore = coreAlpha * sqrt(1. + kd*kd);
+		highp float alphaHalo = sqrt(haloAlpha*haloAlpha + 0.5*Rdf*Rdf);
+		highp float coreT = 0.;
+		highp float haloT = 0.;
+		highp float dmin = 1e30;
+		highp vec2 nearest = vec2(0.);
+		highp float tNearest = 0.5;
+		highp vec2 P0 = A;
+		for (int k = 1; k <= 16; ++k)
+		{
+			if (k > K) break;
+			highp float t = float(k) * invK;
+			highp vec2 P1 = (1.-t)*(1.-t)*A + 2.*t*(1.-t)*C + t*t*B;
+			highp vec2 seg = P1 - P0;
+			highp float L = length(seg);
+			highp vec2 e = L > 1e-4 ? seg / L : vec2(1., 0.);
+			highp vec2 q = p - P0;
+			highp float u = dot(q, e);
+			highp float v = dot(q, vec2(-e.y, e.x));
+			coreT += moffatSegment3(u, v, L, alphaCore);
+			if (showHalo)
+				haloT += moffatSegment15(u, v, L, alphaHalo);
+			highp float uc = clamp(u, 0., L);
+			highp float dd = length(q - e*uc);
+			if (dd < dmin)
+			{
+				dmin = dd;
+				nearest = P0 + e*uc;
+				tNearest = (float(k - 1) + (L > 0. ? uc / L : 0.)) * invK;
+			}
+			trailLength += L;
+			P0 = P1;
+		}
+		coreT *= invK;
+		haloT *= invK;
+		if (Rdf > 0.)
+		{
+			// Out of focus: the blur disk swept along the trail, of even brightness
+			highp float tD = smoothstep(0.5, 2.0, Rdf / coreFwhm);
+			highp float coverage = 1. - smoothstep(-defocusEdge, defocusEdge, dmin - Rdf);
+			coreT = mix(coreT, coverage / (PI*Rdf*Rdf + 2.*Rdf*trailLength), tD);
+		}
+		// A short trail keeps the details of the stationary image (aberrations, the shape of the blur disk)
+		highp float tau = smoothstep(0.5, 2.0, trailLength / max(coreFwhm, 2.*Rdf));
+		profile = mix(profile, coreFraction * vNorm.w * coreT, tau);
+		// (the whole trailed image takes the tint of its nearest point, see trailTint below)
+		haloProfile = haloT;
+		// Extinction along the trail: the light at this point of the trail (mostly from the nearest part), from
+		// the factors at the start (t = 0), the middle (1) and the end; interpolated in the log (magnitudes)
+		highp float tn = tNearest;
+		trailTint = exp(vTrailLogStart * ((1.-tn)*(1.-2.*tn)) + vTrailLogEnd * (tn*(2.*tn-1.)));
+		// the spikes move with the image: they start from the trail (see below)
+		spikeP = p - nearest;
+		spikeR = Rdf;
+		fadeDistance = dmin;
+		highp vec2 chord = B - A;
+		highp float chordLength = length(chord);
+		trailNormal = chordLength > 1e-3 ? vec2(-chord.y, chord.x) / chordLength : vec2(0.);
+	}
+	if (showHalo)
+		profile += haloFraction * vNorm.y * (haloProfile >= 0. ? haloProfile : moffat(r2, haloAlpha, haloBeta));
 	// Diffraction spikes from straight edges in the aperture: thin lines whose intensity
 	// falls off like 1/r^2 along them. Each line is normalized to unit integral.
 	if (spikeLines > 0)
@@ -485,19 +741,25 @@ void main(void)
 		highp float lineNorm = vNorm.z * spikeFraction / (float(spikeLines) * sqrt(2.*PI) * spikeSigma * PI * spikeLength);
 		if (brightness * lineNorm > visibleThreshold)
 		{
-			// Spikes start from the lit part: around its photocenter, as wide as it
-			highp vec2 p = vOffset - vSunDir * (Rd - Rl*Rl/max(Rd, 1e-6));
-			for (int k = 0; k < 4; ++k)
+			// Spikes start from the lit part (or the blur disk): around its photocenter, as wide as it
+			highp vec2 p = spikeP;
+			for (int k = 0; k < 9; ++k)
 			{
 				if (k >= spikeLines) break;
 				highp vec2 dir = spikeDirs[k];
 				highp float acrossC = abs(dot(p, vec2(-dir.y, dir.x)));
-				highp float along = max(0., abs(dot(p, dir)) - sqrt(max(0., Rl*Rl - acrossC*acrossC)));
-				highp float across = max(0., acrossC - Rl);
+				highp float along = max(0., abs(dot(p, dir)) - sqrt(max(0., spikeR*spikeR - acrossC*acrossC)));
+				highp float across = max(0., acrossC - spikeR);
 				highp float line = lineNorm * exp(-0.5 * across * across / (spikeSigma * spikeSigma))
 				                            / (1. + along * along / (spikeLength * spikeLength));
 				if (spikeStart > 0.)
 					line *= smoothstep(spikeStart - 0.5, spikeStart + 0.5, along);
+				// Trailed: a spike across the trail is swept over it, its light spread over the trail length
+				if (trailLength > 0.)
+				{
+					highp float width = sqrt(2.*PI) * spikeSigma + 2.*spikeR;
+					line *= width / (width + trailLength * abs(dot(dir, trailNormal)));
+				}
 				profile += line;
 			}
 		}
@@ -506,8 +768,8 @@ void main(void)
 	// stays on the disk there (the disk itself is drawn with the remaining fraction), and it fills
 	// small dark details such as crater shadows, as on a real overexposed photo.
 	// Fade the outermost part of the sprite, so that its edge never shows
-	profile *= 1. - smoothstep(Rd + 0.75 * (vRadius - Rd), vRadius, r);
-	FRAG_COLOR = vec4(min(vColor * profile, vec3(1e30)), 1.); // guard against overflow
+	profile *= 1. - smoothstep(Rd + 0.75 * (vRadius - Rd), vRadius, fadeDistance);
+	FRAG_COLOR = vec4(min(vColor * trailTint * profile, vec3(1e30)), 1.); // guard against overflow
 }
 )";
 
@@ -527,6 +789,9 @@ void main(void)
 	photoStarShaderVars.radius = prog.attributeLocation("radius");
 	photoStarShaderVars.shape = prog.attributeLocation("shape");
 	photoStarShaderVars.sunDir = prog.attributeLocation("sunDir");
+	photoStarShaderVars.trail = prog.attributeLocation("trail");
+	photoStarShaderVars.trailStart = prog.attributeLocation("trailStart");
+	photoStarShaderVars.trailEnd = prog.attributeLocation("trailEnd");
 	photoStarShaderVars.coreAlpha = prog.uniformLocation("coreAlpha");
 	photoStarShaderVars.coreBeta = prog.uniformLocation("coreBeta");
 	photoStarShaderVars.haloAlpha = prog.uniformLocation("haloAlpha");
@@ -546,6 +811,18 @@ void main(void)
 	photoStarShaderVars.lensCorner = prog.uniformLocation("lensCorner");
 	photoStarShaderVars.comaLength = prog.uniformLocation("comaLength");
 	photoStarShaderVars.astigLength = prog.uniformLocation("astigLength");
+	photoStarShaderVars.defocusRadius = prog.uniformLocation("defocusRadius");
+	photoStarShaderVars.defocusArea = prog.uniformLocation("defocusArea");
+	photoStarShaderVars.defocusSign = prog.uniformLocation("defocusSign");
+	photoStarShaderVars.defocusSA = prog.uniformLocation("defocusSA");
+	photoStarShaderVars.defocusEdge = prog.uniformLocation("defocusEdge");
+	photoStarShaderVars.coreFwhm = prog.uniformLocation("coreFwhm");
+	photoStarShaderVars.apertureBlades = prog.uniformLocation("apertureBlades");
+	photoStarShaderVars.apertureStraightness = prog.uniformLocation("apertureStraightness");
+	photoStarShaderVars.apertureRotation = prog.uniformLocation("apertureRotation");
+	photoStarShaderVars.lensPupil = prog.uniformLocation("lensPupil");
+	photoStarShaderVars.lensShift = prog.uniformLocation("lensShift");
+	photoStarShaderVars.lensVignetting = prog.uniformLocation("lensVignetting");
 
 	const GLfloat corners[] = {-1,-1,  1,-1,  1,1,  -1,-1,  1,1,  -1,1};
 	photoCornerVbo.reset(new QOpenGLBuffer(QOpenGLBuffer::VertexBuffer));
@@ -574,22 +851,31 @@ void main(void)
 	prog.setAttributeBuffer(photoStarShaderVars.radius, GL_FLOAT, offsetof(PhotoStarInstance, radius), 1, sizeof(PhotoStarInstance));
 	prog.setAttributeBuffer(photoStarShaderVars.shape,  GL_FLOAT, offsetof(PhotoStarInstance, shape),  4, sizeof(PhotoStarInstance));
 	prog.setAttributeBuffer(photoStarShaderVars.sunDir, GL_FLOAT, offsetof(PhotoStarInstance, sunDir), 2, sizeof(PhotoStarInstance));
+	prog.setAttributeBuffer(photoStarShaderVars.trail,  GL_FLOAT, offsetof(PhotoStarInstance, trail),  4, sizeof(PhotoStarInstance));
+	prog.setAttributeBuffer(photoStarShaderVars.trailStart, GL_FLOAT, offsetof(PhotoStarInstance, trailStart), 3, sizeof(PhotoStarInstance));
+	prog.setAttributeBuffer(photoStarShaderVars.trailEnd,   GL_FLOAT, offsetof(PhotoStarInstance, trailEnd),   3, sizeof(PhotoStarInstance));
 	prog.enableAttributeArray(photoStarShaderVars.center);
 	prog.enableAttributeArray(photoStarShaderVars.color);
 	prog.enableAttributeArray(photoStarShaderVars.radius);
 	prog.enableAttributeArray(photoStarShaderVars.shape);
 	prog.enableAttributeArray(photoStarShaderVars.sunDir);
+	prog.enableAttributeArray(photoStarShaderVars.trail);
+	prog.enableAttributeArray(photoStarShaderVars.trailStart);
+	prog.enableAttributeArray(photoStarShaderVars.trailEnd);
 	// One record per star (instance), not per vertex
 	hg->glVertexAttribDivisor(static_cast<GLuint>(photoStarShaderVars.center), 1);
 	hg->glVertexAttribDivisor(static_cast<GLuint>(photoStarShaderVars.color), 1);
 	hg->glVertexAttribDivisor(static_cast<GLuint>(photoStarShaderVars.radius), 1);
 	hg->glVertexAttribDivisor(static_cast<GLuint>(photoStarShaderVars.shape), 1);
 	hg->glVertexAttribDivisor(static_cast<GLuint>(photoStarShaderVars.sunDir), 1);
+	hg->glVertexAttribDivisor(static_cast<GLuint>(photoStarShaderVars.trail), 1);
+	hg->glVertexAttribDivisor(static_cast<GLuint>(photoStarShaderVars.trailStart), 1);
+	hg->glVertexAttribDivisor(static_cast<GLuint>(photoStarShaderVars.trailEnd), 1);
 	photoVao->release();
 	photoVbo->release();
 }
 
-void StelSkyDrawer::flushPhotoPointSources(StelPainter* sPainter)
+void StelSkyDrawer::flushPhotoPointSources(StelPainter* sPainter, PhotoBatchMode mode)
 {
 	if (nbPhotoPointSources==0)
 		return;
@@ -615,23 +901,23 @@ void StelSkyDrawer::flushPhotoPointSources(StelPainter* sPainter)
 	prog.setUniformValue(photoStarShaderVars.coreBeta, PHOTO_CORE_BETA);
 	prog.setUniformValue(photoStarShaderVars.haloAlpha, photoCoreAlpha*PHOTO_HALO_WIDTH_FACTOR);
 	prog.setUniformValue(photoStarShaderVars.haloBeta, PHOTO_HALO_BETA);
-	prog.setUniformValue(photoStarShaderVars.haloFraction, getFlagPhotoBloomActive() ? 0.f : photoHaloFraction);
+	prog.setUniformValue(photoStarShaderVars.haloFraction, (getFlagPhotoBloomActive() || mode == PhotoBatchCoreOnly) ? 0.f : photoHaloFraction);
 	prog.setUniformValue(photoStarShaderVars.coreFraction, getPhotoCoreFraction());
 	prog.setUniformValue(photoStarShaderVars.coreDiskTerm, photoDiskTerm(PHOTO_CORE_BETA));
 	prog.setUniformValue(photoStarShaderVars.haloDiskTerm, photoDiskTerm(PHOTO_HALO_BETA));
 	// With bloom, the halo and the inner part of the spikes come from the whole image (StelPhotoBloom)
-	const int spikeLines = (photoSpikeFraction > 0.f) ? photoSpikeCount/2 : 0;
+	const int spikeLines = (getPhotoSpikeFractionEffective() > 0.f && mode != PhotoBatchCoreOnly) ? getPhotoSpikeLines() : 0;
 	prog.setUniformValue(photoStarShaderVars.spikeLines, spikeLines);
-	prog.setUniformValue(photoStarShaderVars.spikeFraction, spikeLines > 0 ? photoSpikeFraction : 0.f);
+	prog.setUniformValue(photoStarShaderVars.spikeFraction, spikeLines > 0 ? getPhotoSpikeFractionEffective() : 0.f);
 	prog.setUniformValue(photoStarShaderVars.spikeSigma, photoCoreAlpha*PHOTO_SPIKE_WIDTH_FACTOR);
-	prog.setUniformValue(photoStarShaderVars.spikeLength, photoCoreAlpha*PHOTO_SPIKE_LENGTH_FACTOR);
-	QVector2D spikeDirs[4];
-	for (int k=0; k<4; ++k)
+	prog.setUniformValue(photoStarShaderVars.spikeLength, getPhotoSpikeLength());
+	QVector2D spikeDirs[PHOTO_MAX_SPIKE_LINES];
+	for (int k=0; k<PHOTO_MAX_SPIKE_LINES; ++k)
 	{
 		const float a = PHOTO_SPIKE_ANGLE + (spikeLines > 0 ? static_cast<float>(k)*M_PIf/static_cast<float>(spikeLines) : 0.f);
 		spikeDirs[k] = QVector2D(std::cos(a), std::sin(a));
 	}
-	prog.setUniformValueArray(photoStarShaderVars.spikeDirs, spikeDirs, 4);
+	prog.setUniformValueArray(photoStarShaderVars.spikeDirs, spikeDirs, PHOTO_MAX_SPIKE_LINES);
 	prog.setUniformValue(photoStarShaderVars.visibleThreshold, photoVisibleThreshold);
 	prog.setUniformValue(photoStarShaderVars.spikeStart, getFlagPhotoBloomActive() ? StelPhotoBloom::NEAR_SPIKE_LENGTH : 0.f);
 	{
@@ -642,6 +928,24 @@ void StelSkyDrawer::flushPhotoPointSources(StelPainter* sPainter)
 		prog.setUniformValue(photoStarShaderVars.lensCorner, lens.corner);
 		prog.setUniformValue(photoStarShaderVars.comaLength, lens.coma);
 		prog.setUniformValue(photoStarShaderVars.astigLength, lens.astigmatism);
+		// Defocus: the image of the aperture. Focused nearer than infinity, the rays of a star cross in front
+		// of the sensor: the image is inverted, and (spherical aberration of a typical, undercorrected lens)
+		// soft-edged; beyond infinity it is upright with a bright rim.
+		prog.setUniformValue(photoStarShaderVars.defocusRadius, lens.defocus);
+		prog.setUniformValue(photoStarShaderVars.defocusArea, getPhotoApertureShapeArea());
+		prog.setUniformValue(photoStarShaderVars.defocusSign, lens.defocus > 0.f ? -1.f : 1.f);
+		prog.setUniformValue(photoStarShaderVars.defocusSA, lens.defocus > 0.f ? -lens.sphericalAberration : lens.sphericalAberration);
+		prog.setUniformValue(photoStarShaderVars.defocusEdge, photoDefocusEdge());
+		prog.setUniformValue(photoStarShaderVars.coreFwhm, photoCoreFwhm());
+		const int blades = photoApertureBlades >= 3 ? photoApertureBlades : 0;
+		const float sector = blades > 0 ? 2.f*M_PIf/static_cast<float>(blades) : 0.f;
+		prog.setUniformValue(photoStarShaderVars.apertureBlades, blades);
+		prog.setUniformValue(photoStarShaderVars.apertureStraightness, blades > 0 ? getPhotoApertureStraightness() : 0.f);
+		// the same orientation as the spikes and the lens reflections: one blade edge normal at PHOTO_SPIKE_ANGLE
+		prog.setUniformValue(photoStarShaderVars.apertureRotation, PHOTO_SPIKE_ANGLE - 0.5f*sector);
+		prog.setUniformValue(photoStarShaderVars.lensPupil, lens.pupil);
+		prog.setUniformValue(photoStarShaderVars.lensShift, PHOTO_VIGNETTING_SHIFT);
+		prog.setUniformValue(photoStarShaderVars.lensVignetting, lens.vignetting ? 1.f : 0.f);
 	}
 
 	photoVao->bind();
@@ -757,11 +1061,43 @@ void StelSkyDrawer::update(double)
 	}
 
 	updatePhotoExtinction();
+	// A new realization of the sensor noise every frame, as in the live view of a camera
+	photoNoiseFrame = (photoNoiseFrame + 1u) % 4093u;
 	{
 		const StelProjectorP prj = core->getProjection(StelCore::FrameJ2000);
 		photoLensCache = getPhotoLens(*prj);
 		photoLensCache.center += Vec2f(static_cast<float>(prj->getViewportPosX()), static_cast<float>(prj->getViewportPosY()));
 		photoLensAberrations = photoLensCache.coma > 0.f || photoLensCache.astigmatism > 0.f;
+
+		// Star trails: during the exposure the sky turns around the rotation axis of the planet we stand on
+		// (one turn per sidereal day). The exposure is centered on the current time.
+		photoTrailsActive = false;
+		const auto observer = core->getCurrentObserver();
+		const auto home = observer ? observer->getHomePlanet() : QSharedPointer<Planet>();
+		if (flagPhotoStarTrails && getFlagPhotographicModeActive() && !home.isNull())
+		{
+			const double siderealDay = home->getSiderealDay(); // days
+			const double t = getPhotoEffectiveExposureTime();
+			if (std::isfinite(siderealDay) && std::fabs(siderealDay) > 1e-6 && t > 0.)
+			{
+				photoTrailAngle = 2.*M_PI*t/(std::fabs(siderealDay)*86400.);
+				// Shorter than half a pixel in the image center: no trails
+				if (photoTrailAngle*prj->getPixelPerRadAtCenter() > 0.5)
+				{
+					Vec3d pole = core->equinoxEquToJ2000(Vec3d(0., 0., 1.), StelCore::RefractionOff);
+					core->getJ2000ModelViewTransform(StelCore::RefractionOff)->forward(pole);
+					pole.normalize();
+					photoTrailAxisView = pole;
+					// The direction of the rotation does not matter: the trail is symmetric about mid-exposure
+					photoTrailToStart = Mat4d::rotation(pole, 0.5*photoTrailAngle);
+					photoTrailToEnd = Mat4d::rotation(pole, -0.5*photoTrailAngle);
+					photoTrailsActive = true;
+					// Extinction along the trails (the altitude changes during the exposure)
+					photoTrailExtinction = getFlagHasAtmosphere() && extinction.getExtinctionCoefficient() >= 0.01f;
+					photoTrailAltAzTransform = core->getAltAzModelViewTransform(StelCore::RefractionAuto);
+				}
+			}
+		}
 	}
 
 	// update limit mag
@@ -873,25 +1209,42 @@ bool StelSkyDrawer::computePhotoRCMag(float mag, RCMag* rcMag) const
 			return 0.f;
 		return alpha * std::sqrt(std::pow(peak/photoVisibleThreshold, 1.f/beta) - 1.f);
 	};
-	const float spikeFraction = (photoSpikeCount > 0) ? photoSpikeFraction : 0.f;
-	const float rCore = radiusAtThreshold(flux*(1.f-photoHaloFraction-spikeFraction), photoCoreAlpha, PHOTO_CORE_BETA);
+	const float spikeFraction = getPhotoSpikeFractionEffective();
+	// Out of focus, the light of the core is spread over the blur disk (the image of the aperture):
+	// faint stars disappear, as on a real photo
+	const float defocusR = std::fabs(photoLensCache.defocus);
+	const float coreFlux = flux*(1.f-photoHaloFraction-spikeFraction);
+	const float rCore = defocusR > 0.f ? photoDefocusCoreRadius(coreFlux, defocusR)
+	                                   : radiusAtThreshold(coreFlux, photoCoreAlpha, PHOTO_CORE_BETA);
 	if (rCore <= 0.f)
 	{
 		rcMag->radius = 0.f;
 		rcMag->luminance = 0.f;
 		return false;
 	}
-	const float rHalo = getFlagPhotoBloomActive() ? 0.f : radiusAtThreshold(flux*photoHaloFraction, photoCoreAlpha*PHOTO_HALO_WIDTH_FACTOR, PHOTO_HALO_BETA);
+	// The halo spreads around the blur disk (see the shader): the profile at max(0, r - R), renormalized
+	float rHalo = 0.f;
+	if (!getFlagPhotoBloomActive())
+	{
+		const float alpha = photoCoreAlpha*PHOTO_HALO_WIDTH_FACTOR;
+		const float norm = 1.f/(1.f + photoDiskTerm(PHOTO_HALO_BETA)*defocusR/alpha + (PHOTO_HALO_BETA-1.f)*defocusR*defocusR/(alpha*alpha));
+		const float r = radiusAtThreshold(flux*photoHaloFraction*norm, alpha, PHOTO_HALO_BETA);
+		if (r > 0.f)
+			rHalo = r + defocusR;
+	}
 	// Length of the diffraction spikes: where the intensity along a spike drops to the threshold
 	float rSpike = 0.f;
 	if (spikeFraction > 0.f)
 	{
-		const float lines = static_cast<float>(photoSpikeCount/2);
+		const float lines = static_cast<float>(getPhotoSpikeLines());
 		const float sigma = photoCoreAlpha*PHOTO_SPIKE_WIDTH_FACTOR;
-		const float length = photoCoreAlpha*PHOTO_SPIKE_LENGTH_FACTOR;
-		const float peak = flux*spikeFraction / (lines * std::sqrt(2.f*M_PIf) * sigma * M_PIf * length);
+		const float length = getPhotoSpikeLength();
+		const float s1 = std::sqrt(2.f*M_PIf)*sigma;
+		const float s2 = M_PIf*length;
+		const float norm = (s1*s2)/((s1+2.f*defocusR)*(s2+2.f*defocusR)); // a band as wide as the blur disk
+		const float peak = flux*spikeFraction*norm / (lines * s1 * s2);
 		if (peak > photoVisibleThreshold)
-			rSpike = length * std::sqrt(peak/photoVisibleThreshold - 1.f);
+			rSpike = defocusR + length * std::sqrt(peak/photoVisibleThreshold - 1.f);
 		// With bloom, the inner part of the spikes comes from the image
 		if (getFlagPhotoBloomActive() && rSpike <= StelPhotoBloom::NEAR_SPIKE_LENGTH)
 			rSpike = 0.f;
@@ -1018,6 +1371,9 @@ bool StelSkyDrawer::drawPhotoPointSource(StelPainter* sPainter, const Vec3d& v, 
 	}
 	star.shape.set(0.f, 1.f, 0.f, 1.f);
 	star.sunDir.set(1.f, 0.f);
+	// Star trail (the sprite box around it is made in the shader)
+	if (computePhotoTrail(*sPainter->getProjector(), v, win, rcMag.luminance*dim, 0.f, star) < 0.f)
+		return false;
 	++nbPhotoPointSources;
 	if (nbPhotoPointSources>=maxPhotoPointSources)
 		flushPhotoPointSources(sPainter);
@@ -1035,7 +1391,7 @@ float StelSkyDrawer::getPhotoCoreWeight(float diskPixRadius) const
 
 float StelSkyDrawer::getPhotoDiskFraction(float diskPixRadius) const
 {
-	const float spikeFraction = (photoSpikeCount > 0) ? photoSpikeFraction : 0.f;
+	const float spikeFraction = getPhotoSpikeFractionEffective();
 	return (1.f - photoHaloFraction - spikeFraction) * (1.f - getPhotoCoreWeight(diskPixRadius));
 }
 
@@ -1061,8 +1417,13 @@ bool StelSkyDrawer::drawPhotoBody(StelPainter* sPainter, const Vec3d& v, float d
 	// A body in phases: its light comes from the lit part. For the normalization, that part counts
 	// as a disk of the same area; the shader measures the distance from the true lit shape.
 	const float k = qBound(0.f, illuminatedFraction, 1.f);
-	const float R = diskR * std::sqrt(k);
-	const float spikeFraction = (photoSpikeCount > 0) ? photoSpikeFraction : 0.f;
+	const float Rlit = diskR * std::sqrt(k);
+	const float spikeFraction = getPhotoSpikeFractionEffective();
+	// Out of focus, a body smaller than the blur disk becomes an image of the aperture, like a star
+	// (the shader makes the same choice). Its halo and spikes then spread around the blur disk.
+	const float defocusR = std::fabs(photoLensCache.defocus);
+	const bool defocused = defocusR > 0.f && diskR < defocusR;
+	const float R = defocused ? std::sqrt(defocusR*defocusR + Rlit*Rlit) : Rlit;
 
 	// How far beyond the disk edge each component stays visible (same as for stars, with the
 	// normalization of a profile spread around the disk)
@@ -1074,14 +1435,15 @@ bool StelSkyDrawer::drawPhotoBody(StelPainter* sPainter, const Vec3d& v, float d
 			return 0.f;
 		return alpha * std::sqrt(std::pow(peak/photoVisibleThreshold, 1.f/beta) - 1.f);
 	};
-	const float rCore = wingRadius(flux*(1.f-photoHaloFraction-spikeFraction)*coreWeight, photoCoreAlpha, PHOTO_CORE_BETA);
+	const float rCore = defocused ? photoDefocusCoreRadius(flux*(1.f-photoHaloFraction-spikeFraction)*coreWeight, R)
+	                              : wingRadius(flux*(1.f-photoHaloFraction-spikeFraction)*coreWeight, photoCoreAlpha, PHOTO_CORE_BETA);
 	const float rHalo = getFlagPhotoBloomActive() ? 0.f : wingRadius(flux*photoHaloFraction, photoCoreAlpha*PHOTO_HALO_WIDTH_FACTOR, PHOTO_HALO_BETA);
 	float rSpike = 0.f;
 	if (spikeFraction > 0.f)
 	{
-		const float lines = static_cast<float>(photoSpikeCount/2);
+		const float lines = static_cast<float>(getPhotoSpikeLines());
 		const float sigma = photoCoreAlpha*PHOTO_SPIKE_WIDTH_FACTOR;
-		const float length = photoCoreAlpha*PHOTO_SPIKE_LENGTH_FACTOR;
+		const float length = getPhotoSpikeLength();
 		const float s1 = std::sqrt(2.f*M_PIf)*sigma;
 		const float s2 = M_PIf*length;
 		const float norm = (s1*s2)/((s1+2.f*R)*(s2+2.f*R));
@@ -1092,7 +1454,9 @@ bool StelSkyDrawer::drawPhotoBody(StelPainter* sPainter, const Vec3d& v, float d
 		if (getFlagPhotoBloomActive() && rSpike <= StelPhotoBloom::NEAR_SPIKE_LENGTH)
 			rSpike = 0.f;
 	}
-	const float wing = qMax(qMax(rCore, rHalo), rSpike);
+	// Defocused: the halo and the spikes start at the blur disk (the core radius already includes it)
+	const float wingOffset = defocused ? R : 0.f;
+	const float wing = qMax(qMax(rCore, rHalo > 0.f ? rHalo + wingOffset : 0.f), rSpike > 0.f ? rSpike + wingOffset : 0.f);
 	if (!(wing > 0.f))
 		return false;
 	// The spikes of the Sun can cross the whole screen
@@ -1134,11 +1498,84 @@ bool StelSkyDrawer::drawPhotoBody(StelPainter* sPainter, const Vec3d& v, float d
 	body.center.set(static_cast<float>(win[0]), static_cast<float>(win[1]));
 	body.color = (linear/Y) * (flux*dim);
 	body.radius = radius;
-	body.shape.set(diskR, coreWeight, R, cosPhase);
+	body.shape.set(diskR, coreWeight, Rlit, cosPhase);
 	body.sunDir = sunDir;
+	// A trail only for a body whose disk is smaller than the trail: it is drawn like a star then
+	if (computePhotoTrail(*prj, v, win, flux*dim, diskR, body) < 0.f)
+		return false;
+	// The PSF core here, in the order of drawing: nearer bodies (the Moon) and the landscape can cover it.
+	// The halo and the spikes arise in the lens and lie over everything: they are drawn at the end.
+	PhotoStarInstance wings = body;
+	wings.shape[1] = 0.f; // no core
 	++nbPhotoPointSources;
-	flushPhotoPointSources(sPainter);
+	flushPhotoPointSources(sPainter, PhotoBatchCoreOnly);
+	if (rHalo > 0.f || rSpike > 0.f)
+		photoDeferredBodies.push_back(wings);
 	return true;
+}
+
+void StelSkyDrawer::drawDeferredPhotoBodies(StelCore* core)
+{
+	if (!getFlagPhotographicModeActive() || photoInstances.empty())
+	{
+		photoDeferredBodies.clear();
+		photoGhostSources.clear();
+		return;
+	}
+	const StelProjectorP prj = core->getProjection(StelCore::FrameJ2000);
+	if (!photoDeferredBodies.empty())
+	{
+		StelPainter sPainter(prj);
+		for (const auto& body : photoDeferredBodies)
+		{
+			photoInstances[nbPhotoPointSources++] = body;
+			if (nbPhotoPointSources >= maxPhotoPointSources)
+				flushPhotoPointSources(&sPainter, PhotoBatchWingsOnly);
+		}
+		flushPhotoPointSources(&sPainter, PhotoBatchWingsOnly);
+		photoDeferredBodies.clear();
+	}
+
+	// Lens reflections of the bright bodies, also of those outside the frame
+	if (!photoGhostSources.empty())
+	{
+		std::vector<StelPhotoLensFlare::Source> sources;
+		for (const auto& g : photoGhostSources)
+		{
+			const float dim = qMax(g.color[0], qMax(g.color[1], g.color[2]));
+			if (!(dim > 0.f))
+				continue;
+			const Vec3f linear = srgbToLinear(g.color/dim);
+			const float Y = 0.2126f*linear[0] + 0.7152f*linear[1] + 0.0722f*linear[2];
+			const float flux = photoFluxMag0 * std::pow(10.f, -0.4f*g.mag) * dim;
+			Vec3d win;
+			if (!(Y > 0.f) || !(flux > 0.f) || !prj->project(g.v, win))
+				continue;
+			// in front of the camera only (a perspective projection maps the back half too)
+			Vec3d view = g.v;
+			prj->getModelViewTransform()->forward(view);
+			if (view[2] >= 0.)
+				continue;
+			sources.push_back({Vec2f(static_cast<float>(win[0]), static_cast<float>(win[1])), (linear/Y)*flux});
+		}
+		photoGhostSources.clear();
+		if (!sources.empty())
+		{
+			if (!photoLensFlare)
+				photoLensFlare.reset(new StelPhotoLensFlare);
+			StelPhotoLensFlare::Camera camera;
+			camera.center = photoLensCache.center;
+			camera.focal = qMax(1.f, prj->getPixelPerRadAtCenter());
+			camera.corner = photoLensCache.corner;
+			camera.fNumber = static_cast<float>(photoAperture);
+			camera.blades = photoApertureBlades;
+			camera.straightness = photoApertureBlades > 0 ? getPhotoApertureStraightness() : 0.f;
+			camera.bladeAngle = PHOTO_SPIKE_ANGLE;
+			camera.strength = photoLensFlareStrength;
+			camera.visibleThreshold = photoVisibleThreshold;
+			photoLensFlare->draw(sources, camera, prj->getProjectionMatrix());
+		}
+	}
 }
 
 bool StelSkyDrawer::drawPointSource(StelPainter* sPainter, const Vec3d& v, const RCMag& rcMag, const Vec3f& color, bool checkInScreen, float twinkleFactor)
@@ -2004,8 +2441,283 @@ StelSkyDrawer::PhotoLens StelSkyDrawer::getPhotoLens(const StelProjector& prj) c
 		const float open = PHOTO_LENS_MAX_APERTURE/N;
 		lens.coma = photoAberrationStrength * PHOTO_COMA_LENGTH * diagonal * open*open;
 		lens.astigmatism = photoAberrationStrength * PHOTO_ASTIGMATISM_LENGTH * diagonal * open;
+		// Spherical aberration: like the coma it grows with the square of the aperture (relative to the defocus)
+		lens.sphericalAberration = qMin(0.9f, photoAberrationStrength * PHOTO_SPHERICAL_ABERRATION * open*open);
+	}
+	if (photoFocusDistance != 0. && getFlagPhotographicModeActive())
+	{
+		// Focused at the distance s, the image of a star (at infinity) lies f^2/(s-f) in front of the sensor.
+		// The cone of light from the aperture (diameter f/N) cuts the sensor in a disk of diameter
+		// c = f^2/(N s) (exact for a thin lens). In pixels of the sensor (focal length f in pixels):
+		// c = (1/s) f [m] f [px] / N. Beyond infinity the sign changes (the image lies behind the sensor).
+		const double f = getPhotoFocalLength(prj);
+		const double dioptres = 1./photoFocusDistance;
+		lens.defocus = static_cast<float>(0.5 * dioptres * f * static_cast<double>(lens.focal) / photoAperture);
+		// Very small blur: as good as in focus
+		if (std::fabs(lens.defocus) < 0.05f)
+			lens.defocus = 0.f;
 	}
 	return lens;
+}
+
+double StelSkyDrawer::getPhotoFocalLength(const StelProjector& prj) const
+{
+	// The diagonal of the view is the diagonal of the sensor
+	const double diagonal = std::hypot(prj.getViewportWidth(), prj.getViewportHeight());
+	return diagonal > 0. ? getPhotoSensorDiagonal() * prj.getPixelPerRadAtCenter() / diagonal : 0.05;
+}
+
+// The projection maps the field radius to pixels: pixelPerRad = (fov disk diameter)/2 / scaling(fov/2).
+// The current projector gives the diameter, then the focal length in pixels follows for any field.
+double StelSkyDrawer::getPhotoFocalLengthForFov(double fov) const
+{
+	const StelProjectorP prj = core->getProjection(StelCore::FrameJ2000);
+	const double diagonal = std::hypot(prj->getViewportWidth(), prj->getViewportHeight());
+	const double halfDisk = static_cast<double>(prj->getPixelPerRadAtCenter()) * static_cast<double>(prj->fovToViewScalingFactor(static_cast<float>(M_PI/360.*static_cast<double>(prj->getFov()))));
+	const double scaling = static_cast<double>(prj->fovToViewScalingFactor(static_cast<float>(M_PI/360.*fov)));
+	if (!(diagonal > 0.) || !(scaling > 0.))
+		return 0.05;
+	return getPhotoSensorDiagonal() * (halfDisk/scaling) / diagonal;
+}
+
+double StelSkyDrawer::getPhotoFovForFocalLength(double f) const
+{
+	const StelProjectorP prj = core->getProjection(StelCore::FrameJ2000);
+	const double diagonal = std::hypot(prj->getViewportWidth(), prj->getViewportHeight());
+	const double halfDisk = static_cast<double>(prj->getPixelPerRadAtCenter()) * static_cast<double>(prj->fovToViewScalingFactor(static_cast<float>(M_PI/360.*static_cast<double>(prj->getFov()))));
+	const double focalPixels = f * diagonal / getPhotoSensorDiagonal();
+	if (!(focalPixels > 0.))
+		return static_cast<double>(prj->getFov());
+	return 360./M_PI * static_cast<double>(prj->viewScalingFactorToFov(static_cast<float>(halfDisk/focalPixels)));
+}
+
+void StelSkyDrawer::setPhotoFocalLength(double millimeters)
+{
+	if (!(millimeters > 0.))
+		return;
+	core->getMovementMgr()->zoomTo(getPhotoFovForFocalLength(millimeters/1000.), 0.5f);
+}
+
+void StelSkyDrawer::setPhotoSensorFormat(int format)
+{
+	const int f = qBound(static_cast<int>(PhotoSensorFullFrame), format, static_cast<int>(PhotoSensorAPSC));
+	if (f == photoSensorFormat)
+		return;
+	// The same lens on the other camera: keep the focal length, the field of view changes (the crop factor)
+	const double focal = getPhotoFocalLengthForFov(core->getMovementMgr()->getAimFov());
+	photoSensorFormat = f;
+	if (getFlagPhotographicModeActive())
+		core->getMovementMgr()->zoomTo(getPhotoFovForFocalLength(focal), 0.5f);
+	StelApp::immediateSave("viewing/photographic_sensor_format", f);
+	emit photoSensorFormatChanged(f);
+}
+
+void StelSkyDrawer::setPhotoFocusDistance(double meters)
+{
+	double s = std::isfinite(meters) ? meters : 0.;
+	// 0 = infinity; beyond the closest focus and beyond the end stop past infinity the ring does not turn
+	if (s > 0.)
+		s = qMax(s, PHOTO_FOCUS_MIN_DISTANCE);
+	else if (s < 0.)
+		s = qMin(s, -PHOTO_FOCUS_BEYOND_INFINITY);
+	if (s > 1e7 || s < -1e7)
+		s = 0.;
+	if (qFuzzyCompare(1. + s, 1. + photoFocusDistance) && (s == 0.) == (photoFocusDistance == 0.))
+		return;
+	photoFocusDistance = s;
+	StelApp::immediateSave("viewing/photographic_focus_distance", s);
+	emit photoFocusDistanceChanged(s);
+}
+
+void StelSkyDrawer::setPhotoNoise(int mode)
+{
+	const int m = qBound(static_cast<int>(PhotoNoiseOff), mode, static_cast<int>(PhotoNoisePixel));
+	if (m == photoNoise)
+		return;
+	photoNoise = m;
+	StelApp::immediateSave("viewing/photographic_noise", m);
+	emit photoNoiseChanged(m);
+}
+
+StelSkyDrawer::PhotoNoiseParams StelSkyDrawer::getPhotoNoiseParams(const StelProjector& prj) const
+{
+	PhotoNoiseParams p;
+	if (photoNoise == PhotoNoiseOff || !getFlagPhotographicModeActive())
+		return p;
+	p.enabled = true;
+	// The sensor collects the light in electrons. The scene buffer is scaled so that 1.0 is a saturated
+	// photosite at the current ISO: at the base ISO that is the full well, at a higher ISO the amplifier
+	// reaches white with proportionally fewer electrons. That is why a high ISO is noisy: for the same
+	// brightness in the picture the sensor has caught fewer photons (for the same exposure time and aperture,
+	// the photons are the same, but so is the noise relative to the signal).
+	const float iso = qMax(static_cast<float>(photoISO), PHOTO_SENSOR_BASE_ISO);
+	// A smaller photosite (APS-C) holds fewer electrons and collects less dark current, in proportion to its area
+	const double pitch = getPhotoSensorPitch();
+	const float area = static_cast<float>((pitch*pitch)/(PHOTO_SENSOR_PITCH*PHOTO_SENSOR_PITCH));
+	p.white = PHOTO_SENSOR_FULL_WELL * area * PHOTO_SENSOR_BASE_ISO / iso;
+	// Read noise: the part after the amplifier shrinks (in electrons) at higher ISO ("ISO invariance")
+	const float downstream = PHOTO_READ_NOISE_DOWNSTREAM * PHOTO_SENSOR_BASE_ISO / iso;
+	p.read2 = PHOTO_READ_NOISE_UPSTREAM*PHOTO_READ_NOISE_UPSTREAM + downstream*downstream;
+	// Dark current grows with the temperature of the sensor: the air temperature (atmosphere settings) plus its own warming
+	const float t = static_cast<float>(getPhotoEffectiveExposureTime());
+	const float celsius = static_cast<float>(getAtmosphereTemperature()) + PHOTO_SENSOR_WARMING;
+	const float thermal = std::exp2((celsius - 20.f)/PHOTO_DARK_DOUBLING);
+	p.dark = PHOTO_DARK_CURRENT * area * thermal * t;
+	p.hot = PHOTO_HOT_PIXEL_CURRENT * thermal * t;
+	// Photosites per screen pixel: the view is the sensor (its diagonal), see getPhotoFocalLength()
+	if (photoNoise == PhotoNoisePixel)
+		p.sites = 1.f;
+	else
+	{
+		const double diagonal = std::hypot(prj.getViewportWidth(), prj.getViewportHeight());
+		const double pixel = diagonal > 0. ? getPhotoSensorDiagonal()/diagonal : pitch;
+		p.sites = static_cast<float>(qMax(1., (pixel*pixel)/(pitch*pitch)));
+	}
+	p.hotProbability = qMin(1.f, 1.f - std::pow(1.f - PHOTO_HOT_PIXEL_FRACTION, p.sites));
+	p.seed = static_cast<float>(photoNoiseFrame) + 0.5f;
+	return p;
+}
+
+void StelSkyDrawer::setFlagPhotoStarTrails(bool b)
+{
+	if (b == flagPhotoStarTrails)
+		return;
+	flagPhotoStarTrails = b;
+	StelApp::immediateSave("viewing/flag_photographic_star_trails", b);
+	emit flagPhotoStarTrailsChanged(b);
+}
+
+Vec3f StelSkyDrawer::photoTrailExtinctionFactor(const Vec3d& view, const Vec3d& viewRef) const
+{
+	if (!photoTrailExtinction || !photoTrailAltAzTransform)
+		return Vec3f(1.f);
+	// Geometric altitude/azimuth, as for the extinction of stars and planets (see ZoneArray, Planet)
+	Vec3d altAz = view;
+	Vec3d altAzRef = viewRef;
+	photoTrailAltAzTransform->backward(altAz);
+	photoTrailAltAzTransform->backward(altAzRef);
+	altAz.normalize();
+	altAzRef.normalize();
+	// Below the horizon (from about -2 degrees) the light is gone, whatever the setting for the extinction there
+	auto extinctionMag = [this](const Vec3d& aa) -> float {
+		if (aa[2] < -0.035)
+			return 42.f*extinction.getExtinctionCoefficient();
+		float mag = 0.f;
+		extinction.forward(aa, &mag);
+		return mag;
+	};
+	const float brightness = std::pow(10.f, -0.4f*(extinctionMag(altAz) - extinctionMag(altAzRef)));
+	Vec3f factor(brightness);
+	if (getFlagPhotoExtinctionColorActive())
+	{
+		const Vec3f tint = getPhotoExtinctionTint(altAz);
+		const Vec3f tintRef = getPhotoExtinctionTint(altAzRef);
+		for (int i=0; i<3; ++i)
+			factor[i] *= tintRef[i] > 0.f ? tint[i]/tintRef[i] : 1.f;
+	}
+	return factor;
+}
+
+float StelSkyDrawer::computePhotoTrail(const StelProjector& prj, const Vec3d& v, const Vec3d& win, float flux, float diskRadius, PhotoStarInstance& instance) const
+{
+	Vec4f& trail = instance.trail;
+	instance.trailStart.set(1.f, 1.f, 1.f);
+	instance.trailEnd.set(1.f, 1.f, 1.f);
+	// The integrated profiles of the trails in the shader (moffatSegment3/15) are written for these exponents
+	static_assert(PHOTO_CORE_BETA == 3.f && PHOTO_HALO_BETA == 1.5f, "star trail profiles need beta 3 and 1.5");
+	trail.set(0.f, 0.f, 0.f, 0.f);
+	if (!photoTrailsActive)
+		return 0.f;
+	const auto mv = prj.getModelViewTransform();
+	Vec3d view = v;
+	mv->forward(view);
+	const double norm = view.norm();
+	if (!(norm > 0.))
+		return 0.f;
+	// Quick estimate first (the arc near the image center): most faint stars drop out here, before projecting
+	const float estimate = static_cast<float>(photoTrailAngle * (photoTrailAxisView^view).norm()/norm * prj.getPixelPerRadAtCenter());
+	if (estimate <= 2.f*diskRadius || estimate < 0.5f)
+		return 0.f;
+	// The brightest point of the trailed image: along the trail the core is spread like flux/length, across it
+	// keeps its profile (peak 0.75/alpha for a Moffat profile with beta 3); a blur disk widens it.
+	// The halo the same way (peak 1/(pi alpha) for beta 1.5). The spikes are kept as they are (conservative).
+	{
+		const float alpha = qMax(photoCoreAlpha, 1.5f*std::fabs(photoLensCache.defocus));
+		const float corePeak = flux*getPhotoCoreFraction()*0.75f/(alpha*estimate);
+		const float haloPeak = getFlagPhotoBloomActive() ? 0.f : flux*photoHaloFraction/(M_PIf*photoCoreAlpha*PHOTO_HALO_WIDTH_FACTOR*estimate);
+		bool visible = corePeak > photoVisibleThreshold || haloPeak > photoVisibleThreshold;
+		if (!visible && getPhotoSpikeFractionEffective() > 0.f)
+		{
+			const float sigma = photoCoreAlpha*PHOTO_SPIKE_WIDTH_FACTOR;
+			const float length = getPhotoSpikeLength();
+			const float peak = flux*getPhotoSpikeFractionEffective() / (static_cast<float>(getPhotoSpikeLines()) * std::sqrt(2.f*M_PIf) * sigma * M_PIf * length);
+			visible = peak > photoVisibleThreshold && !(getFlagPhotoBloomActive() && length*std::sqrt(peak/photoVisibleThreshold - 1.f) <= StelPhotoBloom::NEAR_SPIKE_LENGTH);
+		}
+		if (!visible)
+			return -1.f;
+	}
+	// Positions at the start and the end of the exposure: turn the direction around the axis, then project
+	Vec3d a = photoTrailToStart*view;
+	Vec3d b = photoTrailToEnd*view;
+	mv->backward(a);
+	mv->backward(b);
+	Vec3d winA, winB;
+	if (!prj.project(a, winA) || !prj.project(b, winB))
+		return 0.f;
+	trail.set(static_cast<float>(winA[0]-win[0]), static_cast<float>(winA[1]-win[1]),
+	          static_cast<float>(winB[0]-win[0]), static_cast<float>(winB[1]-win[1]));
+	const float length = std::hypot(trail[0], trail[1]) + std::hypot(trail[2], trail[3]);
+	if (!(length > 0.5f) || length <= 2.f*diskRadius || !std::isfinite(length))
+	{
+		trail.set(0.f, 0.f, 0.f, 0.f);
+		return 0.f;
+	}
+	// The altitude changes along the trail, and so do the extinction and its color (e.g. a rising planet,
+	// red at first). The image at mid-exposure has its own; the start and the end relative to it.
+	if (photoTrailExtinction)
+	{
+		instance.trailStart = photoTrailExtinctionFactor(photoTrailToStart*view, view);
+		instance.trailEnd = photoTrailExtinctionFactor(photoTrailToEnd*view, view);
+	}
+	return length;
+}
+
+float StelSkyDrawer::getPhotoApertureShapeArea() const
+{
+	// Disk, or regular polygon of circumradius 1 (the straightness mixes them, see the shader)
+	const int blades = photoApertureBlades >= 3 ? photoApertureBlades : 0;
+	if (blades == 0)
+		return M_PIf;
+	const float n = static_cast<float>(blades);
+	const float t = getPhotoApertureStraightness();
+	return (1.f-t)*M_PIf + t*0.5f*n*std::sin(2.f*M_PIf/n);
+}
+
+float StelSkyDrawer::photoDefocusCoreRadius(float coreFlux, float R) const
+{
+	// The same blend as in the shader: below the PSF core size the blur only widens the core
+	const float fwhm = photoCoreFwhm();
+	const float x = qBound(0.f, (R/fwhm - 0.5f)/1.5f, 1.f);
+	const float t = x*x*(3.f - 2.f*x);
+	const float edge = photoDefocusEdge();
+	float peakMoffat = 0.f, alphaWide = photoCoreAlpha;
+	if (t < 1.f)
+	{
+		const float k = 1.6f*R/fwhm;
+		alphaWide = photoCoreAlpha*std::sqrt(1.f + k*k);
+		peakMoffat = (1.f-t) * coreFlux * (PHOTO_CORE_BETA-1.f) / (M_PIf*alphaWide*alphaWide);
+	}
+	// The brightest part of the disk: its center or its rim (spherical aberration)
+	const float sa = photoLensCache.sphericalAberration;
+	const float peakDisk = t * coreFlux * (1.f + 0.5f*sa) / (getPhotoApertureShapeArea()*R*R);
+	if (!(peakMoffat + peakDisk > photoVisibleThreshold))
+		return 0.f;
+	float radius = 0.f;
+	if (peakMoffat > photoVisibleThreshold)
+		radius = alphaWide * std::sqrt(std::pow(peakMoffat/photoVisibleThreshold, 1.f/PHOTO_CORE_BETA) - 1.f);
+	// The whole disk with its blurred edge must lie inside the part of the sprite that is not faded out
+	// (the fade starts at 3/4 of the radius; the callers divide by 0.85)
+	return qMax(radius, (R + 2.f*edge) * (0.85f/0.75f));
 }
 
 void StelSkyDrawer::setFlagPhotoVignetting(bool b)
@@ -2015,6 +2727,31 @@ void StelSkyDrawer::setFlagPhotoVignetting(bool b)
 	flagPhotoVignetting = b;
 	StelApp::immediateSave("viewing/flag_photographic_vignetting", b);
 	emit flagPhotoVignettingChanged(b);
+}
+
+void StelSkyDrawer::setFlagPhotoLensFlare(bool b)
+{
+	if (b == flagPhotoLensFlare)
+		return;
+	flagPhotoLensFlare = b;
+	StelApp::immediateSave("viewing/flag_photographic_lens_flare", b);
+	emit flagPhotoLensFlareChanged(b);
+}
+
+void StelSkyDrawer::setPhotoLensFlareStrength(double strength)
+{
+	const float v = qBound(0.f, static_cast<float>(strength), 3.f);
+	if (qFuzzyCompare(1.f+v, 1.f+photoLensFlareStrength))
+		return;
+	photoLensFlareStrength = v;
+	StelApp::immediateSave("viewing/photographic_lens_flare_strength", static_cast<double>(v));
+	emit photoLensFlareStrengthChanged(static_cast<double>(v));
+}
+
+void StelSkyDrawer::addPhotoGhostSource(const Vec3d& v, float mag, const Vec3f& color)
+{
+	if (flagPhotoLensFlare && photoLensFlareStrength > 0.f && getFlagPhotographicModeActive())
+		photoGhostSources.push_back({v, mag, color});
 }
 
 void StelSkyDrawer::setFlagPhotoAberrations(bool b)
@@ -2409,14 +3146,40 @@ void StelSkyDrawer::setPhotoHaloStrength(double fraction)
 	emit photoHaloStrengthChanged(static_cast<double>(v));
 }
 
-void StelSkyDrawer::setPhotoSpikeCount(int count)
+void StelSkyDrawer::setPhotoApertureBlades(int blades)
 {
-	const int v = (count<=0) ? 0 : (count<=4 ? 4 : (count<=6 ? 6 : 8));
-	if (v==photoSpikeCount)
+	const int v = (blades<=0) ? 0 : qBound(4, blades, 9);
+	if (v==photoApertureBlades)
 		return;
-	photoSpikeCount = v;
-	StelApp::immediateSave("viewing/photographic_spike_count", v);
-	emit photoSpikeCountChanged(v);
+	photoApertureBlades = v;
+	StelApp::immediateSave("viewing/photographic_aperture_blades", v);
+	emit photoApertureBladesChanged(v);
+}
+
+float StelSkyDrawer::getPhotoApertureStraightness() const
+{
+	// Wide open the opening is the round stop of the lens (the blades are retracted); stopping down,
+	// the blades form a polygon whose edges get straighter. Fully straight two stops down.
+	const float stops = static_cast<float>(std::log2(photoAperture/static_cast<double>(PHOTO_LENS_MAX_APERTURE)));
+	const float t = qBound(0.f, stops/2.f, 1.f);
+	return t*t*(3.f - 2.f*t);
+}
+
+float StelSkyDrawer::getPhotoSpikeFractionEffective() const
+{
+	// The light that straight edges diffract into the spikes: per unit length along a spike it falls off
+	// like (lambda N)/x^2 beyond the diffraction scale (lambda N), so the total stays the same while the
+	// spikes get longer with the f-number (see getPhotoSpikeLength()).
+	if (photoApertureBlades <= 0)
+		return 0.f;
+	return photoSpikeFraction * getPhotoApertureStraightness();
+}
+
+float StelSkyDrawer::getPhotoSpikeLength() const
+{
+	// The diffraction pattern scales with lambda N: stopped down, the spikes reach farther
+	const float scale = qBound(0.25f, static_cast<float>(photoAperture)/PHOTO_SPIKE_REFERENCE_APERTURE, 4.f);
+	return photoCoreAlpha*PHOTO_SPIKE_LENGTH_FACTOR*scale;
 }
 
 void StelSkyDrawer::setPhotoSpikeStrength(double fraction)
@@ -2445,7 +3208,7 @@ bool StelSkyDrawer::getFlagPhotoBloomActive() const
 
 float StelSkyDrawer::getPhotoCoreFraction() const
 {
-	const float spikeFraction = (photoSpikeCount > 0) ? photoSpikeFraction : 0.f;
+	const float spikeFraction = getPhotoSpikeFractionEffective();
 	return 1.f - photoHaloFraction - spikeFraction;
 }
 
@@ -2458,7 +3221,7 @@ void StelSkyDrawer::resetPhotographicSettings()
 	setPhotoPsfMinFwhm(2.);
 	setPhotoSeeing(3.);
 	setPhotoHaloStrength(0.05);
-	setPhotoSpikeCount(6);
+	setPhotoApertureBlades(6);
 	setPhotoSpikeStrength(0.02);
 	setFlagPhotoBloom(true);
 	setFlagPhotoAutoExposure(false);
@@ -2470,6 +3233,12 @@ void StelSkyDrawer::resetPhotographicSettings()
 	setFlagPhotoVignetting(true);
 	setFlagPhotoAberrations(true);
 	setPhotoAberrationStrength(1.);
+	setFlagPhotoLensFlare(true);
+	setPhotoLensFlareStrength(1.);
+	setPhotoFocusDistance(0.);
+	setFlagPhotoStarTrails(true);
+	setPhotoNoise(PhotoNoiseImage);
+	setPhotoSensorFormat(PhotoSensorFullFrame);
 }
 
 float StelSkyDrawer::getPhotoSceneScale() const
@@ -2515,6 +3284,22 @@ double StelSkyDrawer::photoNominalExposureTime(double seconds)
 	}
 	// Outside the table (or between its sparse long values): keep the true value
 	return bestDistance < 0.2 ? best : seconds;
+}
+
+QString StelSkyDrawer::photoFocusDistanceText(double meters)
+{
+	const QString infinity = QString(QChar(0x221E));
+	if (meters == 0.)
+		return infinity;
+	if (meters < 0.)
+	{
+		// Beyond the infinity mark: by how much, in dioptres (the unit of the focus ring travel)
+		return QString("%1 %2 (%3 %4)").arg(qc_("beyond", "focus: beyond infinity"), infinity,
+		                                    QLocale().toString(1./std::fabs(meters), 'f', 3), qc_("dpt", "unit: dioptre"));
+	}
+	if (meters >= 1000.)
+		return QString("%1 %2").arg(QLocale().toString(meters/1000., 'g', 2), qc_("km", "distance"));
+	return QString("%1 %2").arg(QLocale().toString(meters, 'g', meters < 10. ? 2 : 3), qc_("m", "distance"));
 }
 
 QString StelSkyDrawer::photoExposureTimeText(double seconds)
@@ -2667,6 +3452,15 @@ void StelSkyDrawer::drawPhotoInfoLine(StelCore* core) const
 	parts << (autoExposure ? qc_("Av", "camera mode: aperture priority") : qc_("M", "camera mode: manual"));
 	parts << photoExposureTimeText(t);
 	parts << QString("f/%1").arg(QLocale().toString(photoAperture, 'g', 3));
+	// Focal length of the lens for this field on the sensor in use, and the focus when it is not at infinity
+	{
+		QString lens = QString("%1 mm").arg(qRound(1000.*getPhotoFocalLength(*core->getProjection(StelCore::FrameJ2000))));
+		if (photoSensorFormat == PhotoSensorAPSC)
+			lens += QStringLiteral(" APS-C");
+		parts << lens;
+	}
+	if (photoFocusDistance != 0.)
+		parts << QString("%1 %2").arg(qc_("focus", "camera: focus distance"), photoFocusDistanceText(photoFocusDistance));
 	parts << QString("ISO %1").arg(qRound(photoISO));
 	parts << QString("EV100 %1").arg(QLocale().toString(ev100, 'f', 1));
 	if (std::fabs(photoExposureEV) > 0.01)

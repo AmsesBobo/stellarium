@@ -105,6 +105,7 @@ void main()
 // (texels of 2^L pixels) serves the taps from 8(2^L-1) to 8(2^{L+1}-1) pixels away, 8 taps per level.
 constexpr int SPIKE_LEVELS = 7;
 constexpr int SPIKE_TAPS = 8;
+constexpr int MAX_SPIKE_LINES = 9; // lines through each point: 9 for a diaphragm with 9 blades (18 spikes)
 constexpr int NEAR_SPIKE_LEVELS = 2; // levels 0 and 1: up to 24.5 pixels, see StelPhotoBloom::NEAR_SPIKE_LENGTH
 QByteArray makeSpikeSource()
 {
@@ -119,14 +120,14 @@ uniform sampler2D level5;
 uniform sampler2D level6;
 uniform int numLevels;
 uniform int numLines;
-uniform vec2 lineSteps[4]; // one pixel along each line, in texture coordinates
+uniform vec2 lineSteps[9]; // one pixel along each line, in texture coordinates (up to 9 lines: 9 blades)
 uniform vec2 levelScale[7]; // scene texture coordinates -> level texture coordinates
 uniform highp float offsets[56];
 uniform highp float weights[56];
 void main()
 {
 	highp vec3 sum = vec3(0);
-	for (int d = 0; d < 4; ++d)
+	for (int d = 0; d < 9; ++d)
 	{
 		if (d >= numLines) break;
 		highp vec2 st = lineSteps[d];
@@ -357,8 +358,8 @@ bool StelPhotoBloom::process(GLuint sceneTexture, int w, int h, float haloAlpha,
 		// Each line gets 1/spikeLines of the spike light
 		for (int i=0; i<numLevels*SPIKE_TAPS; ++i)
 			spikeWeights[i] = static_cast<GLfloat>(static_cast<double>(spikeWeights[i])/spikeLines);
-		QVector2D steps[4];
-		for (int k=0; k<4; ++k)
+		QVector2D steps[MAX_SPIKE_LINES];
+		for (int k=0; k<MAX_SPIKE_LINES; ++k)
 		{
 			const float a = spikeAngle + static_cast<float>(k)*static_cast<float>(M_PI)/static_cast<float>(spikeLines);
 			steps[k] = QVector2D(std::cos(a)/static_cast<float>(w), std::sin(a)/static_cast<float>(h));
@@ -371,8 +372,8 @@ bool StelPhotoBloom::process(GLuint sceneTexture, int w, int h, float haloAlpha,
 			spikeProgram->setUniformValue(QByteArray("level"+QByteArray::number(L)).constData(), L);
 		}
 		spikeProgram->setUniformValue("numLevels", numLevels);
-		spikeProgram->setUniformValue("numLines", std::min(spikeLines, 4));
-		spikeProgram->setUniformValueArray("lineSteps", steps, 4);
+		spikeProgram->setUniformValue("numLines", std::min(spikeLines, MAX_SPIKE_LINES));
+		spikeProgram->setUniformValueArray("lineSteps", steps, MAX_SPIKE_LINES);
 		QVector2D levelScales[SPIKE_LEVELS];
 		for (int L=0; L<SPIKE_LEVELS; ++L)
 		{
