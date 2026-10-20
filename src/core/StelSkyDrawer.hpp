@@ -229,8 +229,21 @@ public:
 	//! Labels, lines and markers are drawn as usual and stay sharp. Returns false (draw directly) when the
 	//! body needs neither, or the offscreen image cannot be made.
 	//! @param posJ2000 position of the body, @param radius its radius on the screen with rings (pixels)
-	bool beginPhotoBodyImage(const Vec3d& posJ2000, float radius);
+	//! @param glow false: the disk of a body, trailed and blurred, covering what is behind it. true: light that
+	//! arises in the lens (the halo and the spikes of a bright body), only trailed and added to the scene.
+	bool beginPhotoBodyImage(const Vec3d& posJ2000, float radius, bool glow = false);
 	void endPhotoBodyImage();
+	//! Photographic mode: one copy of an extended image (a picture of a nebula) among the copies whose sum is
+	//! what the camera records of it during the exposure (the star trail) and over the blur disk of the lens.
+	struct PhotoImageSample
+	{
+		Mat4d viewRotation; //!< turns the sky in view (eye) coordinates to where this copy lies
+		Vec3f factor;       //!< share of the light of the image, with the change of the extinction along the trail
+	};
+	//! The copies for an image around @a center (in the frame of @a prj). Empty: the image needs no copies.
+	std::vector<PhotoImageSample> getPhotoImageSamples(const StelProjector& prj, const Vec3d& center) const;
+	//! @a prj with its view turned by the rotation of a sample (see getPhotoImageSamples())
+	StelProjectorP getPhotoImageSampleProjector(const StelProjectorP& prj, const Mat4d& viewRotation) const;
 	//! @param power the texture values are raised to this power first (see PHOTO_DSO_DESTRETCH)
 	bool photoTextureStatistics(class StelTexture& texture, float power, float& mean, float& meanSquare);
 	//! Images of nebulae are processed pictures: their contrast is compressed ("stretched") to show the faint
@@ -1123,8 +1136,13 @@ private:
 	//! (bright bodies, after the landscape: they arise in the lens and lie over everything)
 	enum PhotoBatchMode { PhotoBatchAll, PhotoBatchCoreOnly, PhotoBatchWingsOnly };
 	void flushPhotoPointSources(StelPainter* sPainter, PhotoBatchMode mode = PhotoBatchAll);
-	//! Halo and spikes of bright bodies, drawn by drawDeferredPhotoBodies()
-	std::vector<PhotoStarInstance> photoDeferredBodies;
+	//! Halo and spikes of bright bodies, drawn by drawDeferredPhotoBodies(), with the position (J2000) of the body
+	struct PhotoDeferredBody
+	{
+		PhotoStarInstance instance;
+		Vec3d posJ2000;
+	};
+	std::vector<PhotoDeferredBody> photoDeferredBodies;
 
 	//! Precomputed each frame in update(): total recorded light (linear units) of a magnitude-0 star
 	float photoFluxMag0 = 0.f;
@@ -1260,6 +1278,7 @@ private:
 		Vec4f trail;                        //!< offsets at the start and the end of the exposure (pixels)
 		Vec3f logStart, logEnd;             //!< log of the extinction along the trail
 		float defocus = 0.f;                //!< signed radius of the blur disk (pixels)
+		bool glow = false;                  //!< light of the lens: added, not covering (see beginPhotoBodyImage())
 		int previousFbo = 0;
 		int viewport[4] = {0, 0, 0, 0};
 		bool scissor = false;
