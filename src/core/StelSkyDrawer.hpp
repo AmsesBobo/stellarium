@@ -143,6 +143,8 @@ class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 	//! Sensor format (see PhotoSensorFormat): full frame or APS-C. It sets the focal length for the field of view
 	//! (and so the depth of field), and the light the sensor collects for the picture (and so the noise).
 	Q_PROPERTY(int photoSensorFormat READ getPhotoSensorFormat WRITE setPhotoSensorFormat NOTIFY photoSensorFormatChanged)
+	//! Zooming with the mouse wheel steps the focal length in whole millimeters, as marked on a zoom lens
+	Q_PROPERTY(bool flagPhotoZoomWholeMillimeters READ getFlagPhotoZoomWholeMillimeters WRITE setFlagPhotoZoomWholeMillimeters NOTIFY flagPhotoZoomWholeMillimetersChanged)
 	//! The exposure time in use (seconds): the set one, or the one chosen by the automatic exposure.
 	//! The change signal is only emitted when the value shown by a camera (1/3-stop steps) changes.
 	Q_PROPERTY(double photoEffectiveExposureTime READ getPhotoEffectiveExposureTime NOTIFY photoEffectiveExposureTimeChanged)
@@ -242,6 +244,10 @@ public:
 	double getPhotoFocalLengthForFov(double fov) const;
 	//! The field of view (degrees, as StelMovementMgr) of a lens of the focal length f (m) on the sensor in use
 	double getPhotoFovForFocalLength(double f) const;
+	//! The field of view a zoom from @a currentFov towards @a targetFov ends at when the mouse wheel zoom steps in
+	//! whole millimeters (flagPhotoZoomWholeMillimeters, in photographic mode): the nearest whole focal length,
+	//! at least one millimeter away in the direction of the zoom. Otherwise @a targetFov.
+	double getPhotoWheelZoomFov(double currentFov, double targetFov) const;
 	//! Lens model: the lens is wide open at this f-number (optical vignetting is strongest there)
 	static constexpr float PHOTO_LENS_MAX_APERTURE = 1.4f;
 	//! Optical vignetting: offset of the pupil image against the lens barrel in the corner of the frame,
@@ -635,6 +641,9 @@ public slots:
 	int getPhotoSensorFormat() const {return photoSensorFormat;}
 	//! Zoom the view to the field of a lens of the given focal length (millimeters) on the sensor in use
 	void setPhotoFocalLength(double millimeters);
+	//! Zooming with the mouse wheel in whole millimeters of focal length (see flagPhotoZoomWholeMillimeters)
+	void setFlagPhotoZoomWholeMillimeters(bool b);
+	bool getFlagPhotoZoomWholeMillimeters() const {return flagPhotoZoomWholeMillimeters;}
 	//! Photographic mode: a bright body whose light can be reflected inside the lens (see StelPhotoLensFlare).
 	//! It may lie outside the frame. Collected while drawing, the ghosts are drawn by drawDeferredPhotoBodies().
 	//! @param v position (J2000 frame), @param mag magnitude (with extinction and landscape), @param color display color
@@ -850,6 +859,7 @@ signals:
 	void flagPhotoStarTrailsChanged(bool b);
 	void photoNoiseChanged(int mode);
 	void photoSensorFormatChanged(int format);
+	void flagPhotoZoomWholeMillimetersChanged(bool b);
 	void photoAberrationStrengthChanged(double s);
 	void photoEffectiveExposureTimeChanged(double seconds);
 
@@ -1222,6 +1232,8 @@ private:
 	int photoNoise = PhotoNoiseImage;
 	//! Sensor format
 	int photoSensorFormat = PhotoSensorFullFrame;
+	//! Mouse wheel zoom in whole millimeters of focal length
+	bool flagPhotoZoomWholeMillimeters = false;
 	//! Measuring the mean of textures (see photoTextureMeanLuminance())
 	std::unique_ptr<class QOpenGLShaderProgram> photoTextureMeanProgram;
 	std::unique_ptr<class QOpenGLFramebufferObject> photoTextureMeanFbo;
