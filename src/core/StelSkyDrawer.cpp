@@ -2673,6 +2673,254 @@ void main(void)
 	return std::isfinite(mean) && std::isfinite(meanSquare);
 }
 
+bool StelSkyDrawer::beginPhotoBodyImage(const Vec3d& posJ2000, float radius)
+{
+	PhotoBodyImage& im = photoBodyImage;
+	im.active = false;
+	if (!getFlagPhotographicModeActive() || !(radius > 0.f))
+		return false;
+	const StelProjectorP prj = core->getProjection(StelCore::FrameJ2000);
+	Vec3d win;
+	if (!prj->project(posJ2000, win))
+		return false;
+	// the star trail of the body (no visibility test: flux "infinite") and the blur of the lens
+	PhotoStarInstance trailInfo;
+	const float length = computePhotoTrail(*prj, posJ2000, win, 1e30f, 0.f, trailInfo);
+	const float defocus = photoLensCache.defocus;
+	if (length < 0.75f && std::fabs(defocus) < 0.5f)
+		return false;
+	const Vec2f A(trailInfo.trail[0], trailInfo.trail[1]), B(trailInfo.trail[2], trailInfo.trail[3]);
+	const Vec2f C = -0.5f*(A + B);
+	const float reach = qMax(qMax(A.norm(), B.norm()), C.norm()) + std::fabs(defocus) + 2.f;
+	// The sharp image: the disk with a border, but only what can reach the viewport
+	const int vx = prj->getViewportPosX(), vy = prj->getViewportPosY();
+	const int vw = prj->getViewportWidth(), vh = prj->getViewportHeight();
+	const float r = radius + 2.f;
+	const int x0 = qMax(static_cast<int>(std::floor(win[0] - r)), static_cast<int>(std::floor(vx - reach)));
+	const int y0 = qMax(static_cast<int>(std::floor(win[1] - r)), static_cast<int>(std::floor(vy - reach)));
+	const int x1 = qMin(static_cast<int>(std::ceil(win[0] + r)), static_cast<int>(std::ceil(vx + vw + reach)));
+	const int y1 = qMin(static_cast<int>(std::ceil(win[1] + r)), static_cast<int>(std::ceil(vy + vh + reach)));
+	const int w = x1 - x0, h = y1 - y0;
+	if (w <= 0 || h <= 0 || w > 4096 || h > 4096)
+		return false;
+
+	if (!photoBodyTried)
+	{
+		photoBodyTried = true;
+		const char* vsrc = R"(
+ATTRIBUTE highp vec2 position; // window coordinates
+uniform highp vec4 viewport;   // x, y, width, height of the viewport
+VARYING highp vec2 vWin;
+void main(void)
+{
+	vWin = position;
+	gl_Position = vec4((position - viewport.xy) / viewport.zw * 2. - 1., 0., 1.);
+}
+)";
+		const char* fsrc = R"(
+VARYING highp vec2 vWin;
+uniform sampler2D tex;
+uniform highp vec2 origin;      // window position of texel (0,0)
+uniform highp vec2 texSize;     // size of the texture (texels)
+uniform highp vec2 imageSize;   // the part of it that holds the image
+uniform highp vec4 trail;       // positions at the start (xy) and the end (zw) relative to mid-exposure
+uniform highp vec3 logStart;    // extinction along the trail
+uniform highp vec3 logEnd;
+uniform highp float defocus;    // radius of the blur disk
+uniform highp float defocusSign;
+uniform highp float defocusSA;
+uniform int blades;
+uniform highp float straightness;
+uniform highp float rotation;
+uniform int samples;
+uniform highp float lod;
+const highp float PI = 3.14159265358979;
+void main(void)
+{
+	highp vec2 A = trail.xy;
+	highp vec2 B = trail.zw;
+	highp vec2 C = -0.5*(A + B);
+	highp vec4 sum = vec4(0.);
+	highp float weights = 0.;
+	highp float n = float(samples);
+	for (int i = 0; i < 1024; ++i)
+	{
+		if (i >= samples) break;
+		highp float fi = float(i) + 0.5;
+		// Time along the exposure: in order for a pure trail, else well spread (golden ratio)
+		highp float t = defocus != 0. ? fract(fi*0.6180339887) : fi/n;
+		highp vec2 offset = (1.-t)*(1.-t)*A + 2.*t*(1.-t)*C + t*t*B;
+		highp float w = 1.;
+		if (defocus != 0.)
+		{
+			// A point of the image of the aperture (golden-angle spiral, even density)
+			highp float rr = sqrt(fi/n);
+			highp float a = float(i)*2.39996323;
+			highp float scale = 1.;
+			if (blades >= 3 && straightness > 0.)
+			{
+				highp float nb = float(blades);
+				highp float sector = 2.*PI/nb;
+				highp float d = mod(a - rotation, sector) - 0.5*sector;
+				scale = 1. / mix(1., cos(d)/cos(PI/nb), straightness);
+			}
+			offset += defocusSign * abs(defocus) * rr * scale * vec2(cos(a), sin(a));
+			w = max(0., 1. + defocusSA*(rr*rr - 0.5));
+		}
+		// the light here comes from the point of the sharp image that was offset onto it
+		highp vec2 p = vWin - offset - origin;
+		highp vec4 c = vec4(0.);
+		if (p.x >= 0. && p.y >= 0. && p.x <= imageSize.x && p.y <= imageSize.y)
+			c = textureLod(tex, p / texSize, lod);
+		highp vec3 tint = exp(logStart*((1.-t)*(1.-2.*t)) + logEnd*(t*(2.*t-1.)));
+		sum += w * vec4(c.rgb*tint, c.a);
+		weights += w;
+	}
+	FRAG_COLOR = weights > 0. ? sum / weights : vec4(0.); // premultiplied: the body covers what is behind it
+}
+)";
+		auto program = std::make_unique<QOpenGLShaderProgram>();
+		if (program->addShaderFromSourceCode(QOpenGLShader::Vertex, StelOpenGL::globalShaderPrefix(StelOpenGL::VERTEX_SHADER) + vsrc) &&
+		    program->addShaderFromSourceCode(QOpenGLShader::Fragment, StelOpenGL::globalShaderPrefix(StelOpenGL::FRAGMENT_SHADER) + fsrc))
+		{
+			program->bindAttributeLocation("position", 0);
+			if (StelPainter::linkProg(program.get(), "photographic body image"))
+			{
+				photoBodyProgram = std::move(program);
+				photoBodyVao.reset(new QOpenGLVertexArrayObject);
+				photoBodyVao->create();
+			}
+		}
+	}
+	if (!photoBodyProgram)
+		return false;
+	// One image buffer, grown when needed (with depth for the rings)
+	if (!photoBodyFbo || photoBodyFbo->width() < w || photoBodyFbo->height() < h)
+	{
+		const int fw = qMax(w, photoBodyFbo ? photoBodyFbo->width() : 0);
+		const int fh = qMax(h, photoBodyFbo ? photoBodyFbo->height() : 0);
+		QOpenGLFramebufferObjectFormat format;
+		format.setAttachment(QOpenGLFramebufferObject::Depth);
+		format.setInternalTextureFormat(GL_RGBA16F);
+		format.setMipmap(true);
+		photoBodyFbo.reset(new QOpenGLFramebufferObject((fw + 63)/64*64, (fh + 63)/64*64, format));
+		if (!photoBodyFbo->isValid())
+		{
+			photoBodyFbo.reset();
+			return false;
+		}
+	}
+
+	auto& gl = *QOpenGLContext::currentContext()->extraFunctions();
+	gl.glGetIntegerv(GL_FRAMEBUFFER_BINDING, &im.previousFbo);
+	gl.glGetIntegerv(GL_VIEWPORT, im.viewport);
+	gl.glGetFloatv(GL_COLOR_CLEAR_VALUE, im.clearColor);
+	im.scissor = gl.glIsEnabled(GL_SCISSOR_TEST);
+	gl.glDisable(GL_SCISSOR_TEST);
+	photoBodyFbo->bind();
+	// The projection stays: the viewport is shifted so that window pixel (x0, y0) lands on texel (0, 0)
+	gl.glViewport(im.viewport[0] - x0, im.viewport[1] - y0, im.viewport[2], im.viewport[3]);
+	gl.glClearColor(0.f, 0.f, 0.f, 0.f);
+	gl.glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	im.x0 = x0; im.y0 = y0; im.w = w; im.h = h;
+	im.margin = reach;
+	im.trail = length > 0.f ? trailInfo.trail : Vec4f(0.f);
+	for (int c=0; c<3; ++c)
+	{
+		im.logStart[c] = std::log(qMax(1e-9f, trailInfo.trailStart[c]));
+		im.logEnd[c] = std::log(qMax(1e-9f, trailInfo.trailEnd[c]));
+	}
+	im.defocus = std::fabs(defocus) >= 0.5f ? defocus : 0.f;
+	im.active = true;
+	return true;
+}
+
+void StelSkyDrawer::endPhotoBodyImage()
+{
+	PhotoBodyImage& im = photoBodyImage;
+	if (!im.active)
+		return;
+	im.active = false;
+	auto& gl = *QOpenGLContext::currentContext()->extraFunctions();
+	gl.glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(im.previousFbo));
+	gl.glViewport(im.viewport[0], im.viewport[1], im.viewport[2], im.viewport[3]);
+	gl.glClearColor(im.clearColor[0], im.clearColor[1], im.clearColor[2], im.clearColor[3]);
+	if (im.scissor)
+		gl.glEnable(GL_SCISSOR_TEST);
+
+	// Mipmaps: the samples of a long trail or a large blur disk read a correspondingly smoothed image
+	gl.glActiveTexture(GL_TEXTURE0);
+	gl.glBindTexture(GL_TEXTURE_2D, photoBodyFbo->texture());
+	gl.glGenerateMipmap(GL_TEXTURE_2D);
+	gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+	gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+	const Vec2f A(im.trail[0], im.trail[1]), B(im.trail[2], im.trail[3]);
+	const float length = A.norm() + B.norm();
+	const float R = std::fabs(im.defocus);
+	// Samples: about one per pixel along the trail and per two square pixels of the blur disk
+	const int samples = qBound(8, static_cast<int>(std::ceil(length + 0.5f*M_PIf*R*R)), 256);
+	const float area = length*qMax(1.f, 2.f*R) + M_PIf*R*R;
+	const float lod = 0.5f*std::log2(qMax(1.f, area/static_cast<float>(samples)));
+
+	auto& prog = *photoBodyProgram;
+	prog.bind();
+	prog.setUniformValue("viewport", QVector4D(im.viewport[0], im.viewport[1], im.viewport[2], im.viewport[3]));
+	prog.setUniformValue("tex", 0);
+	prog.setUniformValue("origin", QVector2D(im.x0, im.y0));
+	prog.setUniformValue("texSize", QVector2D(photoBodyFbo->width(), photoBodyFbo->height()));
+	prog.setUniformValue("imageSize", QVector2D(im.w, im.h));
+	prog.setUniformValue("trail", QVector4D(A[0], A[1], B[0], B[1]));
+	prog.setUniformValue("logStart", QVector3D(im.logStart[0], im.logStart[1], im.logStart[2]));
+	prog.setUniformValue("logEnd", QVector3D(im.logEnd[0], im.logEnd[1], im.logEnd[2]));
+	prog.setUniformValue("defocus", im.defocus);
+	prog.setUniformValue("defocusSign", im.defocus > 0.f ? -1.f : 1.f);
+	prog.setUniformValue("defocusSA", im.defocus > 0.f ? -photoLensCache.sphericalAberration : photoLensCache.sphericalAberration);
+	const int blades = photoApertureBlades >= 3 ? photoApertureBlades : 0;
+	const float sector = blades > 0 ? 2.f*M_PIf/static_cast<float>(blades) : 0.f;
+	prog.setUniformValue("blades", blades);
+	prog.setUniformValue("straightness", blades > 0 ? getPhotoApertureStraightness() : 0.f);
+	prog.setUniformValue("rotation", PHOTO_SPIKE_ANGLE - 0.5f*sector);
+	prog.setUniformValue("samples", samples);
+	prog.setUniformValue("lod", lod);
+
+	// The quad: the image and how far the trail and the blur reach
+	const float m = im.margin;
+	const GLfloat quad[] = {
+		im.x0 - m, im.y0 - m,   im.x0 + im.w + m, im.y0 - m,
+		im.x0 - m, im.y0 + im.h + m,   im.x0 + im.w + m, im.y0 + im.h + m };
+	GLint previousVao = 0;
+	gl.glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &previousVao);
+	GLint previousBuffer = 0;
+	gl.glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &previousBuffer);
+	photoBodyVao->bind();
+	GLuint vbo = 0;
+	gl.glGenBuffers(1, &vbo);
+	gl.glBindBuffer(GL_ARRAY_BUFFER, vbo);
+	gl.glBufferData(GL_ARRAY_BUFFER, sizeof(quad), quad, GL_STREAM_DRAW);
+	gl.glEnableVertexAttribArray(0);
+	gl.glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
+	const GLboolean blend = gl.glIsEnabled(GL_BLEND);
+	const GLboolean depth = gl.glIsEnabled(GL_DEPTH_TEST);
+	GLint blendSrcRGB, blendDstRGB, blendSrcA, blendDstA;
+	gl.glGetIntegerv(GL_BLEND_SRC_RGB, &blendSrcRGB);
+	gl.glGetIntegerv(GL_BLEND_DST_RGB, &blendDstRGB);
+	gl.glGetIntegerv(GL_BLEND_SRC_ALPHA, &blendSrcA);
+	gl.glGetIntegerv(GL_BLEND_DST_ALPHA, &blendDstA);
+	gl.glEnable(GL_BLEND);
+	gl.glDisable(GL_DEPTH_TEST);
+	gl.glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+	gl.glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+	gl.glBlendFuncSeparate(static_cast<GLenum>(blendSrcRGB), static_cast<GLenum>(blendDstRGB), static_cast<GLenum>(blendSrcA), static_cast<GLenum>(blendDstA));
+	if (!blend) gl.glDisable(GL_BLEND);
+	if (depth) gl.glEnable(GL_DEPTH_TEST);
+	gl.glDisableVertexAttribArray(0);
+	gl.glDeleteBuffers(1, &vbo);
+	gl.glBindVertexArray(static_cast<GLuint>(previousVao));
+	gl.glBindBuffer(GL_ARRAY_BUFFER, static_cast<GLuint>(previousBuffer));
+	prog.release();
+}
+
 void StelSkyDrawer::setFlagPhotoStarTrails(bool b)
 {
 	if (b == flagPhotoStarTrails)

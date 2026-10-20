@@ -221,6 +221,14 @@ public:
 	//! the GPU from its mipmaps. <Y^2>/<Y> is the typical luminance of the lit parts, whatever their share of the
 	//! image. Used to calibrate images of nebulae in the photographic mode. Returns false on failure.
 	//! It must be called with the GL context current; it restores the bound framebuffer and viewport.
+	//! Photographic mode: blur and trail of a body with a visible disk (Moon, Sun, planets). The disk is drawn
+	//! into an offscreen image (call this after creating the painter, before drawing), which endPhotoBodyImage()
+	//! then puts into the scene, spread along the star trail and over the blur disk of a defocused lens.
+	//! Labels, lines and markers are drawn as usual and stay sharp. Returns false (draw directly) when the
+	//! body needs neither, or the offscreen image cannot be made.
+	//! @param posJ2000 position of the body, @param radius its radius on the screen with rings (pixels)
+	bool beginPhotoBodyImage(const Vec3d& posJ2000, float radius);
+	void endPhotoBodyImage();
 	//! @param power the texture values are raised to this power first (see PHOTO_DSO_DESTRETCH)
 	bool photoTextureStatistics(class StelTexture& texture, float power, float& mean, float& meanSquare);
 	//! Images of nebulae are processed pictures: their contrast is compressed ("stretched") to show the faint
@@ -1219,6 +1227,24 @@ private:
 	std::unique_ptr<class QOpenGLFramebufferObject> photoTextureMeanFbo;
 	std::unique_ptr<QOpenGLVertexArrayObject> photoTextureMeanVao;
 	bool photoTextureMeanTried = false;
+	//! Offscreen image of a body (see beginPhotoBodyImage())
+	std::unique_ptr<class QOpenGLFramebufferObject> photoBodyFbo;
+	std::unique_ptr<class QOpenGLShaderProgram> photoBodyProgram;
+	std::unique_ptr<QOpenGLVertexArrayObject> photoBodyVao;
+	bool photoBodyTried = false;
+	struct PhotoBodyImage
+	{
+		bool active = false;
+		int x0 = 0, y0 = 0, w = 0, h = 0;  //!< the image: window pixels
+		float margin = 0.f;                 //!< how far the blur and the trail reach beyond it (pixels)
+		Vec4f trail;                        //!< offsets at the start and the end of the exposure (pixels)
+		Vec3f logStart, logEnd;             //!< log of the extinction along the trail
+		float defocus = 0.f;                //!< signed radius of the blur disk (pixels)
+		int previousFbo = 0;
+		int viewport[4] = {0, 0, 0, 0};
+		bool scissor = false;
+		float clearColor[4] = {0.f, 0.f, 0.f, 0.f};
+	} photoBodyImage;
 	unsigned int photoNoiseFrame = 0;
 	//! Precomputed each frame in update(): star trails are drawn (long enough to show)
 	bool photoTrailsActive = false;
