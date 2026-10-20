@@ -156,6 +156,14 @@ void PhotographicModeDialog::fillComboBoxes()
 		ui->sensorComboBox->addItem(q_("APS-C (23.5 x 15.6 mm)"), StelSkyDrawer::PhotoSensorAPSC);
 	}
 	{
+		// The motion during the exposure: off (flagPhotoStarTrails false), or the mount
+		const QSignalBlocker blocker(ui->mountComboBox);
+		ui->mountComboBox->clear();
+		ui->mountComboBox->addItem(q_("No motion"), -1);
+		ui->mountComboBox->addItem(q_("Fixed tripod (star trails)"), StelSkyDrawer::PhotoMountTripod);
+		ui->mountComboBox->addItem(q_("Star tracker (landscape blurs)"), StelSkyDrawer::PhotoMountTracker);
+	}
+	{
 		const QSignalBlocker blocker(ui->noiseComboBox);
 		ui->noiseComboBox->clear();
 		ui->noiseComboBox->addItem(q_("Off"), StelSkyDrawer::PhotoNoiseOff);
@@ -224,7 +232,6 @@ void PhotographicModeDialog::createDialogContent()
 	connectBoolProperty(ui->vignettingCheckBox,       "StelSkyDrawer.flagPhotoVignetting");
 	connectBoolProperty(ui->aberrationsCheckBox,      "StelSkyDrawer.flagPhotoAberrations");
 	connectBoolProperty(ui->lensFlareCheckBox,        "StelSkyDrawer.flagPhotoLensFlare");
-	connectBoolProperty(ui->starTrailsCheckBox,       "StelSkyDrawer.flagPhotoStarTrails");
 	connectBoolProperty(ui->zoomWholeMillimetersCheckBox, "StelSkyDrawer.flagPhotoZoomWholeMillimeters");
 
 	fillComboBoxes();
@@ -276,6 +283,17 @@ void PhotographicModeDialog::createDialogContent()
 			drawer->setPhotoNoise(ui->noiseComboBox->itemData(index).toInt());
 	});
 	connect(drawer, &StelSkyDrawer::photoNoiseChanged,                 this, &PhotographicModeDialog::updateCameraWidgets);
+	connect(ui->mountComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this, drawer](int index)
+	{
+		if (index < 0)
+			return;
+		const int mount = ui->mountComboBox->itemData(index).toInt();
+		if (mount >= 0)
+			drawer->setPhotoMount(mount);
+		drawer->setFlagPhotoStarTrails(mount >= 0);
+	});
+	connect(drawer, &StelSkyDrawer::flagPhotoStarTrailsChanged,        this, &PhotographicModeDialog::updateCameraWidgets);
+	connect(drawer, &StelSkyDrawer::photoMountChanged,                 this, &PhotographicModeDialog::updateCameraWidgets);
 	// Sensor and lens
 	connect(ui->sensorComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this, drawer](int index)
 	{
@@ -372,6 +390,11 @@ void PhotographicModeDialog::updateCameraWidgets()
 	{
 		const QSignalBlocker blocker(ui->noiseComboBox);
 		ui->noiseComboBox->setCurrentIndex(qMax(0, ui->noiseComboBox->findData(drawer->getPhotoNoise())));
+	}
+	{
+		const QSignalBlocker blocker(ui->mountComboBox);
+		const int mount = drawer->getFlagPhotoStarTrails() ? drawer->getPhotoMount() : -1;
+		ui->mountComboBox->setCurrentIndex(qMax(0, ui->mountComboBox->findData(mount)));
 	}
 	{
 		const QSignalBlocker blocker(ui->whiteBalanceComboBox);

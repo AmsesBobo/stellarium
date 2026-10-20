@@ -762,11 +762,23 @@ void LandscapeMgr::draw(StelCore* core)
 	// Draw the landscape
 	Landscape::setTransparency( getFlagLandscapeUseTransparency() ? landscapeTransparency : 0.0);
 
+	// Photographic mode on a star tracker: the camera turns with the sky, so the landscape blurs (its horizon
+	// line and labels are annotations and stay sharp)
+	const bool groundImage = !flagPolyLineDisplayedOnly && drawer->beginPhotoGroundImage();
+	Landscape::setPhotoGroundCapture(groundImage);
 	if (oldLandscape)
 	{
 		oldLandscape->draw(core, flagPolyLineDisplayedOnly);
 	}
 	landscape->draw(core, flagPolyLineDisplayedOnly);
+	if (groundImage)
+	{
+		Landscape::setPhotoGroundCapture(false);
+		drawer->endPhotoGroundImage();
+		if (oldLandscape)
+			oldLandscape->drawOverlays(core);
+		landscape->drawOverlays(core);
+	}
 
 	// Draw the cardinal points
 	cardinalPoints->draw(core, static_cast<double>(StelApp::getInstance().getCore()->getCurrentLocation().getLatitude()));
