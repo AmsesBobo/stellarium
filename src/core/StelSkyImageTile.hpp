@@ -139,6 +139,12 @@ protected:
 	//! The texture of the tile
 	StelTextureSP tex;
 
+	//! Photographic mode: luminance (cd/m^2) of a texel of value 1 (linear), from the catalog magnitude of
+	//! the object in the image and the mean of the texture; 0 = not yet known, negative = not possible
+	float photoLuminanceScale = 0.f;
+	//! Compute photoLuminanceScale (the texture must be loaded and bound)
+	void computePhotoLuminanceScale(StelCore* core);
+
 	//! Minimum resolution of the data of the texture in degree/pixel
 	float minResolution;
 

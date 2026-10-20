@@ -1095,7 +1095,7 @@ void LandscapeOldStyle::drawFog(StelCore*const core, const int firstFreeTexSampl
 	renderProgram->setUniformValue(shaderVars.vshift, vpos);
 
 	const float brightness =
-		colorToShader(landFader.getInterstate()*fogFader.getInterstate()*(0.1f+0.1f*landscapeBrightness));
+		colorToShader(landFader.getInterstate()*fogFader.getInterstate()*fogBrightness());
 	renderProgram->setUniformValue(shaderVars.brightness, brightness, brightness, brightness,
 				       (1.f-landscapeTransparency)*landFader.getInterstate());
 	renderProgram->setUniformValue(shaderVars.projectionMatrixInverse, prj->getProjectionMatrix().toQMatrix().inverted());
@@ -1307,7 +1307,7 @@ void LandscapeOldStyle::drawFogLowGL(StelCore* core, StelPainter& sPainter) cons
 	transfo->combine(Mat4d::translation(Vec3d(0.,0.,static_cast<double>(vpos))));
 	sPainter.setProjector(core->getProjection(transfo));
 	sPainter.setBlending(true, GL_ONE, GL_ONE);
-	sPainter.setColor(Vec3f(landFader.getInterstate()*fogFader.getInterstate()*(0.1f+0.1f*landscapeBrightness)),
+	sPainter.setColor(Vec3f(landFader.getInterstate()*fogFader.getInterstate()*fogBrightness()),
 			  (1.f-landscapeTransparency)*landFader.getInterstate());
 	fogTex->bind();
 	const double height = radius * static_cast<double>(calibrated?
@@ -1740,7 +1740,7 @@ void main(void)
 		{
 			gl.glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_COLOR);
 			const float brightness =
-				colorToShader(landFader.getInterstate()*fogFader.getInterstate()*(0.1f+0.1f*landscapeBrightness));
+				colorToShader(landFader.getInterstate()*fogFader.getInterstate()*fogBrightness());
 
 			renderProgram->setUniformValue(shaderVars.brightness, brightness, brightness, brightness,
 						       landFader.getInterstate());
@@ -2105,7 +2105,7 @@ void main(void)
 		{
 			gl.glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_COLOR);
 			const float brightness =
-				colorToShader(landFader.getInterstate()*fogFader.getInterstate()*(0.1f+0.1f*landscapeBrightness));
+				colorToShader(landFader.getInterstate()*fogFader.getInterstate()*fogBrightness());
 
 			renderProgram->setUniformValue(shaderVars.bottomCapColor, 0.f, 0.f, 0.f, 0.f);
 			renderProgram->setUniformValue(shaderVars.brightness,

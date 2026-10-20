@@ -372,6 +372,14 @@ public:
 	//! @return a list containing the nebulae located inside the limitFov circle around position v.
 	QList<StelObjectP> searchAround(const Vec3d& v, double limitFov, const StelCore* core) const override;
 
+	//! The brightest luminous object (galaxy, bright nebula, globular cluster) with a known magnitude within the
+	//! given angular radius (degrees) of the position (J2000) and at least minRadius (degrees) in size, whether
+	//! the nebulae are shown or not. Dark nebulae (their "magnitude" is an opacity class), stars and star
+	//! clusters (their light is drawn as stars) are left out. Used to calibrate the images of nebulae in the
+	//! photographic mode. Returns an empty pointer if there is none.
+	//! @param magnitude the V magnitude (estimated from B where only B is known)
+	NebulaP getBrightestWithin(const Vec3d& v, double radius, double minRadius, float& magnitude) const;
+
 	//! Return the matching nebula object's pointer if exists or an "empty" StelObjectP.
 	//! @param nameI18n The case in-sensitive nebula name or NGC M catalog name : format can
 	//! be M31, M 31, NGC31, NGC 31

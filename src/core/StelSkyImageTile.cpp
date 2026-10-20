@@ -29,6 +29,8 @@
 #include "StelPainter.hpp"
 #include "StelModuleMgr.hpp"
 #include "SolarSystem.hpp"
+#include "NebulaMgr.hpp"
+#include "Nebula.hpp"
 #include <QDebug>
 
 #include <cstdio>
@@ -94,7 +96,8 @@ void StelSkyImageTile::draw(StelCore* core, StelPainter& sPainter, float opacity
 		vel = core->getAberrationVec(core->getJDE());
 	}
 
-	const float limitLuminance = core->getSkyDrawer()->getLimitLuminance();
+	// In the photographic mode the exposure decides what shows (see drawTile()), not the eye
+	const float limitLuminance = core->getSkyDrawer()->getFlagPhotographicModeActive() ? 0.f : core->getSkyDrawer()->getLimitLuminance();
 	QMultiMap<double, StelSkyImageTile*> result;
 	// TODO: adjust that viewportconvexpolygon by aberration to select the right tiles.
 	// I thought the viewportpolygon needs to be enlarged just a bit. (I use 20 arcseconds here as estimate of max. aberration from earth.)
@@ -273,6 +276,63 @@ void StelSkyImageTile::getTilesToDraw(QMultiMap<double, StelSkyImageTile*>& resu
 	}
 }
 
+// The images of nebulae are processed pictures, not measurements: their brightness is set so that the light
+// of the whole image is the catalog magnitude of the brightest object in it. Then they appear with the exposure
+// and stand in the right proportion to the stars and the Milky Way, while the shape within keeps the
+// processing of the picture.
+void StelSkyImageTile::computePhotoLuminanceScale(StelCore* core)
+{
+	photoLuminanceScale = -1.f;
+	if (skyConvexPolygons.isEmpty() || !tex)
+		return;
+	float mean = 0.f, meanSquare = 0.f;
+	if (!core->getSkyDrawer()->photoTextureStatistics(*tex, StelSkyDrawer::PHOTO_DSO_DESTRETCH, mean, meanSquare) || !(mean > 1e-7f) || !(meanSquare > 0.f))
+		return;
+	// typical texture value of the lit parts of the image, whatever their share of it
+	const double lit = static_cast<double>(meanSquare/mean);
+	double area = 0.;
+	for (const auto& poly : std::as_const(skyConvexPolygons))
+		area += poly->getArea();
+	if (!(area > 0.))
+		return;
+	// luminance (cd/m^2) of a surface brightness in V mag/arcsec^2
+	auto surfaceLuminance = [](double mu) { return 10.8e4 * std::pow(10., -0.4*mu); };
+	// Images without a catalog object to measure them by (faint nebulae, dust, star fields): their lit parts
+	// at a faint surface brightness of 22 mag/arcsec^2
+	double scale = surfaceLuminance(22.) / lit;
+	NebulaMgr* nebulae = GETSTELMODULE(NebulaMgr);
+	if (nebulae && getFrameType() == StelCore::FrameJ2000)
+	{
+		const SphericalCap cap = skyConvexPolygons.first()->getBoundingCap();
+		const double radius = std::acos(qBound(-1., cap.d, 1.)) * M_180_PI;
+		float mag = 99.f;
+		// The object must be what the image shows: large in it, or in its middle (a small planetary nebula)
+		NebulaP object = nebulae->getBrightestWithin(cap.n, radius, 0.1*radius, mag);
+		float centralMag = 99.f;
+		const NebulaP central = nebulae->getBrightestWithin(cap.n, 0.1*radius, 0.01*radius, centralMag);
+		if (central && centralMag < mag)
+		{
+			object = central;
+			mag = centralMag;
+		}
+		if (object && mag < 50.f)
+		{
+			// Globular clusters: about half of their light is in stars too faint for the star catalogs
+			if (object->getDSOType() == Nebula::NebGc)
+				mag += 0.75f;
+			// The total light of the object (lux) is the light of the image: its mean luminance (cd/m^2) over
+			// the solid angle of the image. The lit parts between 17 mag/arcsec^2 (the cores of bright nebulae
+			// and galaxies) and 24 (the faintest nebulae a camera records): beyond, the image shows other things
+			// than the object (a wide field, other objects).
+			const double meanLuminance = 2.54e-6 * std::pow(10., -0.4*static_cast<double>(mag)) / area;
+			scale = qBound(surfaceLuminance(24.) / lit, meanLuminance / static_cast<double>(mean), surfaceLuminance(17.) / lit);
+		}
+	}
+	// Whatever the image: its brightest texel (value 1) not brighter than 15 mag/arcsec^2. An image that is
+	// nearly black (a faint nebula processed dark) would otherwise turn its compression noise into light.
+	photoLuminanceScale = static_cast<float>(qMin(scale, surfaceLuminance(15.)));
+}
+
 // Draw the image on the screen.
 // Assume GL_TEXTURE_2D is enabled
 bool StelSkyImageTile::drawTile(StelCore* core, StelPainter& sPainter, const Vec3d &vel)
@@ -288,6 +348,22 @@ bool StelSkyImageTile::drawTile(StelCore* core, StelPainter& sPainter, const Vec
 
 	// Draw the real texture for this image
 	float ad_lum = (luminance>0) ? qMin(1.0f, core->getToneReproducer()->adaptLuminanceScaled(luminance)) : 1.f;
+	// Photographic mode: the image in physical units, like the stars and the Milky Way (scene units)
+	StelSkyDrawer* drawer = core->getSkyDrawer();
+	const bool photo = drawer->getFlagPhotographicModeActive();
+	float photoValue = 0.f;
+	if (photo)
+	{
+		if (photoLuminanceScale == 0.f)
+			computePhotoLuminanceScale(core);
+		if (photoLuminanceScale > 0.f)
+			photoValue = photoLuminanceScale * drawer->getPhotoSceneScale();
+		ad_lum = photoValue;
+		if (!tex->bind())
+			return false;
+		// Give back a part of the contrast of the processed image: value^p (the shader computes (value*color)^p)
+		sPainter.setTextureDisplayAdjustment(1.f/StelSkyDrawer::PHOTO_DSO_DESTRETCH, 1.f, 1.f, 1.f, 0, false, false);
+	}
 	Vec4f color;
 	if (alphaBlend || texFader->state()==QTimeLine::Running)
 	{
@@ -364,10 +440,29 @@ bool StelSkyImageTile::drawTile(StelCore* core, StelPainter& sPainter, const Vec
 			extinctedColor[0]*=fabs(extinctionFactor);
 			extinctedColor[1]*=fabs(extinctionFactor);
 			extinctedColor[2]*=fabs(extinctionFactor);
+			if (photo)
+			{
+				// the color of the extinction (the atmosphere takes the blue first)
+				const Vec3f tint = drawer->getPhotoExtinctionTint(altAz);
+				for (int c=0; c<3; ++c)
+					extinctedColor[c] *= tint[c];
+			}
+		}
+		if (photo)
+		{
+			// The painter takes sRGB-encoded colors (colorToShader() decodes them): encode the linear values,
+			// taken to the power 1/p (see setTextureDisplayAdjustment() above)
+			for (int c=0; c<3; ++c)
+			{
+				const float x = std::pow(qMax(0.f, extinctedColor[c]), 1.f/StelSkyDrawer::PHOTO_DSO_DESTRETCH);
+				extinctedColor[c] = x <= 0.0031308f ? 12.92f*x : 1.055f*std::pow(x, 1.f/2.4f) - 0.055f;
+			}
 		}
 		sPainter.setColor(extinctedColor);
 		sPainter.drawSphericalRegion(poly.data(), StelPainter::SphericalPolygonDrawModeTextureFill, Q_NULLPTR, true, 5., vel);
 	}
+	if (photo)
+		sPainter.resetTextureDisplayAdjustment();
 
 #ifdef DEBUG_STELSKYIMAGE_TILE
 	if (debugFont==Q_NULLPTR)

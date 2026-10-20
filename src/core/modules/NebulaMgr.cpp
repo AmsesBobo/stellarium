@@ -1016,6 +1016,49 @@ QList<StelObjectP> NebulaMgr::searchAround(const Vec3d& av, double limitFov, con
 	return result;
 }
 
+NebulaP NebulaMgr::getBrightestWithin(const Vec3d& av, double radius, double minRadius, float& magnitude) const
+{
+	const StelCore* core = StelApp::getInstance().getCore();
+	Vec3d v(av);
+	v.normalize();
+	const double cosRadius = std::cos(radius * M_PI/180.);
+	NebulaP best;
+	magnitude = 99.f;
+	for (const auto& n : std::as_const(dsoArray))
+	{
+		Vec3d pos = n->XYZ;
+		pos.normalize();
+		if (pos*v < cosRadius)
+			continue;
+		switch (n->getDSOType())
+		{
+			case Nebula::NebDn: case Nebula::NebMolCld: case Nebula::NebStar:
+			case Nebula::NebCl: case Nebula::NebOc: case Nebula::NebSA: case Nebula::NebSC:
+				continue;
+			default:
+				break;
+		}
+		if (n->getAngularRadius(core) < minRadius)
+			continue;
+		// V magnitude; where only B is known, about B - 0.6 (a typical color of galaxies and clusters)
+		float mag = n->getVMagnitude(nullptr);
+		if (!(mag < 50.f))
+		{
+			const float b = n->getBMagnitude(nullptr);
+			mag = (b < 50.f) ? b - 0.6f : 99.f;
+		}
+		// A bright cluster with nebulosity (the Pleiades): its magnitude is the light of its stars
+		if (n->getDSOType() == Nebula::NebCn && mag < 3.f)
+			continue;
+		if (mag < magnitude)
+		{
+			magnitude = mag;
+			best = n;
+		}
+	}
+	return best;
+}
+
 NebulaP NebulaMgr::searchDSO(unsigned int DSO) const
 {
 	if (dsoIndex.contains(DSO))
