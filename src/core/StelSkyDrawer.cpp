@@ -3420,6 +3420,48 @@ highp vec3 photoExtinctionTint(highp float sinAltitude)
 )");
 }
 
+QByteArray StelSkyDrawer::getPhotoSkyTrailShader()
+{
+	return QByteArray(R"(
+uniform int photoSkyTrailSamples;      // 1: no trail
+uniform highp vec3 photoSkyTrailAxis;  // rotation axis of the sky (model frame)
+uniform highp float photoSkyTrailAngle; // angle the sky turns during the exposure (radians)
+// The direction seen at sample i of the exposure (centered on the current time) by the pixel looking at dir now
+highp vec3 photoSkyTrailDirection(highp vec3 dir, int i)
+{
+	highp float a = photoSkyTrailAngle*((float(i) + 0.5)/float(photoSkyTrailSamples) - 0.5);
+	highp float c = cos(a), s = sin(a);
+	return dir*c + cross(photoSkyTrailAxis, dir)*s + photoSkyTrailAxis*(dot(photoSkyTrailAxis, dir)*(1. - c));
+}
+)");
+}
+
+void StelSkyDrawer::setPhotoSkyTrailUniforms(QOpenGLShaderProgram& program, const StelProjector::ModelViewTranformP& modelView, double texturePixelsPerRad) const
+{
+	int samples = 1;
+	Vec3d axis(0., 0., 1.);
+	if (photoTrailsActive && getFlagPhotographicModeActive())
+	{
+		// The axis from the view frame to the frame of the texture (the inverse of the rotation; refraction
+		// does not turn the sky)
+		axis = modelView->getApproximateLinearTransfo().transpose().multiplyWithoutTranslation(photoTrailAxisView);
+		if (axis.normSquared() > 0.)
+		{
+			axis.normalize();
+			// Samples about one screen pixel apart, but no closer than half a texel: the longest trail
+			// (on the celestial equator) decides
+			const double pixelPerRad = static_cast<double>(core->getProjection(StelCore::FrameJ2000)->getPixelPerRadAtCenter());
+			const double length = photoTrailAngle * qMin(pixelPerRad, 2.*texturePixelsPerRad);
+			samples = qBound(1, static_cast<int>(std::ceil(length)), 128);
+		}
+		else
+			axis.set(0., 0., 1.);
+	}
+	program.setUniformValue("photoSkyTrailSamples", samples);
+	program.setUniformValue("photoSkyTrailAxis", QVector3D(static_cast<float>(axis[0]), static_cast<float>(axis[1]), static_cast<float>(axis[2])));
+	program.setUniformValue("photoSkyTrailAngle", static_cast<float>(samples > 1 ? photoTrailAngle : 0.));
+}
+
 void StelSkyDrawer::setPhotoExtinctionUniforms(QOpenGLShaderProgram& program, int textureUnit)
 {
 	const bool enabled = photoExtinctionActive && photoExtinctionTints.size() == 256;

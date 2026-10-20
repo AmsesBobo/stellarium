@@ -286,6 +286,7 @@ void main()
 			core->getAberrationShader() +
 			extinction.getForwardTransformShader() +
 			StelSkyDrawer::getPhotoExtinctionShader() +
+			StelSkyDrawer::getPhotoSkyTrailShader() +
 			makeSaturationShader()+
 			R"(
 VARYING highp vec3 ndcPos;
@@ -334,12 +335,29 @@ void main(void)
 		extinctionFactor = 1.;
 	}
 
-    vec4 texColor = texture2D(mainTex, texc);
-	if (photoMode && photoDestretch != 1.)
+    vec4 texColor;
+	if (photoMode)
 	{
-		float luminance = dot(texColor.rgb, vec3(0.2126, 0.7152, 0.0722));
-		texColor.rgb *= luminance > 0. ? pow(luminance, photoDestretch - 1.) : 0.;
+		// Averaged over the exposure: the sky turns past the pixel (star trails). The display stretch
+		// of the image is undone for each sample, before the light is added up.
+		texColor = vec4(0);
+		for (int i = 0; i < 128; ++i)
+		{
+			if (i >= photoSkyTrailSamples)
+				break;
+			vec3 dir = photoSkyTrailDirection(modelPos, i);
+			vec4 c = texture2D(mainTex, vec2(atan(dir.x, dir.y)/(2.*PI), acos(-dir.z)/PI));
+			if (photoDestretch != 1.)
+			{
+				float luminance = dot(c.rgb, vec3(0.2126, 0.7152, 0.0722));
+				c.rgb *= luminance > 0. ? pow(luminance, photoDestretch - 1.) : 0.;
+			}
+			texColor += c;
+		}
+		texColor /= float(photoSkyTrailSamples);
 	}
+	else
+		texColor = texture2D(mainTex, texc);
     vec4 color = texColor*vec4(brightness*extinctionColor,1)*extinctionFactor;
 	if(saturation != 1.0)
 		color.rgb = saturate(color.rgb, saturation);
@@ -397,6 +415,9 @@ void main(void)
 		projector->setUnProjectUniforms(*renderProgram);
 		extinction.setForwardTransformUniforms(*renderProgram);
 		drawer->setPhotoExtinctionUniforms(*renderProgram, 1);
+		int texWidth = 4096, texHeight = 2048;
+		photoTex->getDimensions(texWidth, texHeight);
+		drawer->setPhotoSkyTrailUniforms(*renderProgram, modelView, texWidth/(2.*M_PI));
 		auto& glf = *QOpenGLContext::currentContext()->functions();
 		glf.glEnable(GL_BLEND);
 		glf.glBlendFunc(GL_ONE,GL_ONE);

@@ -685,6 +685,14 @@ public slots:
 	static QByteArray getPhotoExtinctionShader();
 	//! Set the uniforms of getPhotoExtinctionShader(), with the table bound to the given texture unit.
 	void setPhotoExtinctionUniforms(class QOpenGLShaderProgram& program, int textureUnit);
+	//! GLSL code for the trails of extended sky textures (Milky Way, zodiacal light) during the exposure:
+	//! uniform int photoSkyTrailSamples (1 = no trail), and highp vec3 photoSkyTrailDirection(highp vec3 dir, int i),
+	//! the direction (model frame) seen at the same place of the sensor at sample i of the exposure.
+	//! The camera stands still, so a pixel keeps its altitude (and extinction) while the sky turns past it.
+	static QByteArray getPhotoSkyTrailShader();
+	//! Set the uniforms of getPhotoSkyTrailShader() for a texture drawn in the frame of @a modelView, with
+	//! @a texturePixelsPerRad texels per radian (it limits the number of samples needed).
+	void setPhotoSkyTrailUniforms(class QOpenGLShaderProgram& program, const StelProjector::ModelViewTranformP& modelView, double texturePixelsPerRad) const;
 	//! Show the line with the camera settings at the top of the screen.
 	void setFlagPhotoInfoLine(bool b);
 	bool getFlagPhotoInfoLine() const {return flagPhotoInfoLine;}
