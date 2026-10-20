@@ -382,6 +382,7 @@ void main()
 			projector->getUnProjectShader() +
 			extinction.getForwardTransformShader() +
 			StelSkyDrawer::getPhotoExtinctionShader() +
+			StelSkyDrawer::getPhotoSkyTrailShader() +
 			R"(
 VARYING highp vec3 ndcPos;
 uniform sampler2D mainTex;
@@ -430,7 +431,17 @@ void main(void)
 
 	if (photoMode)
 	{
-		FRAG_COLOR = vec4(texture2D(photoTex, texc).r * brightness * extinctionColor * extinctionFactor, 1);
+		// Averaged over the exposure: the sky turns past the pixel (star trails)
+		float zodiacal = 0.;
+		for (int i = 0; i < 128; ++i)
+		{
+			if (i >= photoSkyTrailSamples)
+				break;
+			vec3 dir = photoSkyTrailDirection(modelPos, i);
+			zodiacal += texture2D(photoTex, vec2((atan(dir.x, dir.y) + lambdaSun)/(2.*PI), acos(-dir.z)/PI)).r;
+		}
+		zodiacal /= float(photoSkyTrailSamples);
+		FRAG_COLOR = vec4(zodiacal * brightness * extinctionColor * extinctionFactor, 1);
 		return;
 	}
     vec4 color = texture2D(mainTex, texc)*vec4(brightness,1)*extinctionFactor;
@@ -494,6 +505,7 @@ void main(void)
 		projector->setUnProjectUniforms(*renderProgram);
 		extinction.setForwardTransformUniforms(*renderProgram);
 		drawer->setPhotoExtinctionUniforms(*renderProgram, 2);
+		drawer->setPhotoSkyTrailUniforms(*renderProgram, transfo, 360./(2.*M_PI)); // 1 texel per degree
 		glf.glEnable(GL_BLEND);
 		glf.glBlendFunc(GL_ONE,GL_ONE);
 		bindVAO();
