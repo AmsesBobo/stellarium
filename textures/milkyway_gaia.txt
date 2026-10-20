@@ -1,0 +1,37 @@
+milkyway_gaia.png - Milky Way texture of the photographic mode
+==============================================================
+
+Source
+------
+Derived from the Milky Way skybox (six cubemap faces) of the Gaia Sky
+high-resolution texture pack, version 15 of 2026-01-09:
+  https://gaia.ari.uni-heidelberg.de/gaiasky/repository/tex/v015_20260109/
+Gaia Sky: Toni Sagrista Selles, Astronomisches Rechen-Institut (ARI/ZAH),
+Heidelberg University - https://gaiasky.space
+The Milky Way of Gaia Sky is based on data of the ESA mission Gaia
+(ESA/Gaia/DPAC).
+
+Processing (for Stellarium)
+---------------------------
+- the six cube faces re-projected to Stellarium's equatorial layout
+  (4096 x 2048, column 0.25 - RA/360, top row Dec +90),
+- adaptive smoothing of the faint, quantized regions; the darkened spots at
+  the galactic poles of the source corrected with a cosecant law,
+- treated as linear in surface brightness and calibrated to the mean
+  integrated starlight at the zenith at 40 N (Masana et al. 2021, MNRAS 501,
+  5443) minus the light of the stars Stellarium draws itself
+  (see src/core/modules/MilkyWay.cpp),
+- stored sRGB-encoded (the GPU decodes it back to linear light).
+
+License
+-------
+This texture is not covered by the GPL of Stellarium.
+Gaia Sky states (https://gaiasky.space/licenses/) that datasets it created
+itself are licensed under CC BY, while datasets from other sources keep their
+original licenses. The texture pack does not state the license of the
+skybox. Gaia catalogue data are distributed under CC BY-NC 3.0 IGO
+(https://www.cosmos.esa.int/web/gaia-users/license).
+Until this is confirmed by the author of Gaia Sky, use this file with the
+attribution above, and only for non-commercial purposes.
+Attribution: "Milky Way: Gaia Sky (T. Sagrista Selles, ARI/ZAH, Heidelberg
+University), based on ESA/Gaia/DPAC data."
