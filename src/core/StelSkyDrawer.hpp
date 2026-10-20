@@ -26,6 +26,7 @@
 #include "VecMath.hpp"
 #include "StelPhotoMeter.hpp"
 #include "StelAtmosphereTransmission.hpp"
+#include "StelProjectorType.hpp"
 
 #include <memory>
 #include <QObject>
@@ -138,6 +139,9 @@ class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 	//! Star trails: the camera stands on a fixed tripod, so during the exposure the stars and planets move
 	//! with the diurnal motion and draw arcs around the celestial pole
 	Q_PROPERTY(bool flagPhotoStarTrails READ getFlagPhotoStarTrails WRITE setFlagPhotoStarTrails NOTIFY flagPhotoStarTrailsChanged)
+	//! What the camera stands on while the sky turns during the exposure (with flagPhotoStarTrails, see PhotoMount):
+	//! a fixed tripod (star trails) or a star tracker that follows the sky (the landscape blurs)
+	Q_PROPERTY(int photoMount READ getPhotoMount WRITE setPhotoMount NOTIFY photoMountChanged)
 	//! Sensor noise (see PhotoNoise): off, as in the whole picture on the screen, or as in a 100% view of the sensor
 	Q_PROPERTY(int photoNoise READ getPhotoNoise WRITE setPhotoNoise NOTIFY photoNoiseChanged)
 	//! Sensor format (see PhotoSensorFormat): full frame or APS-C. It sets the focal length for the field of view
@@ -270,6 +274,11 @@ public:
 	static constexpr float PHOTO_COMA_LENGTH = 0.006f;
 	//! Astigmatism: length of the line image in the corner, wide open, as a fraction of the diagonal (scales with 1/N)
 	static constexpr float PHOTO_ASTIGMATISM_LENGTH = 0.004f;
+	//! Mounts of the camera (see photoMount)
+	enum PhotoMount {
+		PhotoMountTripod = 0, //!< fixed on the ground: the stars draw trails
+		PhotoMountTracker = 1 //!< turns with the sky (around the pole): the stars stay sharp, the landscape blurs
+	};
 	//! Sensor formats
 	enum PhotoSensorFormat {
 		PhotoSensorFullFrame = 0, //!< 36 x 24 mm
@@ -643,6 +652,15 @@ public slots:
 	double getPhotoFocusDistance() const {return photoFocusDistance;}
 	void setFlagPhotoStarTrails(bool b);
 	bool getFlagPhotoStarTrails() const {return flagPhotoStarTrails;}
+	//! Set the mount of the camera (see PhotoMount)
+	void setPhotoMount(int mount);
+	int getPhotoMount() const {return photoMount;}
+	//! Photographic mode, star tracker: the landscape turns past the camera during the exposure. The landscape is
+	//! drawn into an offscreen image between these calls (its horizon line and labels after, see Landscape), which
+	//! endPhotoGroundImage() then puts into the scene averaged along that motion. Returns false (draw directly)
+	//! when the camera does not follow the sky, the motion is too small to show, or the image cannot be made.
+	bool beginPhotoGroundImage();
+	void endPhotoGroundImage();
 	//! Set how the sensor noise is shown (see PhotoNoise)
 	void setPhotoNoise(int mode);
 	int getPhotoNoise() const {return photoNoise;}
@@ -878,6 +896,7 @@ signals:
 	void photoLensFlareStrengthChanged(double s);
 	void photoFocusDistanceChanged(double meters);
 	void flagPhotoStarTrailsChanged(bool b);
+	void photoMountChanged(int mount);
 	void photoNoiseChanged(int mode);
 	void photoSensorFormatChanged(int format);
 	void flagPhotoZoomWholeMillimetersChanged(bool b);
@@ -1254,6 +1273,21 @@ private:
 	double photoFocusDistance = 0.;
 	//! Star trails
 	bool flagPhotoStarTrails = true;
+	//! Mount of the camera
+	int photoMount = PhotoMountTripod;
+	//! Precomputed each frame in update(): the camera follows the sky and the ground moves far enough to show
+	bool photoGroundTrailActive = false;
+	//! Offscreen image of the landscape (see beginPhotoGroundImage())
+	std::unique_ptr<class QOpenGLFramebufferObject> photoGroundFbo;
+	std::unique_ptr<class QOpenGLShaderProgram> photoGroundProgram;
+	StelProjectorP photoGroundProjector; //!< the projector the composite program was made for
+	struct PhotoGroundImage
+	{
+		bool active = false;
+		int previousFbo = 0;
+		int viewport[4] = {0, 0, 0, 0};
+		float clearColor[4] = {0.f, 0.f, 0.f, 0.f};
+	} photoGroundImage;
 	//! Sensor noise
 	int photoNoise = PhotoNoiseImage;
 	//! Sensor format

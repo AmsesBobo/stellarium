@@ -35,6 +35,7 @@
 #include <QImage>
 #include <QList>
 #include <QVariant>
+#include <qopengl.h> // GLenum
 
 class LandscapeMgr;
 class QSettings;
@@ -175,6 +176,13 @@ public:
 	double getSinMinAltitudeLimit() const {return sinMinAltitudeLimit;}
 
 	static void setTransparency(const double f) { landscapeTransparency=f; }
+	//! Photographic mode, star tracker: the landscape is drawn into an offscreen image that is then blurred (see
+	//! StelSkyDrawer::beginPhotoGroundImage()). Meanwhile the alpha of that image keeps the coverage of the sky
+	//! (light that is only added, fog and lamps, does not cover it), and the horizon line and the labels wait
+	//! for drawOverlays(): they are annotations and stay sharp.
+	static void setPhotoGroundCapture(bool b) { photoGroundCapture=b; }
+	//! Draw the horizon line and the labels (after a photographic ground capture)
+	void drawOverlays(StelCore* core);
 
 	//! Find opacity in a certain direction. (New in V0.13 series)
 	//! can be used to find sunrise or visibility questions on the real-world landscape horizon.
@@ -254,6 +262,9 @@ protected:
 
 	double sinMinAltitudeLimit; //! Minimal altitude of landscape cover. Can be used to construct bounding caps, so that e.g. no stars are drawn below this altitude. Default -0.035, i.e. sin(-2 degrees).
 	static double landscapeTransparency;
+	static bool photoGroundCapture;
+	//! glBlendFunc(), with the alpha as coverage of the sky during a photographic ground capture
+	static void setBlendFunc(GLenum src, GLenum dst);
 
 	StelLocation location; //!< OPTIONAL. If present, can be used to set location.
 	/** May be given in landscape.ini:light_pollution_luminance in cd/m². Default: no change.

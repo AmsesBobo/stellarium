@@ -155,6 +155,7 @@ StelSkyDrawer::StelSkyDrawer(StelCore* acore) :
 	photoLensFlareStrength = qBound(0.f, conf->value("viewing/photographic_lens_flare_strength", 1.0).toFloat(), 3.f);
 	setPhotoFocusDistance(conf->value("viewing/photographic_focus_distance", 0.0).toDouble());
 	flagPhotoStarTrails = conf->value("viewing/flag_photographic_star_trails", true).toBool();
+	photoMount = qBound(static_cast<int>(PhotoMountTripod), conf->value("viewing/photographic_mount", static_cast<int>(PhotoMountTripod)).toInt(), static_cast<int>(PhotoMountTracker));
 	photoSensorFormat = qBound(static_cast<int>(PhotoSensorFullFrame), conf->value("viewing/photographic_sensor_format", static_cast<int>(PhotoSensorFullFrame)).toInt(), static_cast<int>(PhotoSensorAPSC));
 	flagPhotoZoomWholeMillimeters = conf->value("viewing/flag_photographic_zoom_whole_millimeters", false).toBool();
 	photoNoise = qBound(static_cast<int>(PhotoNoiseOff), conf->value("viewing/photographic_noise", static_cast<int>(PhotoNoiseImage)).toInt(), static_cast<int>(PhotoNoisePixel));
@@ -1073,8 +1074,10 @@ void StelSkyDrawer::update(double)
 		photoLensAberrations = photoLensCache.coma > 0.f || photoLensCache.astigmatism > 0.f;
 
 		// Star trails: during the exposure the sky turns around the rotation axis of the planet we stand on
-		// (one turn per sidereal day). The exposure is centered on the current time.
+		// (one turn per sidereal day). The exposure is centered on the current time. On a star tracker the
+		// camera turns with the sky: then the ground moves instead (see beginPhotoGroundImage()).
 		photoTrailsActive = false;
+		photoGroundTrailActive = false;
 		const auto observer = core->getCurrentObserver();
 		const auto home = observer ? observer->getHomePlanet() : QSharedPointer<Planet>();
 		if (flagPhotoStarTrails && getFlagPhotographicModeActive() && !home.isNull())
@@ -1094,7 +1097,8 @@ void StelSkyDrawer::update(double)
 					// The direction of the rotation does not matter: the trail is symmetric about mid-exposure
 					photoTrailToStart = Mat4d::rotation(pole, 0.5*photoTrailAngle);
 					photoTrailToEnd = Mat4d::rotation(pole, -0.5*photoTrailAngle);
-					photoTrailsActive = true;
+					photoTrailsActive = photoMount != PhotoMountTracker;
+					photoGroundTrailActive = photoMount == PhotoMountTracker;
 					// Extinction along the trails (the altitude changes during the exposure)
 					photoTrailExtinction = getFlagHasAtmosphere() && extinction.getExtinctionCoefficient() >= 0.01f;
 					photoTrailAltAzTransform = core->getAltAzModelViewTransform(StelCore::RefractionAuto);
@@ -3061,6 +3065,205 @@ StelProjectorP StelSkyDrawer::getPhotoImageSampleProjector(const StelProjectorP&
 	return core->getProjection(modelView, static_cast<StelCore::ProjectionType>(1000));
 }
 
+void StelSkyDrawer::setPhotoMount(int mount)
+{
+	const int m = qBound(static_cast<int>(PhotoMountTripod), mount, static_cast<int>(PhotoMountTracker));
+	if (m == photoMount)
+		return;
+	photoMount = m;
+	StelApp::immediateSave("viewing/photographic_mount", m);
+	emit photoMountChanged(m);
+}
+
+bool StelSkyDrawer::beginPhotoGroundImage()
+{
+	PhotoGroundImage& im = photoGroundImage;
+	im.active = false;
+	if (!photoGroundTrailActive || !getFlagPhotographicModeActive())
+		return false;
+	auto& gl = *QOpenGLContext::currentContext()->extraFunctions();
+	GLint viewport[4];
+	gl.glGetIntegerv(GL_VIEWPORT, viewport);
+	// The image covers the window up to the viewport: texel = window pixel, nothing else changes
+	const int w = viewport[0] + viewport[2], h = viewport[1] + viewport[3];
+	if (w <= 0 || h <= 0 || w > 16384 || h > 16384)
+		return false;
+
+	// The composite program depends on the projection (its unprojection and projection functions)
+	const StelProjector::ModelViewTranformP identity(new StelProjector::Mat4dTransform(Mat4d::identity(), Mat4d::identity()));
+	const StelProjectorP prj = core->getProjection(identity);
+	if (!photoGroundProgram || !photoGroundProjector || !prj->isSameProjection(*photoGroundProjector))
+	{
+		photoGroundProgram.reset();
+		photoGroundProjector = prj;
+		const char* vsrc = R"(
+ATTRIBUTE highp vec2 position; // window coordinates
+uniform highp vec4 viewport;
+VARYING highp vec2 vWin;
+void main(void)
+{
+	vWin = position;
+	gl_Position = vec4((position - viewport.xy) / viewport.zw * 2. - 1., 0., 1.);
+}
+)";
+		// The unprojection and the projection both declare some uniforms: keep the first declaration only
+		const QByteArray unproject = prj->getUnProjectShader();
+		QByteArray project;
+		for (const QByteArray& line : prj->getProjectShader().split('\n'))
+		{
+			if (!(line.trimmed().startsWith("uniform ") && unproject.contains(line.trimmed())))
+				project += line + '\n';
+		}
+		const QByteArray fsrc = unproject + project + R"(
+VARYING highp vec2 vWin;
+uniform sampler2D tex;
+uniform highp vec2 texSize;
+uniform highp vec3 axis;    // rotation axis of the sky (view coordinates)
+uniform highp float angle;  // angle it turns during the exposure
+uniform int samples;
+void main(void)
+{
+	bool ok = false;
+	highp vec3 dir = unProject(vWin.x, vWin.y, ok);
+	highp vec2 here = clamp(vWin, vec2(0.5), texSize - 0.5) / texSize;
+	if (!ok)
+	{
+		FRAG_COLOR = texture2D(tex, here);
+		return;
+	}
+	dir = normalize(dir);
+	// The camera turns with the sky: this pixel sees the ground that turns past it. The samples read
+	// a correspondingly smoothed image (mipmaps) where they lie far apart.
+	highp float spacing = angle * PROJECTOR_pixelPerRad * length(cross(axis, dir)) / float(samples);
+	highp float lod = log2(max(1., spacing));
+	highp vec4 sum = vec4(0.);
+	for (int i = 0; i < 256; ++i)
+	{
+		if (i >= samples)
+			break;
+		highp float a = angle * ((float(i) + 0.5)/float(samples) - 0.5);
+		highp float c = cos(a), s = sin(a);
+		highp vec3 d = dir*c + cross(axis, dir)*s + axis*(dot(axis, dir)*(1. - c));
+		highp vec3 win = project(d);
+		// outside the image: the nearest edge stands for what lies beyond the frame
+		highp vec2 p = clamp(win.xy, vec2(0.5), texSize - 0.5);
+		sum += textureLod(tex, p / texSize, lod);
+	}
+	FRAG_COLOR = sum / float(samples); // premultiplied: the ground covers the sky a part of the time
+}
+)";
+		auto program = std::make_unique<QOpenGLShaderProgram>();
+		if (program->addShaderFromSourceCode(QOpenGLShader::Vertex, StelOpenGL::globalShaderPrefix(StelOpenGL::VERTEX_SHADER) + vsrc) &&
+		    program->addShaderFromSourceCode(QOpenGLShader::Fragment, StelOpenGL::globalShaderPrefix(StelOpenGL::FRAGMENT_SHADER) + fsrc))
+		{
+			program->bindAttributeLocation("position", 0);
+			if (StelPainter::linkProg(program.get(), "photographic ground image"))
+				photoGroundProgram = std::move(program);
+		}
+		if (!photoGroundProgram)
+			qWarning() << "Photographic mode: the landscape cannot be blurred for the star tracker";
+	}
+	if (!photoGroundProgram)
+		return false;
+	if (!photoGroundFbo || photoGroundFbo->width() != w || photoGroundFbo->height() != h)
+	{
+		QOpenGLFramebufferObjectFormat format;
+		format.setAttachment(QOpenGLFramebufferObject::Depth);
+		format.setInternalTextureFormat(GL_RGBA16F);
+		format.setMipmap(true);
+		photoGroundFbo.reset(new QOpenGLFramebufferObject(w, h, format));
+		if (!photoGroundFbo->isValid())
+		{
+			photoGroundFbo.reset();
+			return false;
+		}
+	}
+	gl.glGetIntegerv(GL_FRAMEBUFFER_BINDING, &im.previousFbo);
+	for (int i=0; i<4; ++i)
+		im.viewport[i] = viewport[i];
+	gl.glGetFloatv(GL_COLOR_CLEAR_VALUE, im.clearColor);
+	photoGroundFbo->bind();
+	gl.glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
+	gl.glClearColor(0.f, 0.f, 0.f, 0.f);
+	gl.glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	im.active = true;
+	return true;
+}
+
+void StelSkyDrawer::endPhotoGroundImage()
+{
+	PhotoGroundImage& im = photoGroundImage;
+	if (!im.active)
+		return;
+	im.active = false;
+	auto& gl = *QOpenGLContext::currentContext()->extraFunctions();
+	gl.glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(im.previousFbo));
+	gl.glViewport(im.viewport[0], im.viewport[1], im.viewport[2], im.viewport[3]);
+	gl.glClearColor(im.clearColor[0], im.clearColor[1], im.clearColor[2], im.clearColor[3]);
+
+	gl.glActiveTexture(GL_TEXTURE0);
+	gl.glBindTexture(GL_TEXTURE_2D, photoGroundFbo->texture());
+	gl.glGenerateMipmap(GL_TEXTURE_2D);
+	gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+	gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+	// About one sample per pixel of the longest arc (90 degrees from the pole)
+	const double pixelPerRad = static_cast<double>(photoGroundProjector->getPixelPerRadAtCenter());
+	const int samples = qBound(2, static_cast<int>(std::ceil(photoTrailAngle*pixelPerRad)), 256);
+
+	auto& prog = *photoGroundProgram;
+	prog.bind();
+	photoGroundProjector->setUnProjectUniforms(prog);
+	photoGroundProjector->setProjectUniforms(prog);
+	prog.setUniformValue("viewport", QVector4D(im.viewport[0], im.viewport[1], im.viewport[2], im.viewport[3]));
+	prog.setUniformValue("tex", 0);
+	prog.setUniformValue("texSize", QVector2D(photoGroundFbo->width(), photoGroundFbo->height()));
+	prog.setUniformValue("axis", QVector3D(static_cast<float>(photoTrailAxisView[0]), static_cast<float>(photoTrailAxisView[1]), static_cast<float>(photoTrailAxisView[2])));
+	prog.setUniformValue("angle", static_cast<float>(photoTrailAngle));
+	prog.setUniformValue("samples", samples);
+
+	const float x0 = static_cast<float>(im.viewport[0]), y0 = static_cast<float>(im.viewport[1]);
+	const float x1 = x0 + static_cast<float>(im.viewport[2]), y1 = y0 + static_cast<float>(im.viewport[3]);
+	const GLfloat quad[] = { x0, y0,   x1, y0,   x0, y1,   x1, y1 };
+	GLint previousVao = 0;
+	gl.glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &previousVao);
+	GLint previousBuffer = 0;
+	gl.glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &previousBuffer);
+	if (!photoBodyVao)
+	{
+		photoBodyVao.reset(new QOpenGLVertexArrayObject);
+		photoBodyVao->create();
+	}
+	photoBodyVao->bind();
+	GLuint vbo = 0;
+	gl.glGenBuffers(1, &vbo);
+	gl.glBindBuffer(GL_ARRAY_BUFFER, vbo);
+	gl.glBufferData(GL_ARRAY_BUFFER, sizeof(quad), quad, GL_STREAM_DRAW);
+	gl.glEnableVertexAttribArray(0);
+	gl.glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
+	const GLboolean blend = gl.glIsEnabled(GL_BLEND);
+	const GLboolean depth = gl.glIsEnabled(GL_DEPTH_TEST);
+	GLint blendSrcRGB, blendDstRGB, blendSrcA, blendDstA;
+	gl.glGetIntegerv(GL_BLEND_SRC_RGB, &blendSrcRGB);
+	gl.glGetIntegerv(GL_BLEND_DST_RGB, &blendDstRGB);
+	gl.glGetIntegerv(GL_BLEND_SRC_ALPHA, &blendSrcA);
+	gl.glGetIntegerv(GL_BLEND_DST_ALPHA, &blendDstA);
+	gl.glEnable(GL_BLEND);
+	gl.glDisable(GL_DEPTH_TEST);
+	gl.glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+	gl.glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+	gl.glBlendFuncSeparate(static_cast<GLenum>(blendSrcRGB), static_cast<GLenum>(blendDstRGB), static_cast<GLenum>(blendSrcA), static_cast<GLenum>(blendDstA));
+	if (!blend) gl.glDisable(GL_BLEND);
+	if (depth) gl.glEnable(GL_DEPTH_TEST);
+	gl.glDisableVertexAttribArray(0);
+	gl.glDeleteBuffers(1, &vbo);
+	gl.glBindVertexArray(static_cast<GLuint>(previousVao));
+	gl.glBindBuffer(GL_ARRAY_BUFFER, static_cast<GLuint>(previousBuffer));
+	prog.release();
+}
+
 void StelSkyDrawer::setFlagPhotoStarTrails(bool b)
 {
 	if (b == flagPhotoStarTrails)
@@ -3109,6 +3312,21 @@ float StelSkyDrawer::computePhotoTrail(const StelProjector& prj, const Vec3d& v,
 	// The integrated profiles of the trails in the shader (moffatSegment3/15) are written for these exponents
 	static_assert(PHOTO_CORE_BETA == 3.f && PHOTO_HALO_BETA == 1.5f, "star trail profiles need beta 3 and 1.5");
 	trail.set(0.f, 0.f, 0.f, 0.f);
+	// On a star tracker the image stays in its place, but the altitude still changes during the exposure, and
+	// with it the extinction: the light is its mean (Simpson's rule over the start, the middle and the end)
+	if (photoGroundTrailActive && photoTrailExtinction)
+	{
+		Vec3d view = v;
+		prj.getModelViewTransform()->forward(view);
+		if (view.normSquared() > 0.)
+		{
+			const Vec3f fStart = photoTrailExtinctionFactor(photoTrailToStart*view, view);
+			const Vec3f fEnd = photoTrailExtinctionFactor(photoTrailToEnd*view, view);
+			for (int c=0; c<3; ++c)
+				instance.color[c] *= (fStart[c] + 4.f + fEnd[c])/6.f;
+		}
+		return 0.f;
+	}
 	if (!photoTrailsActive)
 		return 0.f;
 	const auto mv = prj.getModelViewTransform();
@@ -3762,6 +3980,7 @@ void StelSkyDrawer::resetPhotographicSettings()
 	setPhotoLensFlareStrength(1.);
 	setPhotoFocusDistance(0.);
 	setFlagPhotoStarTrails(true);
+	setPhotoMount(PhotoMountTripod);
 	setPhotoNoise(PhotoNoiseImage);
 	setPhotoSensorFormat(PhotoSensorFullFrame);
 	setFlagPhotoZoomWholeMillimeters(false);

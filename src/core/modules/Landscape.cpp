@@ -323,7 +323,7 @@ void Landscape::createPolygonalHorizon(const QString& lineFileName, const float 
 
 void Landscape::drawHorizonLine(StelCore* core, StelPainter& painter)
 {
-	if (!horizonPolygon || horizonPolygonLineThickness<1 )
+	if (!horizonPolygon || horizonPolygonLineThickness<1 || photoGroundCapture)
 		return;
 
 	StelProjector::ModelViewTranformP transfo = core->getAltAzModelViewTransform(StelCore::RefractionOff);
@@ -422,7 +422,7 @@ void Landscape::loadLabels(const QString& landscapeId)
 
 void Landscape::drawLabels(StelCore* core, StelPainter *painter)
 {
-	if (landscapeLabels.length()==0) // no labels
+	if (landscapeLabels.length()==0 || photoGroundCapture) // no labels (or later: drawOverlays())
 		return;
 	if (labelFader.getInterstate() < 0.0001f) // switched off
 		return;
@@ -1037,7 +1037,7 @@ void main(void)
 		const int firstFreeTexSampler = 0;
 
 		gl.glEnable(GL_BLEND);
-		gl.glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		setBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 		if(drawGroundFirst)
 			drawGround(core, firstFreeTexSampler);
 		drawDecor(core, firstFreeTexSampler, false);
@@ -1049,7 +1049,7 @@ void main(void)
 		// Self-luminous layer (Light pollution etc). This looks striking!
 		if (lightScapeBrightness>0.0f && (illumFader.getInterstate()>0.f) && core->getFlagClearSky())
 		{
-			gl.glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+			setBlendFunc(GL_SRC_ALPHA, GL_ONE);
 			drawDecor(core, firstFreeTexSampler, true);
 		}
 
@@ -1084,7 +1084,7 @@ void LandscapeOldStyle::drawFog(StelCore*const core, const int firstFreeTexSampl
 	const StelProjectorP prj = core->getProjection(transfo);
 
 	auto& gl = *QOpenGLContext::currentContext()->functions();
-	gl.glBlendFunc(GL_ONE, GL_ONE);
+	setBlendFunc(GL_ONE, GL_ONE);
 
 	const float height = calibrated ? std::tan((fogAltAngle+fogAngleShift)*M_PI_180f) - std::tan(fogAngleShift*M_PI_180f)
 					: tanMode ? std::tan(fogAltAngle*M_PI_180f)
@@ -1275,6 +1275,8 @@ void LandscapeOldStyle::drawLowGL(StelCore* core, bool onlyPolygon)
 		if (lightScapeBrightness>0.0f && (illumFader.getInterstate()>0.f))
 		{
 			painter.setBlending(true, GL_SRC_ALPHA, GL_ONE);
+			if (photoGroundCapture)
+				setBlendFunc(GL_SRC_ALPHA, GL_ONE);
 			drawDecorLowGL(core, painter, true);
 		}
 
@@ -1307,6 +1309,8 @@ void LandscapeOldStyle::drawFogLowGL(StelCore* core, StelPainter& sPainter) cons
 	transfo->combine(Mat4d::translation(Vec3d(0.,0.,static_cast<double>(vpos))));
 	sPainter.setProjector(core->getProjection(transfo));
 	sPainter.setBlending(true, GL_ONE, GL_ONE);
+	if (photoGroundCapture)
+		setBlendFunc(GL_ONE, GL_ONE);
 	sPainter.setColor(Vec3f(landFader.getInterstate()*fogFader.getInterstate()*fogBrightness()),
 			  (1.f-landscapeTransparency)*landFader.getInterstate());
 	fogTex->bind();
@@ -1730,7 +1734,7 @@ void main(void)
 		prj->setUnProjectUniforms(*renderProgram);
 
 		gl.glEnable(GL_BLEND);
-		gl.glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		setBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 		bindVAO();
 
 		gl.glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
@@ -1738,7 +1742,7 @@ void main(void)
 		// NEW since 0.13: Fog also for fisheye...
 		if ((mapTexFog) && (core->getSkyDrawer()->getFlagHasAtmosphere()) && core->getFlagClearSky())
 		{
-			gl.glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_COLOR);
+			setBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_COLOR);
 			const float brightness =
 				colorToShader(landFader.getInterstate()*fogFader.getInterstate()*fogBrightness());
 
@@ -1750,7 +1754,7 @@ void main(void)
 
 		if (mapTexIllum && lightScapeBrightness>0.0f && (illumFader.getInterstate()>0.f) && core->getFlagClearSky())
 		{
-			gl.glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+			setBlendFunc(GL_SRC_ALPHA, GL_ONE);
 			const float brightness = colorToShader(lightScapeBrightness*illumFader.getInterstate());
 			renderProgram->setUniformValue(shaderVars.brightness, brightness, brightness, brightness,
 						       landFader.getInterstate());
@@ -2095,7 +2099,7 @@ void main(void)
 		prj->setUnProjectUniforms(*renderProgram);
 
 		gl.glEnable(GL_BLEND);
-		gl.glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		setBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 		bindVAO();
 
 		gl.glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
@@ -2103,7 +2107,7 @@ void main(void)
 		// Since 0.13: Fog also for sphericals...
 		if ((mapTexFog) && (core->getSkyDrawer()->getFlagHasAtmosphere()) && core->getFlagClearSky())
 		{
-			gl.glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_COLOR);
+			setBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_COLOR);
 			const float brightness =
 				colorToShader(landFader.getInterstate()*fogFader.getInterstate()*fogBrightness());
 
@@ -2120,7 +2124,7 @@ void main(void)
 		// Self-luminous layer (Light pollution etc). This looks striking!
 		if (mapTexIllum && (lightScapeBrightness>0.0f) && (illumFader.getInterstate()>0.0f) && core->getFlagClearSky())
 		{
-			gl.glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+			setBlendFunc(GL_SRC_ALPHA, GL_ONE);
 			const float brightness = colorToShader(lightScapeBrightness*illumFader.getInterstate());
 			renderProgram->setUniformValue(shaderVars.bottomCapColor, 0.f, 0.f, 0.f, 0.f);
 			renderProgram->setUniformValue(shaderVars.brightness,
@@ -2206,5 +2210,28 @@ int Landscape::labelAngle=45;             // text tilt angle
 int Landscape::fontSize=12;               // Used for landscape labels (optionally indicating landscape features)
 Vec3f Landscape::labelColor(0,1,0);       // Color for the landscape labels.
 double Landscape::landscapeTransparency=0.0;
+bool Landscape::photoGroundCapture=false;
+
+void Landscape::setBlendFunc(GLenum src, GLenum dst)
+{
+	auto& gl = *QOpenGLContext::currentContext()->functions();
+	if (!photoGroundCapture)
+	{
+		gl.glBlendFunc(src, dst);
+		return;
+	}
+	// A layer drawn over (alpha blending) covers the sky, light that is added (fog, lamps) does not
+	const bool covers = (dst == GL_ONE_MINUS_SRC_ALPHA);
+	gl.glBlendFuncSeparate(src, dst, covers ? GL_ONE : GL_ZERO, covers ? GL_ONE_MINUS_SRC_ALPHA : GL_ONE);
+}
+
+void Landscape::drawOverlays(StelCore* core)
+{
+	if (!validLandscape || landFader.getInterstate()==0.f)
+		return;
+	StelPainter painter(core->getProjection(StelCore::FrameAltAz, StelCore::RefractionOff));
+	drawHorizonLine(core, painter);
+	drawLabels(core, &painter);
+}
 LinearFader Landscape::illumFader;//! Used to slowly fade in/out illumination painting.
 LinearFader Landscape::labelFader;//! Used to slowly fade in/out landscape feature labels.
