@@ -131,11 +131,15 @@ private:
 		int extinctionEnabled;
 		int projectionMatrixInverse;
 		int photoMode;
+		int photoDestretch;
 	} shaderVars;
 
 	//! Photographic mode: luminance (cd/m^2) of a linear value of 1.0 in photoTex. It calibrates the
 	//! texture against measured surface brightness of the Milky Way (config: astro/milky_way_photo_luminance).
-	double photoLuminanceScale = 4.7e-4;
+	double photoLuminanceScale = 1.16e-3;
+	//! Photographic mode: power applied to the luminance of photoTex, undoing the display stretch of the
+	//! image (config: astro/milky_way_photo_destretch)
+	float photoDestretch = 1.5f;
 
 	std::unique_ptr<QOpenGLVertexArrayObject> vao;
 	std::unique_ptr<QOpenGLBuffer> vbo;

@@ -22,6 +22,11 @@ Processing (for Stellarium)
   5443) minus the light of the stars Stellarium draws itself
   (see src/core/modules/MilkyWay.cpp),
 - stored sRGB-encoded (the GPU decodes it back to linear light).
+- the source image is stretched for display (its contrast compressed), so
+  the photographic mode expands it again when drawing: the luminance is
+  raised to the power 1.5 (config: astro/milky_way_photo_destretch), with
+  the calibration kept at the same zenith mean (1.0 = 1400 S10(V)). The
+  star clouds of Sagittarius and Scutum then reach about 20 mag/arcsec^2.
 
 License
 -------

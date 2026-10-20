@@ -95,9 +95,14 @@ void MilkyWay::init()
 	// Texture for the photographic mode. It must be linear in surface brightness (after sRGB decoding)
 	// and free of the stars that Stellarium draws itself. photoLuminanceScale is the luminance (cd/m^2)
 	// of a linear texture value of 1.0.
-	// Default: milkyway_gaia.png, made from the Gaia Sky Milky Way cubemap (based on ESA Gaia EDR3 data),
-	// calibrated to the mean integrated starlight at the zenith at 40N (75 nW/m^2/sr in V, Masana et al.
-	// 2021, MNRAS 501, 5443) minus the ~20% contributed by Hipparcos-bright stars: 1.0 = 565 S10(V).
+	// Default: milkyway_gaia.png, made from the Gaia Sky Milky Way cubemap (based on ESA Gaia EDR3 data).
+	// That image is stretched for display (its contrast compressed, like most astronomical pictures), so
+	// the photographic mode expands it again: the luminance is raised to the power photoDestretch (1.5,
+	// as for the nebula images, see StelSkyDrawer). The bright star clouds of Sagittarius and Scutum then
+	// reach about 20 mag/arcsec^2 (V), the Cygnus clouds about 21, the anticenter about 22.5.
+	// The result is calibrated to the mean integrated starlight at the zenith at 40N (75 nW/m^2/sr in V,
+	// Masana et al. 2021, MNRAS 501, 5443) minus the ~20% contributed by Hipparcos-bright stars:
+	// 1.0 = 1400 S10(V). (Without the expansion, 1.0 = 565 S10(V) would give that mean.)
 	// Without it, Axel Mellinger's panorama is used: its 99.9th percentile (linear 0.21) is set to
 	// about 20.5 mag/arcsec^2 (V).
 	const QString photoTextureName = conf->value("astro/milky_way_photo_texture", "milkyway_gaia.png").toString();
@@ -107,6 +112,7 @@ void MilkyWay::init()
 		qWarning() << "Photographic Milky Way texture" << photoTextureName << "not found, using" << textureName;
 		photoTex = mainTex;
 		photoLuminanceScale = conf->value("astro/milky_way_photo_luminance", 3.2e-3).toDouble();
+		photoDestretch = conf->value("astro/milky_way_photo_destretch", 1.0).toFloat();
 	}
 	else
 	{
@@ -115,7 +121,9 @@ void MilkyWay::init()
 		photoTex->bind(0);
 		gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
 		photoTex->release();
-		photoLuminanceScale = conf->value("astro/milky_way_photo_luminance", 4.7e-4).toDouble();
+		// The scale belongs to the expansion: changing astro/milky_way_photo_destretch needs a new scale
+		photoLuminanceScale = conf->value("astro/milky_way_photo_luminance", 1.16e-3).toDouble();
+		photoDestretch = conf->value("astro/milky_way_photo_destretch", 1.5).toFloat();
 	}
 	setFlagShow(conf->value("astro/flag_milky_way").toBool());
 	setIntensity(conf->value("astro/milky_way_intensity",1.).toDouble());
@@ -288,6 +296,7 @@ uniform mat4 projectionMatrixInverse;
 uniform bool extinctionEnabled;
 uniform float bortleIntensity;
 uniform bool photoMode;  // photographic mode: texture is linear luminance, brightness holds the calibration
+uniform float photoDestretch; // photographic mode: power applied to the luminance of the texture (keeps the color)
 void main(void)
 {
 	const float PI = 3.14159265;
@@ -325,7 +334,13 @@ void main(void)
 		extinctionFactor = 1.;
 	}
 
-    vec4 color = texture2D(mainTex, texc)*vec4(brightness*extinctionColor,1)*extinctionFactor;
+    vec4 texColor = texture2D(mainTex, texc);
+	if (photoMode && photoDestretch != 1.)
+	{
+		float luminance = dot(texColor.rgb, vec3(0.2126, 0.7152, 0.0722));
+		texColor.rgb *= luminance > 0. ? pow(luminance, photoDestretch - 1.) : 0.;
+	}
+    vec4 color = texColor*vec4(brightness*extinctionColor,1)*extinctionFactor;
 	if(saturation != 1.0)
 		color.rgb = saturate(color.rgb, saturation);
 	FRAG_COLOR = color;
@@ -350,6 +365,7 @@ void main(void)
 		shaderVars.extinctionEnabled= renderProgram->uniformLocation("extinctionEnabled");
 		shaderVars.projectionMatrixInverse = renderProgram->uniformLocation("projectionMatrixInverse");
 		shaderVars.photoMode        = renderProgram->uniformLocation("photoMode");
+		shaderVars.photoDestretch   = renderProgram->uniformLocation("photoDestretch");
 		renderProgram->release();
 	}
 	if(!renderProgram || !renderProgram->isLinked())
@@ -368,6 +384,7 @@ void main(void)
 		const float k = static_cast<float>(photoLuminanceScale * intensity) * drawer->getPhotoSceneScale() * fader->getInterstate();
 		renderProgram->bind();
 		renderProgram->setUniformValue(shaderVars.photoMode, true);
+		renderProgram->setUniformValue(shaderVars.photoDestretch, photoDestretch);
 		renderProgram->setUniformValue(shaderVars.extinctionEnabled, drawer->getFlagHasAtmosphere() && extinction.getExtinctionCoefficient()>=0.01f);
 		renderProgram->setUniformValue(shaderVars.bortleIntensity, 1.f);
 		const int mainTexSampler = 0;
