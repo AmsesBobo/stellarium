@@ -1513,7 +1513,7 @@ bool StelSkyDrawer::drawPhotoBody(StelPainter* sPainter, const Vec3d& v, float d
 	++nbPhotoPointSources;
 	flushPhotoPointSources(sPainter, PhotoBatchCoreOnly);
 	if (rHalo > 0.f || rSpike > 0.f)
-		photoDeferredBodies.push_back(wings);
+		photoDeferredBodies.push_back({wings, v});
 	return true;
 }
 
@@ -1531,7 +1531,22 @@ void StelSkyDrawer::drawDeferredPhotoBodies(StelCore* core)
 		StelPainter sPainter(prj);
 		for (const auto& body : photoDeferredBodies)
 		{
-			photoInstances[nbPhotoPointSources++] = body;
+			const Vec4f& trail = body.instance.trail;
+			// A body larger than its trail is drawn without one (the shader trails point-like images only):
+			// its halo and spikes are trailed as an image of their own then
+			const bool trailImage = photoTrailsActive && trail[0] == 0.f && trail[1] == 0.f && trail[2] == 0.f && trail[3] == 0.f;
+			if (trailImage)
+			{
+				flushPhotoPointSources(&sPainter, PhotoBatchWingsOnly);
+				if (beginPhotoBodyImage(body.posJ2000, body.instance.radius, true))
+				{
+					photoInstances[nbPhotoPointSources++] = body.instance;
+					flushPhotoPointSources(&sPainter, PhotoBatchWingsOnly);
+					endPhotoBodyImage();
+					continue;
+				}
+			}
+			photoInstances[nbPhotoPointSources++] = body.instance;
 			if (nbPhotoPointSources >= maxPhotoPointSources)
 				flushPhotoPointSources(&sPainter, PhotoBatchWingsOnly);
 		}
@@ -2711,7 +2726,7 @@ void main(void)
 	return std::isfinite(mean) && std::isfinite(meanSquare);
 }
 
-bool StelSkyDrawer::beginPhotoBodyImage(const Vec3d& posJ2000, float radius)
+bool StelSkyDrawer::beginPhotoBodyImage(const Vec3d& posJ2000, float radius, bool glow)
 {
 	PhotoBodyImage& im = photoBodyImage;
 	im.active = false;
@@ -2724,7 +2739,8 @@ bool StelSkyDrawer::beginPhotoBodyImage(const Vec3d& posJ2000, float radius)
 	// the star trail of the body (no visibility test: flux "infinite") and the blur of the lens
 	PhotoStarInstance trailInfo;
 	const float length = computePhotoTrail(*prj, posJ2000, win, 1e30f, 0.f, trailInfo);
-	const float defocus = photoLensCache.defocus;
+	// The halo and the spikes are already images of the blurred lens
+	const float defocus = glow ? 0.f : photoLensCache.defocus;
 	if (length < 0.75f && std::fabs(defocus) < 0.5f)
 		return false;
 	const Vec2f A(trailInfo.trail[0], trailInfo.trail[1]), B(trailInfo.trail[2], trailInfo.trail[3]);
@@ -2739,7 +2755,7 @@ bool StelSkyDrawer::beginPhotoBodyImage(const Vec3d& posJ2000, float radius)
 	const int x1 = qMin(static_cast<int>(std::ceil(win[0] + r)), static_cast<int>(std::ceil(vx + vw + reach)));
 	const int y1 = qMin(static_cast<int>(std::ceil(win[1] + r)), static_cast<int>(std::ceil(vy + vh + reach)));
 	const int w = x1 - x0, h = y1 - y0;
-	if (w <= 0 || h <= 0 || w > 4096 || h > 4096)
+	if (w <= 0 || h <= 0 || w > 8192 || h > 8192)
 		return false;
 
 	if (!photoBodyTried)
@@ -2869,6 +2885,7 @@ void main(void)
 		im.logEnd[c] = std::log(qMax(1e-9f, trailInfo.trailEnd[c]));
 	}
 	im.defocus = std::fabs(defocus) >= 0.5f ? defocus : 0.f;
+	im.glow = glow;
 	im.active = true;
 	return true;
 }
@@ -2947,7 +2964,10 @@ void StelSkyDrawer::endPhotoBodyImage()
 	gl.glGetIntegerv(GL_BLEND_DST_ALPHA, &blendDstA);
 	gl.glEnable(GL_BLEND);
 	gl.glDisable(GL_DEPTH_TEST);
-	gl.glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+	if (im.glow)
+		gl.glBlendFuncSeparate(GL_ONE, GL_ONE, GL_ZERO, GL_ONE); // light added to the scene
+	else
+		gl.glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 	gl.glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 	gl.glBlendFuncSeparate(static_cast<GLenum>(blendSrcRGB), static_cast<GLenum>(blendDstRGB), static_cast<GLenum>(blendSrcA), static_cast<GLenum>(blendDstA));
 	if (!blend) gl.glDisable(GL_BLEND);
@@ -2957,6 +2977,88 @@ void StelSkyDrawer::endPhotoBodyImage()
 	gl.glBindVertexArray(static_cast<GLuint>(previousVao));
 	gl.glBindBuffer(GL_ARRAY_BUFFER, static_cast<GLuint>(previousBuffer));
 	prog.release();
+}
+
+std::vector<StelSkyDrawer::PhotoImageSample> StelSkyDrawer::getPhotoImageSamples(const StelProjector& prj, const Vec3d& center) const
+{
+	std::vector<PhotoImageSample> samples;
+	if (!getFlagPhotographicModeActive())
+		return samples;
+	Vec3d win;
+	if (!prj.project(center, win))
+		return samples;
+	PhotoStarInstance trailInfo;
+	const float length = qMax(0.f, computePhotoTrail(prj, center, win, 1e30f, 0.f, trailInfo));
+	const float defocus = std::fabs(photoLensCache.defocus) >= 0.5f ? photoLensCache.defocus : 0.f;
+	const float R = std::fabs(defocus);
+	if (length < 0.75f && R == 0.f)
+		return samples;
+	// About one copy per pixel of the trail and per two square pixels of the blur disk (as for the bodies)
+	const int n = qBound(2, static_cast<int>(std::ceil(length + 0.5f*M_PIf*R*R)), 96);
+	const double pixelPerRad = static_cast<double>(prj.getPixelPerRadAtCenter());
+	Vec3d view = center;
+	prj.getModelViewTransform()->forward(view);
+	view.normalize();
+	const int blades = photoApertureBlades >= 3 ? photoApertureBlades : 0;
+	const float straightness = blades > 0 ? getPhotoApertureStraightness() : 0.f;
+	const float sector = blades > 0 ? 2.f*M_PIf/static_cast<float>(blades) : 0.f;
+	const float rotation = PHOTO_SPIKE_ANGLE - 0.5f*sector;
+	const float sign = defocus > 0.f ? -1.f : 1.f;
+	const float sa = defocus > 0.f ? -photoLensCache.sphericalAberration : photoLensCache.sphericalAberration;
+	float weights = 0.f;
+	samples.reserve(static_cast<size_t>(n));
+	for (int i=0; i<n; ++i)
+	{
+		const float fi = static_cast<float>(i) + 0.5f;
+		// Time along the exposure: in order for a pure trail, else well spread over the disk (golden ratio)
+		const float t = R > 0.f ? std::fmod(fi*0.6180339887f, 1.f) : fi/static_cast<float>(n);
+		Mat4d rot = Mat4d::identity();
+		Vec3f factor(1.f);
+		if (length > 0.f)
+		{
+			// t = 0 at the start of the exposure (see photoTrailToStart)
+			rot = Mat4d::rotation(photoTrailAxisView, photoTrailAngle*(0.5 - static_cast<double>(t)));
+			if (photoTrailExtinction)
+				factor = photoTrailExtinctionFactor(rot*view, view);
+		}
+		float w = 1.f;
+		if (R > 0.f)
+		{
+			// A point of the image of the aperture (golden-angle spiral, even density), as a small turn of the view
+			const float rr = std::sqrt(fi/static_cast<float>(n));
+			const float a = static_cast<float>(i)*2.39996323f;
+			float scale = 1.f;
+			if (blades > 0 && straightness > 0.f)
+			{
+				const float d = std::fmod(std::fmod(a - rotation, sector) + sector, sector) - 0.5f*sector;
+				scale = 1.f / (1.f + (std::cos(d)/std::cos(M_PIf/static_cast<float>(blades)) - 1.f)*straightness);
+			}
+			const double dx = static_cast<double>(sign*R*rr*scale*std::cos(a));
+			const double dy = static_cast<double>(sign*R*rr*scale*std::sin(a));
+			rot = Mat4d::yrotation(-dx/pixelPerRad) * Mat4d::xrotation(dy/pixelPerRad) * rot;
+			w = qMax(0.f, 1.f + sa*(rr*rr - 0.5f));
+		}
+		weights += w;
+		samples.push_back({rot, factor*w});
+	}
+	if (!(weights > 0.f))
+	{
+		samples.clear();
+		return samples;
+	}
+	for (auto& s : samples)
+		s.factor /= weights;
+	return samples;
+}
+
+StelProjectorP StelSkyDrawer::getPhotoImageSampleProjector(const StelProjectorP& prj, const Mat4d& viewRotation) const
+{
+	// The turn in view coordinates, expressed in the frame of the model: M^T R M (M: the rotation of the model view)
+	StelProjector::ModelViewTranformP modelView = prj->getModelViewTransform()->clone();
+	Mat4d m = modelView->getApproximateLinearTransfo();
+	m[12] = m[13] = m[14] = 0.;
+	modelView->combine(m.transpose() * viewRotation * m);
+	return core->getProjection(modelView, static_cast<StelCore::ProjectionType>(1000));
 }
 
 void StelSkyDrawer::setFlagPhotoStarTrails(bool b)

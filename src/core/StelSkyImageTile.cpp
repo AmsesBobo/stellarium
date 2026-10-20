@@ -451,12 +451,38 @@ bool StelSkyImageTile::drawTile(StelCore* core, StelPainter& sPainter, const Vec
 		if (photo)
 		{
 			// The painter takes sRGB-encoded colors (colorToShader() decodes them): encode the linear values,
-			// taken to the power 1/p (see setTextureDisplayAdjustment() above)
-			for (int c=0; c<3; ++c)
+			// taken to the power 1/p (see setTextureDisplayAdjustment() above). The shader computes
+			// (value*color)^p, so the light of the image scales with the linear color given here.
+			auto encode = [](const Vec4f& linear, const Vec3f& factor) -> Vec4f
 			{
-				const float x = std::pow(qMax(0.f, extinctedColor[c]), 1.f/StelSkyDrawer::PHOTO_DSO_DESTRETCH);
-				extinctedColor[c] = x <= 0.0031308f ? 12.92f*x : 1.055f*std::pow(x, 1.f/2.4f) - 0.055f;
+				Vec4f encoded = linear;
+				for (int c=0; c<3; ++c)
+				{
+					const float x = std::pow(qMax(0.f, linear[c]*factor[c]), 1.f/StelSkyDrawer::PHOTO_DSO_DESTRETCH);
+					encoded[c] = x <= 0.0031308f ? 12.92f*x : 1.055f*std::pow(x, 1.f/2.4f) - 0.055f;
+				}
+				return encoded;
+			};
+			// The camera records the image along the star trail of the exposure and over the blur disk of the
+			// lens: copies of it, each with its share of the light, added up (only for images that add light)
+			// (and only for images in or near the frame: the copies cost)
+			const std::vector<StelSkyDrawer::PhotoImageSample> samples =
+				alphaBlend && sPainter.getProjector()->getViewportConvexPolygon(64.f, 64.f)->intersects(poly)
+				? drawer->getPhotoImageSamples(*sPainter.getProjector(), poly->getPointInside())
+				: std::vector<StelSkyDrawer::PhotoImageSample>();
+			if (!samples.empty())
+			{
+				const StelProjectorP projector = sPainter.getProjector();
+				for (const auto& sample : samples)
+				{
+					sPainter.setProjector(drawer->getPhotoImageSampleProjector(projector, sample.viewRotation));
+					sPainter.setColor(encode(extinctedColor, sample.factor));
+					sPainter.drawSphericalRegion(poly.data(), StelPainter::SphericalPolygonDrawModeTextureFill, Q_NULLPTR, true, 5., vel);
+				}
+				sPainter.setProjector(projector);
+				continue;
 			}
+			extinctedColor = encode(extinctedColor, Vec3f(1.f));
 		}
 		sPainter.setColor(extinctedColor);
 		sPainter.drawSphericalRegion(poly.data(), StelPainter::SphericalPolygonDrawModeTextureFill, Q_NULLPTR, true, 5., vel);
