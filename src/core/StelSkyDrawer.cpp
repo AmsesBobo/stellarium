@@ -29,6 +29,7 @@
 #include "StelApp.hpp"
 #include "StelSRGB.hpp"
 #include "StelCore.hpp"
+#include "StelUtils.hpp"
 #include "StelMovementMgr.hpp"
 #include "StelPainter.hpp"
 #include "StelMainView.hpp"
@@ -146,6 +147,8 @@ StelSkyDrawer::StelSkyDrawer(StelCore* acore) :
 	photoToneCurve = qBound(0, conf->value("viewing/photographic_tone_curve", static_cast<int>(PhotoToneStandard)).toInt(), 2);
 	updatePhotoToneCurve();
 	flagPhotoExtinctionColor = conf->value("viewing/flag_photographic_extinction_color", true).toBool();
+	flagPhotoAirglow = conf->value("viewing/flag_photographic_airglow", true).toBool();
+	photoAirglowStrength = qBound(0.25f, conf->value("viewing/photographic_airglow_strength", 1.0).toFloat(), 2.f);
 	photoWhiteBalance = qBound(0, conf->value("viewing/photographic_white_balance", static_cast<int>(PhotoWBDaylight)).toInt(), 8);
 	photoWhiteBalanceKelvin = qBound(2000., conf->value("viewing/photographic_white_balance_kelvin", 5200.).toDouble(), 12000.);
 	flagPhotoVignetting = conf->value("viewing/flag_photographic_vignetting", true).toBool();
@@ -3720,6 +3723,8 @@ void StelSkyDrawer::savePhotoSettings(QSettings* conf) const
 	conf->setValue("viewing/photographic_white_balance", getPhotoWhiteBalance());
 	conf->setValue("viewing/photographic_white_balance_kelvin", getPhotoWhiteBalanceKelvin());
 	conf->setValue("viewing/flag_photographic_extinction_color", getFlagPhotoExtinctionColor());
+	conf->setValue("viewing/flag_photographic_airglow", getFlagPhotoAirglow());
+	conf->setValue("viewing/photographic_airglow_strength", getPhotoAirglowStrength());
 	conf->setValue("viewing/photographic_tone_curve", getPhotoToneCurve());
 	conf->setValue("viewing/photographic_psf_min_fwhm", getPhotoPsfMinFwhm());
 	conf->setValue("viewing/photographic_seeing", getPhotoSeeing());
@@ -3953,6 +3958,59 @@ void StelSkyDrawer::setFlagPhotoExtinctionColor(bool b)
 	flagPhotoExtinctionColor = b;
 	StelApp::immediateSave("viewing/flag_photographic_extinction_color", b);
 	emit flagPhotoExtinctionColorChanged(b);
+}
+
+void StelSkyDrawer::setFlagPhotoAirglow(bool b)
+{
+	if (b == flagPhotoAirglow)
+		return;
+	flagPhotoAirglow = b;
+	StelApp::immediateSave("viewing/flag_photographic_airglow", b);
+	emit flagPhotoAirglowChanged(b);
+}
+
+void StelSkyDrawer::setPhotoAirglowStrength(double strength)
+{
+	const float v = qBound(0.25f, static_cast<float>(strength), 2.f);
+	if (qFuzzyCompare(1.f+v, 1.f+photoAirglowStrength))
+		return;
+	photoAirglowStrength = v;
+	StelApp::immediateSave("viewing/photographic_airglow_strength", static_cast<double>(v));
+	emit photoAirglowStrengthChanged(static_cast<double>(v));
+}
+
+Vec3f StelSkyDrawer::getPhotoAirglow() const
+{
+	if (!flagPhotoAirglow || !getFlagPhotographicModeActive() || !getFlagHasAtmosphere()
+	    || core->getCurrentLocation().planetName != QStringLiteral("Earth"))
+		return Vec3f(0.f);
+	// The solar cycle, as in Skybright (Schaefer 1998): brightest near the maxima (1990, 2001, 2012...)
+	int year, month, day;
+	StelUtils::getDateFromJulianDay(core->getJD(), &year, &month, &day);
+	const double y = year + (month - 0.5)/12.;
+	const double cycle = 1. + 0.3*std::cos(0.57118*(y - 1992.));
+	// Surface brightness to luminance: L [cd/m^2] = 10.8e4 x 10^(-0.4 mag/arcsec^2); observed at the zenith,
+	// so above the atmosphere it is brighter by the extinction of one airmass
+	// The surface brightness at the zenith (V, magnitudes per square arc second, as observed through the atmosphere)
+	// at a mean solar activity; the cycle changes it by +-30% (about +-0.3 mag), and it varies from night to night
+	// (photoAirglowStrength). The whole dark sky is about 21.9-22.0 at the best sites: the airglow, plus the
+	// zodiacal light and the starlight that Stellarium draws by themselves.
+	constexpr double zenithMagnitude = 22.5;
+	const double k = static_cast<double>(extinction.getExtinctionCoefficient());
+	const double luminance = 10.8e4*std::pow(10., -0.4*zenithMagnitude)*cycle*static_cast<double>(photoAirglowStrength)*std::pow(10., 0.4*k);
+	// The color: the night sky at dark observatories is much redder than sunlight (B-V about 0.95, V-R about 0.8,
+	// against 0.65 and 0.36 for the Sun; Benn & Ellison 1998, Patat 2003): the green line of oxygen (558 nm),
+	// sodium (589 nm), the red oxygen lines (630 nm) and the OH bands. As linear sRGB against white sunlight
+	// (luminance 1): a warm, brownish grey in daylight white balance.
+	const Vec3f color(1.227f, 0.959f, 0.748f);
+	return color*static_cast<float>(luminance*static_cast<double>(getPhotoSceneScale()));
+}
+
+Vec3f StelSkyDrawer::getPhotoAirglowExtinction() const
+{
+	// Blue is dimmed more than green, red less (Rayleigh scattering and aerosols); luminance weighted it is k
+	const float k = extinction.getExtinctionCoefficient();
+	return Vec3f(0.75f*k, k, 1.45f*k);
 }
 
 Vec3f StelSkyDrawer::getPhotoExtinctionTint(const Vec3d& altAzGeometric) const
@@ -4292,6 +4350,8 @@ void StelSkyDrawer::resetPhotographicSettings()
 	setPhotoMeteringMode(0);
 	setPhotoToneCurve(PhotoToneStandard);
 	setFlagPhotoExtinctionColor(true);
+	setFlagPhotoAirglow(true);
+	setPhotoAirglowStrength(1.);
 	setPhotoWhiteBalance(PhotoWBDaylight);
 	setPhotoWhiteBalanceKelvin(5200.);
 	setFlagPhotoVignetting(true);

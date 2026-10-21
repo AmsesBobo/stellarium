@@ -121,6 +121,12 @@ class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 	//! spectral transmission of the atmosphere model (atmosphere/lightweight-extinction.dat). The amount of the
 	//! extinction still follows the extinction coefficient.
 	Q_PROPERTY(bool flagPhotoExtinctionColor READ getFlagPhotoExtinctionColor WRITE setFlagPhotoExtinctionColor NOTIFY flagPhotoExtinctionColorChanged)
+	//! Photographic mode: the airglow, the faint light of the upper atmosphere (about 90 km) that is the natural night
+	//! sky at a dark site (with the lightweight atmosphere model, which holds the scattered light of the Sun and the Moon)
+	Q_PROPERTY(bool flagPhotoAirglow READ getFlagPhotoAirglow WRITE setFlagPhotoAirglow NOTIFY flagPhotoAirglowChanged)
+	//! Photographic mode: the brightness of the airglow relative to its mean (1.0); it changes from night to night
+	//! by about a factor of two
+	Q_PROPERTY(double photoAirglowStrength READ getPhotoAirglowStrength WRITE setPhotoAirglowStrength NOTIFY photoAirglowStrengthChanged)
 	//! White balance of the camera (see PhotoWhiteBalance): 0 = automatic, 1 = daylight, 2 = cloudy, 3 = shade,
 	//! 4 = tungsten, 5 = fluorescent, 6 = flash, 7 = custom color temperature, 8 = neutral (D65, the rendering as it is)
 	Q_PROPERTY(int photoWhiteBalance READ getPhotoWhiteBalance WRITE setPhotoWhiteBalance NOTIFY photoWhiteBalanceChanged)
@@ -793,6 +799,18 @@ public slots:
 	//! Whether the extinction colors come from the transmission table now: switched on, photographic mode,
 	//! atmosphere with extinction, table loaded, observer on the Earth.
 	bool getFlagPhotoExtinctionColorActive() const {return photoExtinctionActive;}
+	//! Switch the airglow of the photographic mode on or off.
+	void setFlagPhotoAirglow(bool b);
+	bool getFlagPhotoAirglow() const {return flagPhotoAirglow;}
+	//! Set the brightness of the airglow relative to its mean (0.25 to 2)
+	void setPhotoAirglowStrength(double strength);
+	double getPhotoAirglowStrength() const {return static_cast<double>(photoAirglowStrength);}
+	//! The airglow at the zenith above the atmosphere, in linear RGB of the scene buffer (photographic mode, on the
+	//! Earth, with the airglow on; otherwise 0). The brightness follows the solar cycle as in Skybright (Schaefer).
+	Vec3f getPhotoAirglow() const;
+	//! The extinction of the airglow per airmass in red, green and blue (magnitudes; the green one is the
+	//! extinction coefficient)
+	Vec3f getPhotoAirglowExtinction() const;
 	//! The color of the extinction towards the given direction (normalized geometric alt-azimuthal vector):
 	//! linear RGB at unit luminance, so that it changes the color but not the brightness, which comes from
 	//! the magnitude with extinction. (1,1,1) when the extinction colors are not active.
@@ -977,6 +995,8 @@ signals:
 	void flagPhotoInfoLineChanged(bool b);
 	void photoToneCurveChanged(int curve);
 	void flagPhotoExtinctionColorChanged(bool b);
+	void flagPhotoAirglowChanged(bool b);
+	void photoAirglowStrengthChanged(double strength);
 	void photoWhiteBalanceChanged(int wb);
 	void photoWhiteBalanceKelvinChanged(double kelvin);
 	void flagPhotoVignettingChanged(bool b);
@@ -1357,6 +1377,8 @@ private:
 	//! Extinction colors: the transmission table, and the tint as a function of the sine of the altitude
 	//! (photoExtinctionTints[i] at sin(alt) = sinMin + (1-sinMin) (i/(N-1))^2, dense near the horizon)
 	bool flagPhotoExtinctionColor = true;
+	bool flagPhotoAirglow = true;
+	float photoAirglowStrength = 1.f;
 	bool photoExtinctionActive = false;
 	StelAtmosphereTransmission atmosphereTransmission;
 	std::vector<Vec3f> photoExtinctionTints;

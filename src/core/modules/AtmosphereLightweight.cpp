@@ -369,6 +369,8 @@ void main()
 	// Undo the sqrt
 	color_xyY.z *= color_xyY.z;
 	vec3 color_RGB = xyYToRGB(color_xyY.x, color_xyY.y, color_xyY.z * colorScale);
+	// Photographic mode: the airglow (in the pass of the Sun only, see draw())
+	color_RGB += linearColorToFramebuffer(photoAirglowLight(viewDir.z));
 	FRAG_COLOR = vec4(color_RGB, 1);
 }
 )";
@@ -574,8 +576,12 @@ void AtmosphereLightweight::computeDrawParams(const StelCore* core, const Planet
 
 	float elevation = std::asin(std::clamp(p.dir[2], -1.f, 1.f));
 	// The elevations are expected to be decreasing in the array
+	float belowTable = 0.f;
 	if (elevation < layerSolarElevations_.back())
+	{
+		belowTable = layerSolarElevations_.back() - elevation;
 		elevation = layerSolarElevations_.back();
+	}
 
 	const auto lowIt = std::lower_bound(layerSolarElevations_.begin(), layerSolarElevations_.end(),
 	                                    elevation, std::greater<float>{});
@@ -590,6 +596,19 @@ void AtmosphereLightweight::computeDrawParams(const StelCore* core, const Planet
 	if (p.layerToDrawA >= layerSolarElevations_.size())
 		p.layerToDrawA = layerSolarElevations_.size() - 1;
 	p.fboColorScale = layerNorms_[p.layerToDrawA] + p.layerAlpha * (layerNorms_[p.layerToDrawB] - layerNorms_[p.layerToDrawA]);
+	// Photographic mode: below the last layer (the end of the astronomical twilight, -18 degrees) the table would
+	// keep the last of the twilight all night, a blue glow. It fades on at the rate of the last degrees of the table;
+	// the night sky is the airglow then (see photoAirglowLight()).
+	if (belowTable > 0.f && core->getSkyDrawer()->getFlagPhotographicModeActive())
+	{
+		const size_t last = layerSolarElevations_.size() - 1;
+		size_t ref = last;
+		while (ref > 0 && layerSolarElevations_[ref] - layerSolarElevations_[last] < 0.00872665f /* half a degree */)
+			--ref;
+		const float span = layerSolarElevations_[ref] - layerSolarElevations_[last];
+		if (span > 0.f && layerNorms_[ref] > layerNorms_[last] && layerNorms_[last] > 0.f)
+			p.fboColorScale *= std::exp(-std::log(layerNorms_[ref]/layerNorms_[last])/span * belowTable);
+	}
 
 	switch(paramIdx)
 	{
@@ -739,6 +758,8 @@ void AtmosphereLightweight::applyToneReproducerParams(StelCore* core, const floa
 		const StelSkyDrawer* skyDrawer = core->getSkyDrawer();
 		GL(renderShaderProgram_->setUniformValue("photoMode", skyDrawer->getFlagPhotographicModeActive()));
 		GL(renderShaderProgram_->setUniformValue("photoScale", skyDrawer->getPhotoSceneScale()));
+		const Vec3f k = skyDrawer->getPhotoAirglowExtinction();
+		GL(renderShaderProgram_->setUniformValue("photoAirglowExtinction", k[0], k[1], k[2]));
 	}
 }
 
@@ -787,6 +808,9 @@ void AtmosphereLightweight::draw(StelCore*const core)
 		float colorScale = p.fboColorScale * p.relativeBrightness * p.eclipseFactor;
 		colorScale *= maxValue; // restore the scale we used when creating the preparation FBO
 		renderShaderProgram_->setUniformValue(renderUniformLocations_.colorScale, colorScale);
+		// Photographic mode: the airglow, once (in the pass of the Sun)
+		const Vec3f airglow = i == DRAW_PARAM_SUN ? core->getSkyDrawer()->getPhotoAirglow() : Vec3f(0.f);
+		renderShaderProgram_->setUniformValue("photoAirglow", airglow[0], airglow[1], airglow[2]);
 
 		GL(gl.glDrawArrays(GL_TRIANGLE_STRIP, 0, 4));
 	}

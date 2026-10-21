@@ -263,6 +263,14 @@ void PhotographicModeDialog::createDialogContent()
 	connect(drawer, &StelSkyDrawer::flagPhotoProgramExposureChanged,   this, &PhotographicModeDialog::updateCameraWidgets);
 	connectBoolProperty(ui->infoLineCheckBox,         "StelSkyDrawer.flagPhotoInfoLine");
 	connectBoolProperty(ui->extinctionColorCheckBox,  "StelSkyDrawer.flagPhotoExtinctionColor");
+	connectBoolProperty(ui->airglowCheckBox,          "StelSkyDrawer.flagPhotoAirglow");
+	// Airglow: percent in the dialog, factor in the property
+	connect(ui->airglowStrengthSpinBox, QOverload<int>::of(&QSpinBox::valueChanged), this, [drawer](int percent)
+	{
+		drawer->setPhotoAirglowStrength(percent/100.);
+	});
+	connect(drawer, &StelSkyDrawer::photoAirglowStrengthChanged,      this, &PhotographicModeDialog::updateCameraWidgets);
+	connect(drawer, &StelSkyDrawer::flagPhotoAirglowChanged,          this, &PhotographicModeDialog::updateCameraWidgets);
 	connectBoolProperty(ui->vignettingCheckBox,       "StelSkyDrawer.flagPhotoVignetting");
 	connectBoolProperty(ui->aberrationsCheckBox,      "StelSkyDrawer.flagPhotoAberrations");
 	connectBoolProperty(ui->lensFlareCheckBox,        "StelSkyDrawer.flagPhotoLensFlare");
@@ -479,6 +487,11 @@ void PhotographicModeDialog::updateCameraWidgets()
 		ui->aberrationStrengthSpinBox->setValue(qRound(100.*drawer->getPhotoAberrationStrength()));
 		ui->aberrationStrengthSpinBox->setEnabled(drawer->getFlagPhotoAberrations());
 		ui->aberrationStrengthLabel->setEnabled(drawer->getFlagPhotoAberrations());
+	}
+	{
+		const QSignalBlocker blocker(ui->airglowStrengthSpinBox);
+		ui->airglowStrengthSpinBox->setValue(qRound(100.*drawer->getPhotoAirglowStrength()));
+		ui->airglowStrengthSpinBox->setEnabled(drawer->getFlagPhotoAirglow());
 	}
 	{
 		const QSignalBlocker blocker(ui->detectionSnrSpinBox);
