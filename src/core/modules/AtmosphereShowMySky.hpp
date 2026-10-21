@@ -90,6 +90,9 @@ private:
 	bool flagDynamicResolution;
 
 	std::unique_ptr<QOpenGLShaderProgram> luminanceToScreenProgram_;
+	//! (Re)build luminanceToScreenProgram_ for the projection (it needs the view direction: the airglow of the
+	//! photographic mode, see photoAirglowLight() in xyYToRGB.glsl)
+	void compileLuminanceToScreenProgram(const StelProjector& projector);
 	decltype(::ShowMySky_AtmosphereRenderer_create)* ShowMySky_AtmosphereRenderer_create=nullptr;
 
 	struct {
