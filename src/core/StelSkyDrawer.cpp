@@ -162,6 +162,7 @@ StelSkyDrawer::StelSkyDrawer(StelCore* acore) :
 	flagPhotoZoomWholeMillimeters = conf->value("viewing/flag_photographic_zoom_whole_millimeters", false).toBool();
 	flagPhotoPortrait = conf->value("viewing/flag_photographic_portrait", false).toBool();
 	flagPhotoFrameMask = conf->value("viewing/flag_photographic_frame_mask", true).toBool();
+	photoEclipseAtmosphere = qBound(0, conf->value("viewing/photographic_eclipse_atmosphere", 1).toInt(), 3);
 	photoNoise = qBound(static_cast<int>(PhotoNoiseOff), conf->value("viewing/photographic_noise", static_cast<int>(PhotoNoiseImage)).toInt(), static_cast<int>(PhotoNoisePixel));
 	updatePhotoWhiteBalanceMatrix();
 	{
@@ -2704,6 +2705,16 @@ void StelSkyDrawer::setFlagPhotoPortrait(bool b)
 	emit flagPhotoPortraitChanged(b);
 }
 
+void StelSkyDrawer::setPhotoEclipseAtmosphere(int state)
+{
+	const int s = qBound(0, state, 3);
+	if (s == photoEclipseAtmosphere)
+		return;
+	photoEclipseAtmosphere = s;
+	StelApp::immediateSave("viewing/photographic_eclipse_atmosphere", s);
+	emit photoEclipseAtmosphereChanged(s);
+}
+
 void StelSkyDrawer::setFlagPhotoFrameMask(bool b)
 {
 	if (b == flagPhotoFrameMask)
@@ -4245,6 +4256,7 @@ void StelSkyDrawer::resetPhotographicSettings()
 	setFlagPhotoZoomWholeMillimeters(false);
 	setFlagPhotoPortrait(false);
 	setFlagPhotoFrameMask(true);
+	setPhotoEclipseAtmosphere(1);
 }
 
 float StelSkyDrawer::getPhotoSceneScale() const
