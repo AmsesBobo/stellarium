@@ -160,6 +160,12 @@ void PhotographicModeDialog::fillComboBoxes()
 		ui->sensorComboBox->addItem(q_("1-inch (13.2 x 8.8 mm)"), StelSkyDrawer::PhotoSensorOneInch);
 	}
 	{
+		const QSignalBlocker blocker(ui->frameOrientationComboBox);
+		ui->frameOrientationComboBox->clear();
+		ui->frameOrientationComboBox->addItem(q_("Landscape"), false);
+		ui->frameOrientationComboBox->addItem(q_("Portrait"), true);
+	}
+	{
 		// The motion during the exposure: off (flagPhotoStarTrails false), or the mount
 		const QSignalBlocker blocker(ui->mountComboBox);
 		ui->mountComboBox->clear();
@@ -237,6 +243,7 @@ void PhotographicModeDialog::createDialogContent()
 	connectBoolProperty(ui->aberrationsCheckBox,      "StelSkyDrawer.flagPhotoAberrations");
 	connectBoolProperty(ui->lensFlareCheckBox,        "StelSkyDrawer.flagPhotoLensFlare");
 	connectBoolProperty(ui->zoomWholeMillimetersCheckBox, "StelSkyDrawer.flagPhotoZoomWholeMillimeters");
+	connectBoolProperty(ui->frameMaskCheckBox,        "StelSkyDrawer.flagPhotoFrameMask");
 
 	fillComboBoxes();
 
@@ -298,6 +305,12 @@ void PhotographicModeDialog::createDialogContent()
 	});
 	connect(drawer, &StelSkyDrawer::flagPhotoStarTrailsChanged,        this, &PhotographicModeDialog::updateCameraWidgets);
 	connect(drawer, &StelSkyDrawer::photoMountChanged,                 this, &PhotographicModeDialog::updateCameraWidgets);
+	connect(ui->frameOrientationComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this, drawer](int index)
+	{
+		if (index >= 0)
+			drawer->setFlagPhotoPortrait(ui->frameOrientationComboBox->itemData(index).toBool());
+	});
+	connect(drawer, &StelSkyDrawer::flagPhotoPortraitChanged,          this, &PhotographicModeDialog::updateCameraWidgets);
 	// Sensor and lens
 	connect(ui->sensorComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this, drawer](int index)
 	{
@@ -394,6 +407,10 @@ void PhotographicModeDialog::updateCameraWidgets()
 	{
 		const QSignalBlocker blocker(ui->noiseComboBox);
 		ui->noiseComboBox->setCurrentIndex(qMax(0, ui->noiseComboBox->findData(drawer->getPhotoNoise())));
+	}
+	{
+		const QSignalBlocker blocker(ui->frameOrientationComboBox);
+		ui->frameOrientationComboBox->setCurrentIndex(drawer->getFlagPhotoPortrait() ? 1 : 0);
 	}
 	{
 		const QSignalBlocker blocker(ui->mountComboBox);

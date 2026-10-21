@@ -329,6 +329,34 @@
             </property>
            </widget>
           </item>
+          <item row="18" column="0">
+           <widget class="QLabel" name="frameLabel">
+            <property name="text">
+             <string>Frame:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="18" column="1">
+           <layout class="QHBoxLayout" name="frameLayout">
+            <item>
+             <widget class="QComboBox" name="frameOrientationComboBox">
+              <property name="toolTip">
+               <string>How the camera is held: landscape (the long side of the sensor horizontal) or portrait (turned upright). The frame is the largest rectangle with the proportions of the sensor that fits in the window; the picture is what lies inside it, and the focal length, the corners of the lens and the exposure meter refer to it.</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QCheckBox" name="frameMaskCheckBox">
+              <property name="toolTip">
+               <string>Dim the view outside the frame of the sensor, like a viewfinder: it shows what the picture holds.</string>
+              </property>
+              <property name="text">
+               <string>Dim outside</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
          </layout>
         </widget>
        </item>

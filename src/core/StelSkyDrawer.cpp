@@ -159,6 +159,8 @@ StelSkyDrawer::StelSkyDrawer(StelCore* acore) :
 	photoMount = qBound(static_cast<int>(PhotoMountTripod), conf->value("viewing/photographic_mount", static_cast<int>(PhotoMountTripod)).toInt(), static_cast<int>(PhotoMountTracker));
 	photoSensorFormat = qBound(0, conf->value("viewing/photographic_sensor_format", static_cast<int>(PhotoSensorFullFrame)).toInt(), PHOTO_SENSOR_FORMAT_COUNT - 1);
 	flagPhotoZoomWholeMillimeters = conf->value("viewing/flag_photographic_zoom_whole_millimeters", false).toBool();
+	flagPhotoPortrait = conf->value("viewing/flag_photographic_portrait", false).toBool();
+	flagPhotoFrameMask = conf->value("viewing/flag_photographic_frame_mask", true).toBool();
 	photoNoise = qBound(static_cast<int>(PhotoNoiseOff), conf->value("viewing/photographic_noise", static_cast<int>(PhotoNoiseImage)).toInt(), static_cast<int>(PhotoNoisePixel));
 	updatePhotoWhiteBalanceMatrix();
 	{
@@ -1115,7 +1117,7 @@ void StelSkyDrawer::update(double)
 		{
 			const StelProjectorP prj = core->getProjection(StelCore::FrameJ2000);
 			PhotoNoiseParams noise = getPhotoNoiseParams(*prj);
-			const double diagonal = std::hypot(prj->getViewportWidth(), prj->getViewportHeight());
+			const double diagonal = getPhotoFrameDiagonal(*prj);
 			const double pixel = diagonal > 0. ? getPhotoSensorDiagonal()/diagonal : getPhotoSensorPitch();
 			const float sites = static_cast<float>(qMax(1., (pixel*pixel)/(getPhotoSensorPitch()*getPhotoSensorPitch())));
 			const float skyElectrons = photoSkyBackground * noise.white * sites;
@@ -2517,7 +2519,8 @@ StelSkyDrawer::PhotoLens StelSkyDrawer::getPhotoLens(const StelProjector& prj) c
 	const auto c = prj.getViewportCenter();
 	lens.center.set(static_cast<float>(c[0]) - static_cast<float>(prj.getViewportPosX()),
 	                static_cast<float>(c[1]) - static_cast<float>(prj.getViewportPosY()));
-	lens.corner = qMax(1.f, 0.5f*static_cast<float>(std::hypot(prj.getViewportWidth(), prj.getViewportHeight())));
+	// the corners of the picture: the corners of the frame of the sensor
+	lens.corner = qMax(1.f, 0.5f*static_cast<float>(getPhotoFrameDiagonal(prj)));
 	// Rectilinear lens: tan(field angle) = distance from the center / focal length (pixels)
 	lens.focal = qMax(1.f, prj.getPixelPerRadAtCenter());
 	const float N = static_cast<float>(photoAperture);
@@ -2559,8 +2562,8 @@ StelSkyDrawer::PhotoLens StelSkyDrawer::getPhotoLens(const StelProjector& prj) c
 
 double StelSkyDrawer::getPhotoFocalLength(const StelProjector& prj) const
 {
-	// The diagonal of the view is the diagonal of the sensor
-	const double diagonal = std::hypot(prj.getViewportWidth(), prj.getViewportHeight());
+	// The diagonal of the frame in the view is the diagonal of the sensor
+	const double diagonal = getPhotoFrameDiagonal(prj);
 	return diagonal > 0. ? getPhotoSensorDiagonal() * prj.getPixelPerRadAtCenter() / diagonal : 0.05;
 }
 
@@ -2569,7 +2572,7 @@ double StelSkyDrawer::getPhotoFocalLength(const StelProjector& prj) const
 double StelSkyDrawer::getPhotoFocalLengthForFov(double fov) const
 {
 	const StelProjectorP prj = core->getProjection(StelCore::FrameJ2000);
-	const double diagonal = std::hypot(prj->getViewportWidth(), prj->getViewportHeight());
+	const double diagonal = getPhotoFrameDiagonal(*prj);
 	const double halfDisk = static_cast<double>(prj->getPixelPerRadAtCenter()) * static_cast<double>(prj->fovToViewScalingFactor(static_cast<float>(M_PI/360.*static_cast<double>(prj->getFov()))));
 	const double scaling = static_cast<double>(prj->fovToViewScalingFactor(static_cast<float>(M_PI/360.*fov)));
 	if (!(diagonal > 0.) || !(scaling > 0.))
@@ -2580,7 +2583,7 @@ double StelSkyDrawer::getPhotoFocalLengthForFov(double fov) const
 double StelSkyDrawer::getPhotoFovForFocalLength(double f) const
 {
 	const StelProjectorP prj = core->getProjection(StelCore::FrameJ2000);
-	const double diagonal = std::hypot(prj->getViewportWidth(), prj->getViewportHeight());
+	const double diagonal = getPhotoFrameDiagonal(*prj);
 	const double halfDisk = static_cast<double>(prj->getPixelPerRadAtCenter()) * static_cast<double>(prj->fovToViewScalingFactor(static_cast<float>(M_PI/360.*static_cast<double>(prj->getFov()))));
 	const double focalPixels = f * diagonal / getPhotoSensorDiagonal();
 	if (!(focalPixels > 0.))
@@ -2636,14 +2639,61 @@ const StelSkyDrawer::PhotoSensorSpec& StelSkyDrawer::getPhotoSensorSpec(int form
 {
 	// Typical cameras of each format: pitch from the sensor width and the number of photosites across it
 	static const PhotoSensorSpec specs[PHOTO_SENSOR_FORMAT_COUNT] = {
-		{ PHOTO_SENSOR_DIAGONAL, PHOTO_SENSOR_PITCH, "" },  // full frame: 36 mm / 6000 (24 Mpx)
-		{ 0.028207, 3.92e-6, "APS-C" },                     // 23.5 mm / 6000 (24 Mpx)
-		{ 0.026820, 3.72e-6, "APS-C 1.6x" },                // 22.3 mm / 6000 (24 Mpx)
-		{ 0.021640, 3.34e-6, "4/3" },                       // 17.3 mm / 5184 (20 Mpx)
-		{ 0.015864, 2.41e-6, "1\"" },                       // 13.2 mm / 5472 (20 Mpx)
-		{ 0.054780, 5.30e-6, "MF" }                         // 43.8 mm / 8256 (51 Mpx)
+		{ PHOTO_SENSOR_DIAGONAL, PHOTO_SENSOR_PITCH, "", 36.0/24.0 },  // full frame: 36 mm / 6000 (24 Mpx)
+		{ 0.028207, 3.92e-6, "APS-C", 23.5/15.6 },                     // 23.5 mm / 6000 (24 Mpx)
+		{ 0.026820, 3.72e-6, "APS-C 1.6x", 22.3/14.9 },                // 22.3 mm / 6000 (24 Mpx)
+		{ 0.021640, 3.34e-6, "4/3", 17.3/13.0 },                       // 17.3 mm / 5184 (20 Mpx)
+		{ 0.015864, 2.41e-6, "1\"", 13.2/8.8 },                        // 13.2 mm / 5472 (20 Mpx)
+		{ 0.054780, 5.30e-6, "MF", 43.8/32.9 }                         // 43.8 mm / 8256 (51 Mpx)
 	};
 	return specs[qBound(0, format, PHOTO_SENSOR_FORMAT_COUNT - 1)];
+}
+
+Vec4f StelSkyDrawer::getPhotoFrame(const StelProjector& prj) const
+{
+	const double vx = prj.getViewportPosX(), vy = prj.getViewportPosY();
+	const double vw = prj.getViewportWidth(), vh = prj.getViewportHeight();
+	const auto c = prj.getViewportCenter();
+	// The largest frame around the optical axis that stays in the viewport
+	const double halfW = qMax(1., qMin(c[0] - vx, vx + vw - c[0]));
+	const double halfH = qMax(1., qMin(c[1] - vy, vy + vh - c[1]));
+	double aspect = getPhotoSensorSpec(photoSensorFormat).aspect;
+	if (flagPhotoPortrait)
+		aspect = 1./aspect;
+	double w = 2.*halfW, h = 2.*halfH;
+	if (w > aspect*h)
+		w = aspect*h;
+	else
+		h = w/aspect;
+	return Vec4f(static_cast<float>(c[0] - 0.5*w), static_cast<float>(c[1] - 0.5*h), static_cast<float>(w), static_cast<float>(h));
+}
+
+double StelSkyDrawer::getPhotoFrameDiagonal(const StelProjector& prj) const
+{
+	const Vec4f frame = getPhotoFrame(prj);
+	return std::hypot(static_cast<double>(frame[2]), static_cast<double>(frame[3]));
+}
+
+void StelSkyDrawer::setFlagPhotoPortrait(bool b)
+{
+	if (b == flagPhotoPortrait)
+		return;
+	// The same lens on the turned camera: keep the focal length, the frame (and so the field of view) changes
+	const double focal = getPhotoFocalLengthForFov(core->getMovementMgr()->getAimFov());
+	flagPhotoPortrait = b;
+	if (getFlagPhotographicModeActive())
+		core->getMovementMgr()->zoomTo(getPhotoFovForFocalLength(focal), 0.5f);
+	StelApp::immediateSave("viewing/flag_photographic_portrait", b);
+	emit flagPhotoPortraitChanged(b);
+}
+
+void StelSkyDrawer::setFlagPhotoFrameMask(bool b)
+{
+	if (b == flagPhotoFrameMask)
+		return;
+	flagPhotoFrameMask = b;
+	StelApp::immediateSave("viewing/flag_photographic_frame_mask", b);
+	emit flagPhotoFrameMaskChanged(b);
 }
 
 void StelSkyDrawer::setPhotoSensorFormat(int format)
@@ -2712,12 +2762,12 @@ StelSkyDrawer::PhotoNoiseParams StelSkyDrawer::getPhotoNoiseParams(const StelPro
 	const float thermal = std::exp2((celsius - 20.f)/PHOTO_DARK_DOUBLING);
 	p.dark = PHOTO_DARK_CURRENT * area * thermal * t;
 	p.hot = PHOTO_HOT_PIXEL_CURRENT * thermal * t;
-	// Photosites per screen pixel: the view is the sensor (its diagonal), see getPhotoFocalLength()
+	// Photosites per screen pixel: the frame in the view is the sensor (its diagonal), see getPhotoFocalLength()
 	if (photoNoise == PhotoNoisePixel)
 		p.sites = 1.f;
 	else
 	{
-		const double diagonal = std::hypot(prj.getViewportWidth(), prj.getViewportHeight());
+		const double diagonal = getPhotoFrameDiagonal(prj);
 		const double pixel = diagonal > 0. ? getPhotoSensorDiagonal()/diagonal : pitch;
 		p.sites = static_cast<float>(qMax(1., (pixel*pixel)/(pitch*pitch)));
 	}
@@ -4073,6 +4123,8 @@ void StelSkyDrawer::resetPhotographicSettings()
 	setPhotoNoise(PhotoNoiseImage);
 	setPhotoSensorFormat(PhotoSensorFullFrame);
 	setFlagPhotoZoomWholeMillimeters(false);
+	setFlagPhotoPortrait(false);
+	setFlagPhotoFrameMask(true);
 }
 
 float StelSkyDrawer::getPhotoSceneScale() const

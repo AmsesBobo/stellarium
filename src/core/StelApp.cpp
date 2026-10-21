@@ -1000,6 +1000,21 @@ highp vec3 sensorNoise(highp vec3 sensor, highp vec2 fragCoord)
 	return e / photoNoiseWhite;
 }
 
+// The frame of the sensor (see StelSkyDrawer::getPhotoFrame()): outside it the view is dimmed, like a viewfinder
+// (the picture is what lies inside), with a thin line along its edge. On the encoded (display) values.
+uniform bool photoFrameMask;
+uniform highp vec4 photoFrame; // window coordinates: x0, y0, x1, y1
+highp vec3 photoFrameMasked(highp vec3 encoded, highp vec2 fragCoord)
+{
+	if (!photoMode || !photoFrameMask)
+		return encoded;
+	highp vec2 d = max(photoFrame.xy - fragCoord, fragCoord - photoFrame.zw);
+	highp float outside = max(d.x, d.y); // > 0 outside the frame (distance to its edge, pixels)
+	highp vec3 c = outside > 0. ? 0.3 * encoded : encoded;
+	highp float line = 1. - smoothstep(0.5, 1.5, abs(outside));
+	return mix(c, vec3(0.7), 0.5 * line);
+}
+
 highp vec3 cameraResponse(highp vec3 lin)
 {
 	if(!photoMode) return lin;
@@ -1041,6 +1056,9 @@ void setPhotoToneUniforms(QOpenGLShaderProgram& program, const StelSkyDrawer& dr
 	program.setUniformValue("photoLensFocal", lens.focal);
 	program.setUniformValue("photoLensPupil", lens.pupil);
 	program.setUniformValue("photoLensShift", StelSkyDrawer::PHOTO_VIGNETTING_SHIFT);
+	const Vec4f frame = drawer.getPhotoFrame(prj);
+	program.setUniformValue("photoFrameMask", drawer.getFlagPhotoFrameMask());
+	program.setUniformValue("photoFrame", QVector4D(frame[0], frame[1], frame[0] + frame[2], frame[1] + frame[3]));
 	const StelSkyDrawer::PhotoToneParams& p = drawer.getPhotoToneParams();
 	program.setUniformValue("photoToneCurve", drawer.getPhotoToneCurve());
 	program.setUniformValue("photoTone", p.a, p.ad, p.b, p.c);
@@ -1117,7 +1135,7 @@ void main()
 	if (spikeEnabled)
 		extra += spikeAmount * texture2D(spikeTex, texcoord).rgb;
 	rgba.rgb += extra;
-	FRAG_COLOR = vec4(dither(linearToSRGB(cameraResponse(rgba.rgb))), rgba.a);
+	FRAG_COLOR = vec4(dither(photoFrameMasked(linearToSRGB(cameraResponse(rgba.rgb)), gl_FragCoord.xy)), rgba.a);
 }
 )");
 	StelPainter::linkProg(postProcessorProgram.get(), "Post-processing program");
@@ -1162,7 +1180,7 @@ void main()
 	for(int n = 0; n < numMultiSamples; ++n)
 		rgba += texelFetch(tex, ivec2(gl_FragCoord.xy), n);
 	rgba /= float(numMultiSamples);
-	FRAG_COLOR = vec4(dither(linearToSRGB(cameraResponse(rgba.rgb))), rgba.a);
+	FRAG_COLOR = vec4(dither(photoFrameMasked(linearToSRGB(cameraResponse(rgba.rgb)), gl_FragCoord.xy)), rgba.a);
 }
 )");
 		StelPainter::linkProg(postProcessorProgramMS.get(), "Multisampled post-processing program");
@@ -1338,8 +1356,14 @@ void StelApp::highGraphicsModeDraw()
 			photoMeterLastMs = now;
 			core->getSkyDrawer()->applyPhotoMeterReading(reading, dt);
 		}
-		photoMeter->measure(sceneFBO->texture(), static_cast<int>(w), static_cast<int>(h),
-		                    photoSceneScale, photoExposureTime, postProcessorVAO.get());
+		// Only the frame of the sensor: what lies outside is not in the picture
+		const Vec4f frame = skyDrawer->getPhotoFrame(*core->getProjection(StelCore::FrameJ2000));
+		const int fx0 = qBound(0, static_cast<int>(std::floor(frame[0])), static_cast<int>(w) - 1);
+		const int fy0 = qBound(0, static_cast<int>(std::floor(frame[1])), static_cast<int>(h) - 1);
+		const int fw = qBound(1, static_cast<int>(std::ceil(frame[2])), static_cast<int>(w) - fx0);
+		const int fh = qBound(1, static_cast<int>(std::ceil(frame[3])), static_cast<int>(h) - fy0);
+		photoMeter->measure(sceneFBO->texture(), fw, fh, photoSceneScale, photoExposureTime, postProcessorVAO.get(),
+		                    fx0, fy0, static_cast<int>(w), static_cast<int>(h));
 	}
 	else
 	{

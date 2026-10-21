@@ -149,6 +149,10 @@ class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 	Q_PROPERTY(int photoSensorFormat READ getPhotoSensorFormat WRITE setPhotoSensorFormat NOTIFY photoSensorFormatChanged)
 	//! Zooming with the mouse wheel steps the focal length in whole millimeters, as marked on a zoom lens
 	Q_PROPERTY(bool flagPhotoZoomWholeMillimeters READ getFlagPhotoZoomWholeMillimeters WRITE setFlagPhotoZoomWholeMillimeters NOTIFY flagPhotoZoomWholeMillimetersChanged)
+	//! The camera is turned for a portrait (upright) picture: the long side of the sensor is vertical
+	Q_PROPERTY(bool flagPhotoPortrait READ getFlagPhotoPortrait WRITE setFlagPhotoPortrait NOTIFY flagPhotoPortraitChanged)
+	//! Dim the view outside the frame of the sensor (what the picture holds), like a viewfinder
+	Q_PROPERTY(bool flagPhotoFrameMask READ getFlagPhotoFrameMask WRITE setFlagPhotoFrameMask NOTIFY flagPhotoFrameMaskChanged)
 	//! The exposure time in use (seconds): the set one, or the one chosen by the automatic exposure.
 	//! The change signal is only emitted when the value shown by a camera (1/3-stop steps) changes.
 	Q_PROPERTY(double photoEffectiveExposureTime READ getPhotoEffectiveExposureTime NOTIFY photoEffectiveExposureTimeChanged)
@@ -254,6 +258,13 @@ public:
 	//! parts. In the photographic mode their values are raised to this power, which gives back a part of the
 	//! real contrast (the core of M42 is some 4 magnitudes brighter than its outer parts, not 2).
 	static constexpr float PHOTO_DSO_DESTRETCH = 1.5f;
+	//! The frame of the sensor in the view (window coordinates: x, y of the lower left corner, width, height):
+	//! the largest rectangle with the proportions of the sensor (turned for a portrait) that fits in the viewport,
+	//! centered on the optical axis (the viewport center). The picture is what lies inside. The focal length, the
+	//! lens model (its corners are the corners of this frame), the photosites per pixel and the metering refer to it.
+	Vec4f getPhotoFrame(const StelProjector& prj) const;
+	//! Diagonal of the frame of the sensor in the view (pixels)
+	double getPhotoFrameDiagonal(const StelProjector& prj) const;
 	//! The sensor in use: diagonal and pitch of a photosite (m)
 	double getPhotoSensorDiagonal() const {return getPhotoSensorSpec(photoSensorFormat).diagonal;}
 	double getPhotoSensorPitch() const {return getPhotoSensorSpec(photoSensorFormat).pitch;}
@@ -297,6 +308,7 @@ public:
 		double diagonal;
 		double pitch;
 		const char* shortName;
+		double aspect; //!< width / height (long side over short side)
 	};
 	static const PhotoSensorSpec& getPhotoSensorSpec(int format);
 	//! Full frame: the reference of the noise model (see PHOTO_SENSOR_PITCH)
@@ -699,6 +711,11 @@ public slots:
 	//! Zooming with the mouse wheel in whole millimeters of focal length (see flagPhotoZoomWholeMillimeters)
 	void setFlagPhotoZoomWholeMillimeters(bool b);
 	bool getFlagPhotoZoomWholeMillimeters() const {return flagPhotoZoomWholeMillimeters;}
+	//! Turn the camera for a portrait picture. The lens stays: the field of view changes with the frame.
+	void setFlagPhotoPortrait(bool b);
+	bool getFlagPhotoPortrait() const {return flagPhotoPortrait;}
+	void setFlagPhotoFrameMask(bool b);
+	bool getFlagPhotoFrameMask() const {return flagPhotoFrameMask;}
 	//! Photographic mode: a bright body whose light can be reflected inside the lens (see StelPhotoLensFlare).
 	//! It may lie outside the frame. Collected while drawing, the ghosts are drawn by drawDeferredPhotoBodies().
 	//! @param v position (J2000 frame), @param mag magnitude (with extinction and landscape), @param color display color
@@ -924,6 +941,8 @@ signals:
 	void photoNoiseChanged(int mode);
 	void photoSensorFormatChanged(int format);
 	void flagPhotoZoomWholeMillimetersChanged(bool b);
+	void flagPhotoPortraitChanged(bool b);
+	void flagPhotoFrameMaskChanged(bool b);
 	void photoAberrationStrengthChanged(double s);
 	void photoEffectiveExposureTimeChanged(double seconds);
 
@@ -1325,6 +1344,9 @@ private:
 	int photoSensorFormat = PhotoSensorFullFrame;
 	//! Mouse wheel zoom in whole millimeters of focal length
 	bool flagPhotoZoomWholeMillimeters = false;
+	//! Frame of the sensor: portrait orientation, and the dimming outside it
+	bool flagPhotoPortrait = false;
+	bool flagPhotoFrameMask = true;
 	//! Measuring the mean of textures (see photoTextureMeanLuminance())
 	std::unique_ptr<class QOpenGLShaderProgram> photoTextureMeanProgram;
 	std::unique_ptr<class QOpenGLFramebufferObject> photoTextureMeanFbo;
