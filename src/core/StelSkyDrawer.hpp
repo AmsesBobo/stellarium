@@ -198,7 +198,7 @@ public:
 	//! (electrons) at the base ISO, the read noise before and after the ISO amplifier (electrons, the latter
 	//! at the base ISO), dark current (electrons per second at 20 degrees C, doubling every 6 degrees),
 	//! hot pixels (fraction of the photosites and their mean dark current), warming of the sensor above the air.
-	//! For another pitch (APS-C) the full well and the dark current scale with the area of the photosite,
+	//! For another pitch (other sensors) the full well and the dark current scale with the area of the photosite,
 	//! the read noise stays the same per photosite.
 	static constexpr double PHOTO_SENSOR_PITCH = 6.0e-6;
 	static constexpr float PHOTO_SENSOR_FULL_WELL = 50000.f;
@@ -255,8 +255,8 @@ public:
 	//! real contrast (the core of M42 is some 4 magnitudes brighter than its outer parts, not 2).
 	static constexpr float PHOTO_DSO_DESTRETCH = 1.5f;
 	//! The sensor in use: diagonal and pitch of a photosite (m)
-	double getPhotoSensorDiagonal() const {return photoSensorFormat == PhotoSensorAPSC ? PHOTO_SENSOR_DIAGONAL_APSC : PHOTO_SENSOR_DIAGONAL;}
-	double getPhotoSensorPitch() const {return photoSensorFormat == PhotoSensorAPSC ? PHOTO_SENSOR_PITCH_APSC : PHOTO_SENSOR_PITCH;}
+	double getPhotoSensorDiagonal() const {return getPhotoSensorSpec(photoSensorFormat).diagonal;}
+	double getPhotoSensorPitch() const {return getPhotoSensorSpec(photoSensorFormat).pitch;}
 	//! The focal length (m) of a lens that gives the field of view fov (degrees, as StelMovementMgr) on the sensor in use
 	double getPhotoFocalLengthForFov(double fov) const;
 	//! The field of view (degrees, as StelMovementMgr) of a lens of the focal length f (m) on the sensor in use
@@ -279,17 +279,28 @@ public:
 		PhotoMountTripod = 0, //!< fixed on the ground: the stars draw trails
 		PhotoMountTracker = 1 //!< turns with the sky (around the pole): the stars stay sharp, the landscape blurs
 	};
-	//! Sensor formats
+	//! Sensor formats (the values are stored in the settings: keep them)
 	enum PhotoSensorFormat {
-		PhotoSensorFullFrame = 0, //!< 36 x 24 mm
-		PhotoSensorAPSC = 1       //!< 23.5 x 15.6 mm (crop factor 1.53, as Nikon, Sony, Fujifilm, Pentax)
+		PhotoSensorFullFrame = 0,      //!< 36 x 24 mm
+		PhotoSensorAPSC = 1,           //!< 23.5 x 15.6 mm (crop factor 1.53, as Nikon, Sony, Fujifilm, Pentax)
+		PhotoSensorAPSCCanon = 2,      //!< 22.3 x 14.9 mm (crop factor 1.61, Canon)
+		PhotoSensorMicroFourThirds = 3,//!< 17.3 x 13.0 mm (crop factor 2.0, Olympus/OM System, Panasonic)
+		PhotoSensorOneInch = 4,        //!< 13.2 x 8.8 mm (crop factor 2.7, compact cameras)
+		PhotoSensorMediumFormat = 5    //!< 43.8 x 32.9 mm (crop factor 0.79, Fujifilm GFX, Hasselblad X)
 	};
-	//! Sensor diagonals (m). The diagonal of the view is the diagonal of the sensor, which gives the focal length
+	static constexpr int PHOTO_SENSOR_FORMAT_COUNT = 6;
+	//! Size of a sensor: its diagonal (m) and the pitch of a photosite (m), and a short name for the info line
+	//! (empty for full frame). The diagonal of the view is the diagonal of the sensor, which gives the focal length
 	//! of the lens: f = (sensor diagonal) x (focal length in pixels) / (diagonal of the view in pixels).
-	static constexpr double PHOTO_SENSOR_DIAGONAL = 0.043267;      //!< full frame
-	static constexpr double PHOTO_SENSOR_DIAGONAL_APSC = 0.028207; //!< APS-C
-	//! Both sensors have 24 megapixels (6000 x 4000): pitch of a photosite (m)
-	static constexpr double PHOTO_SENSOR_PITCH_APSC = 3.92e-6;
+	struct PhotoSensorSpec
+	{
+		double diagonal;
+		double pitch;
+		const char* shortName;
+	};
+	static const PhotoSensorSpec& getPhotoSensorSpec(int format);
+	//! Full frame: the reference of the noise model (see PHOTO_SENSOR_PITCH)
+	static constexpr double PHOTO_SENSOR_DIAGONAL = 0.043267;
 	//! Focus: the closest focus distance of the lens (meters)
 	static constexpr double PHOTO_FOCUS_MIN_DISTANCE = 0.3;
 	//! Focus: how far the focus ring turns beyond the infinity mark, as a distance (meters, see photoFocusDistance)
