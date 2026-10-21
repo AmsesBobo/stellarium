@@ -140,6 +140,9 @@ private:
 	//! Photographic mode: power applied to the luminance of photoTex, undoing the display stretch of the
 	//! image (config: astro/milky_way_photo_destretch)
 	float photoDestretch = 1.5f;
+	//! Photographic mode: gains on the linear red, green and blue of photoTex (luminance kept), which bring its mean
+	//! color to the measured one of the integrated starlight (config: astro/milky_way_photo_color_gain)
+	Vec3f photoColorGain = Vec3f(1.f);
 
 	std::unique_ptr<QOpenGLVertexArrayObject> vao;
 	std::unique_ptr<QOpenGLBuffer> vbo;
