@@ -371,10 +371,10 @@
           <item row="1" column="0" colspan="2">
            <widget class="QCheckBox" name="aberrationsCheckBox">
             <property name="toolTip">
-             <string>Stars away from the center turn into small comets (coma) and short lines (astigmatism), most in the corners and with the lens wide open. Stopping down makes them sharp.</string>
+             <string>Stars away from the center turn into small comets (coma) and short lines (astigmatism), most in the corners and with the lens wide open. Stopping down makes them sharp. Chromatic aberration: towards the corners the stars get red and blue edges (lateral), and wide open bright stars get purple fringes (axial, gone when stopped down).</string>
             </property>
             <property name="text">
-             <string>Coma and astigmatism</string>
+             <string>Coma, astigmatism and color fringes</string>
             </property>
            </widget>
           </item>

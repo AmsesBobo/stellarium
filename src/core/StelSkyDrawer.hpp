@@ -297,6 +297,15 @@ public:
 	//! Focus: brightness change from the center to the edge of a defocused star image from the spherical
 	//! aberration of the lens, wide open (it scales with 1/N^2 and the aberration strength)
 	static constexpr float PHOTO_SPHERICAL_ABERRATION = 0.6f;
+	//! Lateral chromatic aberration: the red image is a little larger than the green one, the blue one a little
+	//! smaller. Shift of each in the corner, as a fraction of the image diagonal (red and blue then lie 0.08% of
+	//! the diagonal apart there, an average wide-angle lens). It does not change with the aperture.
+	static constexpr float PHOTO_LATERAL_CA = 0.0004f;
+	//! Axial chromatic aberration (secondary spectrum): red and blue focus a little behind green, as a fraction
+	//! of the focal length. Their blur disks have the radius (shift)/(2N): colored (purple) fringes around bright
+	//! stars with the lens wide open, gone when stopped down.
+	static constexpr float PHOTO_AXIAL_CA_RED = 1.f/1600.f;
+	static constexpr float PHOTO_AXIAL_CA_BLUE = 1.f/800.f;
 	//! The lens model for the given projection: center of the image (optical axis), half diagonal and focal length
 	//! (all in window pixels), relative pupil size (1 = wide open) and the aberration lengths in the corner (pixels)
 	struct PhotoLens
@@ -314,6 +323,10 @@ public:
 		float defocus = 0.f;
 		//! Defocus: relative brightness change from the center to the edge of the blur disk (spherical aberration)
 		float sphericalAberration = 0.f;
+		//! Chromatic aberration: radial shift of the red, green and blue images in the corner (pixels, outwards
+		//! positive), and the radius of their blur disks (pixels). Zero: none.
+		Vec3f chromaShift = Vec3f(0.f);
+		Vec3f chromaBlur = Vec3f(0.f);
 	};
 	PhotoLens getPhotoLens(const StelProjector& prj) const;
 	//! Time constant of the smooth adaptation of the automatic white balance (seconds)

@@ -477,6 +477,9 @@ VARYING highp vec2 vSunDir;
 VARYING highp vec3 vLens;
 uniform highp float comaLength;   // lens: length of the coma in the corner (pixels), 0 = none
 uniform highp float astigLength;  // lens: length of the astigmatic line in the corner (pixels), 0 = none
+uniform bool chromaEnabled;       // lens: chromatic aberration
+uniform highp vec3 chromaShift;   // radial shift of the red, green and blue images in the corner (pixels)
+uniform highp vec3 chromaBlur;    // radius of their blur disks (pixels): axial chromatic aberration
 uniform highp float coreAlpha;
 uniform highp float coreBeta;
 uniform highp float haloAlpha;
@@ -520,7 +523,7 @@ highp float moffat2(highp float u, highp float v, highp float au, highp float av
 // Coma: the image of a point is a family of circles whose radius grows like t^2 and whose centers move
 // outwards by twice that (a comet with its tail away from the center); here a few blurred blobs along it.
 // Astigmatism: the image is drawn out into a short line, across the radial direction (tangential focus).
-highp float aberratedCore(highp vec2 offset)
+highp float aberratedCore(highp vec2 offset, highp float alpha)
 {
 	highp float rho = vLens.x;
 	highp vec2 er = vLens.yz;
@@ -528,7 +531,7 @@ highp float aberratedCore(highp vec2 offset)
 	highp float v = dot(offset, vec2(-er.y, er.x));
 	highp float coma = comaLength * rho;
 	highp float astig = astigLength * rho * rho;
-	highp float a2 = coreAlpha * coreAlpha;
+	highp float a2 = alpha * alpha;
 	// a line of length L convolved with the core: about the width of a uniform segment, L^2/12, added in quadrature
 	highp float av2 = a2 + astig * astig / 3.;
 	const int K = 6;
@@ -599,6 +602,17 @@ highp float defocusDisk(highp vec2 p, highp float R)
 	highp float sa = max(0., 1. + defocusSA * (r*r - 0.5));
 	return coverage * sa * vDefocus.z;
 }
+// The core of one color with the chromatic aberration: its image shifted along the radial direction, and a small
+// blur disk that widens it (as a small defocus widens the core, see main())
+highp vec2 chromaOffset(highp float shift)
+{
+	return vOffset - vLens.yz * (shift * vLens.x);
+}
+highp float chromaAlpha(highp float blur)
+{
+	highp float k = 1.6 * blur / coreFwhm;
+	return coreAlpha * sqrt(1. + k*k);
+}
 void main(void)
 {
 	highp float r = length(vOffset);
@@ -629,6 +643,17 @@ void main(void)
 	highp float r2 = d * d;
 	highp float brightness = max(vColor.r, max(vColor.g, vColor.b));
 	highp float profile;
+	highp vec3 chroma = vec3(0.); // change of the core in each color (chromatic aberration of the lens)
+	// The colored fringes show only where the change of the core makes a visible color difference (a few
+	// steps of the screen): bright stars. The others (most) skip it. The change is about (shift + blur)/alpha
+	// of the peak of the core.
+	bool showChroma = false;
+	if (chromaEnabled)
+	{
+		highp float peak = brightness * coreFraction * vNorm.x * (coreBeta - 1.) / (PI * coreAlpha * coreAlpha);
+		highp float change = min(1., (max(abs(chromaShift.r), abs(chromaShift.b)) * vLens.x + max(chromaBlur.r, chromaBlur.b)) / coreAlpha);
+		showChroma = peak * change > 4. * visibleThreshold;
+	}
 	// Where the halo and the spikes start: the lit part, or the blur disk of a defocused image
 	highp vec2 spikeP = vOffset - vSunDir * (Rd - Rl*Rl/max(Rd, 1e-6)); // from the photocenter of the lit part
 	highp float spikeR = Rl;
@@ -653,9 +678,26 @@ void main(void)
 		spikeR = Reff;
 	}
 	else if (Rd <= 0. && (comaLength > 0. || astigLength > 0.) && vLens.x > 0.05)
-		profile = coreFraction * vNorm.x * aberratedCore(vOffset);
+	{
+		highp float base = aberratedCore(vOffset, coreAlpha);
+		profile = coreFraction * vNorm.x * base;
+		// Chromatic aberration of a star: the red and the blue core differ from the green one (green is the reference)
+		if (showChroma)
+			chroma = coreFraction * vNorm.x * vec3(aberratedCore(chromaOffset(chromaShift.r), chromaAlpha(chromaBlur.r)) - base, 0.,
+			                                       aberratedCore(chromaOffset(chromaShift.b), chromaAlpha(chromaBlur.b)) - base);
+	}
 	else
-		profile = coreFraction * vNorm.x * moffat(r2, coreAlpha, coreBeta);
+	{
+		highp float base = moffat(r2, coreAlpha, coreBeta);
+		profile = coreFraction * vNorm.x * base;
+		if (showChroma && Rd <= 0.)
+		{
+			highp vec2 oR = chromaOffset(chromaShift.r);
+			highp vec2 oB = chromaOffset(chromaShift.b);
+			chroma = coreFraction * vNorm.x * vec3(moffat(dot(oR, oR), chromaAlpha(chromaBlur.r), coreBeta) - base, 0.,
+			                                       moffat(dot(oB, oB), chromaAlpha(chromaBlur.b), coreBeta) - base);
+		}
+	}
 	// The halo and the spikes matter only for bright stars: skip them where even their
 	// peak would stay below what can show on the screen (most stars)
 	bool showHalo = brightness * haloFraction * vNorm.y * (haloBeta - 1.) / (PI * haloAlpha * haloAlpha) > visibleThreshold;
@@ -722,6 +764,7 @@ void main(void)
 		// A short trail keeps the details of the stationary image (aberrations, the shape of the blur disk)
 		highp float tau = smoothstep(0.5, 2.0, trailLength / max(coreFwhm, 2.*Rdf));
 		profile = mix(profile, coreFraction * vNorm.w * coreT, tau);
+		chroma *= 1. - tau; // (a trail smears the colored fringes)
 		// (the whole trailed image takes the tint of its nearest point, see trailTint below)
 		haloProfile = haloT;
 		// Extinction along the trail: the light at this point of the trail (mostly from the nearest part), from
@@ -772,8 +815,8 @@ void main(void)
 	// stays on the disk there (the disk itself is drawn with the remaining fraction), and it fills
 	// small dark details such as crater shadows, as on a real overexposed photo.
 	// Fade the outermost part of the sprite, so that its edge never shows
-	profile *= 1. - smoothstep(Rd + 0.75 * (vRadius - Rd), vRadius, fadeDistance);
-	FRAG_COLOR = vec4(min(vColor * trailTint * profile, vec3(1e30)), 1.); // guard against overflow
+	highp float fade = 1. - smoothstep(Rd + 0.75 * (vRadius - Rd), vRadius, fadeDistance);
+	FRAG_COLOR = vec4(min(max(vColor * trailTint * (vec3(profile) + chroma) * fade, vec3(0.)), vec3(1e30)), 1.); // guard against overflow
 }
 )";
 
@@ -932,6 +975,9 @@ void StelSkyDrawer::flushPhotoPointSources(StelPainter* sPainter, PhotoBatchMode
 		prog.setUniformValue(photoStarShaderVars.lensCorner, lens.corner);
 		prog.setUniformValue(photoStarShaderVars.comaLength, lens.coma);
 		prog.setUniformValue(photoStarShaderVars.astigLength, lens.astigmatism);
+		prog.setUniformValue("chromaEnabled", lens.chromaShift[0] != 0.f || lens.chromaBlur[2] != 0.f);
+		prog.setUniformValue("chromaShift", QVector3D(lens.chromaShift[0], lens.chromaShift[1], lens.chromaShift[2]));
+		prog.setUniformValue("chromaBlur", QVector3D(lens.chromaBlur[0], lens.chromaBlur[1], lens.chromaBlur[2]));
 		// Defocus: the image of the aperture. Focused nearer than infinity, the rays of a star cross in front
 		// of the sensor: the image is inverted, and (spherical aberration of a typical, undercorrected lens)
 		// soft-edged; beyond infinity it is upright with a bright rim.
@@ -2465,6 +2511,13 @@ StelSkyDrawer::PhotoLens StelSkyDrawer::getPhotoLens(const StelProjector& prj) c
 		lens.astigmatism = photoAberrationStrength * PHOTO_ASTIGMATISM_LENGTH * diagonal * open;
 		// Spherical aberration: like the coma it grows with the square of the aperture (relative to the defocus)
 		lens.sphericalAberration = qMin(0.9f, photoAberrationStrength * PHOTO_SPHERICAL_ABERRATION * open*open);
+		// Chromatic aberration: the lateral part is a difference of magnification (a shift that grows with the
+		// field), the axial part a difference of focus (a blur disk of radius shift/(2N), here in pixels: the
+		// shift as a fraction of f times the focal length in pixels)
+		const float lateral = photoAberrationStrength * PHOTO_LATERAL_CA * diagonal;
+		lens.chromaShift.set(lateral, 0.f, -lateral);
+		const float blur = photoAberrationStrength * 0.5f * lens.focal / N;
+		lens.chromaBlur.set(blur*PHOTO_AXIAL_CA_RED, 0.f, blur*PHOTO_AXIAL_CA_BLUE);
 	}
 	if (photoFocusDistance != 0. && getFlagPhotographicModeActive())
 	{
