@@ -152,8 +152,12 @@ void PhotographicModeDialog::fillComboBoxes()
 	{
 		const QSignalBlocker blocker(ui->sensorComboBox);
 		ui->sensorComboBox->clear();
+		ui->sensorComboBox->addItem(q_("Medium format (44 x 33 mm)"), StelSkyDrawer::PhotoSensorMediumFormat);
 		ui->sensorComboBox->addItem(q_("Full frame (36 x 24 mm)"), StelSkyDrawer::PhotoSensorFullFrame);
 		ui->sensorComboBox->addItem(q_("APS-C (23.5 x 15.6 mm)"), StelSkyDrawer::PhotoSensorAPSC);
+		ui->sensorComboBox->addItem(q_("APS-C Canon (22.3 x 14.9 mm)"), StelSkyDrawer::PhotoSensorAPSCCanon);
+		ui->sensorComboBox->addItem(q_("Micro Four Thirds (17.3 x 13 mm)"), StelSkyDrawer::PhotoSensorMicroFourThirds);
+		ui->sensorComboBox->addItem(q_("1-inch (13.2 x 8.8 mm)"), StelSkyDrawer::PhotoSensorOneInch);
 	}
 	{
 		// The motion during the exposure: off (flagPhotoStarTrails false), or the mount

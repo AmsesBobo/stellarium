@@ -156,7 +156,7 @@ StelSkyDrawer::StelSkyDrawer(StelCore* acore) :
 	setPhotoFocusDistance(conf->value("viewing/photographic_focus_distance", 0.0).toDouble());
 	flagPhotoStarTrails = conf->value("viewing/flag_photographic_star_trails", true).toBool();
 	photoMount = qBound(static_cast<int>(PhotoMountTripod), conf->value("viewing/photographic_mount", static_cast<int>(PhotoMountTripod)).toInt(), static_cast<int>(PhotoMountTracker));
-	photoSensorFormat = qBound(static_cast<int>(PhotoSensorFullFrame), conf->value("viewing/photographic_sensor_format", static_cast<int>(PhotoSensorFullFrame)).toInt(), static_cast<int>(PhotoSensorAPSC));
+	photoSensorFormat = qBound(0, conf->value("viewing/photographic_sensor_format", static_cast<int>(PhotoSensorFullFrame)).toInt(), PHOTO_SENSOR_FORMAT_COUNT - 1);
 	flagPhotoZoomWholeMillimeters = conf->value("viewing/flag_photographic_zoom_whole_millimeters", false).toBool();
 	photoNoise = qBound(static_cast<int>(PhotoNoiseOff), conf->value("viewing/photographic_noise", static_cast<int>(PhotoNoiseImage)).toInt(), static_cast<int>(PhotoNoisePixel));
 	updatePhotoWhiteBalanceMatrix();
@@ -2610,9 +2610,23 @@ double StelSkyDrawer::getPhotoWheelZoomFov(double currentFov, double targetFov) 
 	return getPhotoFovForFocalLength(mm/1000.);
 }
 
+const StelSkyDrawer::PhotoSensorSpec& StelSkyDrawer::getPhotoSensorSpec(int format)
+{
+	// Typical cameras of each format: pitch from the sensor width and the number of photosites across it
+	static const PhotoSensorSpec specs[PHOTO_SENSOR_FORMAT_COUNT] = {
+		{ PHOTO_SENSOR_DIAGONAL, PHOTO_SENSOR_PITCH, "" },  // full frame: 36 mm / 6000 (24 Mpx)
+		{ 0.028207, 3.92e-6, "APS-C" },                     // 23.5 mm / 6000 (24 Mpx)
+		{ 0.026820, 3.72e-6, "APS-C 1.6x" },                // 22.3 mm / 6000 (24 Mpx)
+		{ 0.021640, 3.34e-6, "4/3" },                       // 17.3 mm / 5184 (20 Mpx)
+		{ 0.015864, 2.41e-6, "1\"" },                       // 13.2 mm / 5472 (20 Mpx)
+		{ 0.054780, 5.30e-6, "MF" }                         // 43.8 mm / 8256 (51 Mpx)
+	};
+	return specs[qBound(0, format, PHOTO_SENSOR_FORMAT_COUNT - 1)];
+}
+
 void StelSkyDrawer::setPhotoSensorFormat(int format)
 {
-	const int f = qBound(static_cast<int>(PhotoSensorFullFrame), format, static_cast<int>(PhotoSensorAPSC));
+	const int f = qBound(0, format, PHOTO_SENSOR_FORMAT_COUNT - 1);
 	if (f == photoSensorFormat)
 		return;
 	// The same lens on the other camera: keep the focal length, the field of view changes (the crop factor)
@@ -2663,7 +2677,7 @@ StelSkyDrawer::PhotoNoiseParams StelSkyDrawer::getPhotoNoiseParams(const StelPro
 	// brightness in the picture the sensor has caught fewer photons (for the same exposure time and aperture,
 	// the photons are the same, but so is the noise relative to the signal).
 	const float iso = qMax(static_cast<float>(photoISO), PHOTO_SENSOR_BASE_ISO);
-	// A smaller photosite (APS-C) holds fewer electrons and collects less dark current, in proportion to its area
+	// A smaller photosite holds fewer electrons and collects less dark current, in proportion to its area
 	const double pitch = getPhotoSensorPitch();
 	const float area = static_cast<float>((pitch*pitch)/(PHOTO_SENSOR_PITCH*PHOTO_SENSOR_PITCH));
 	p.white = PHOTO_SENSOR_FULL_WELL * area * PHOTO_SENSOR_BASE_ISO / iso;
@@ -4253,8 +4267,9 @@ void StelSkyDrawer::drawPhotoInfoLine(StelCore* core) const
 	// Focal length of the lens for this field on the sensor in use, and the focus when it is not at infinity
 	{
 		QString lens = QString("%1 mm").arg(qRound(1000.*getPhotoFocalLength(*core->getProjection(StelCore::FrameJ2000))));
-		if (photoSensorFormat == PhotoSensorAPSC)
-			lens += QStringLiteral(" APS-C");
+		const char* sensor = getPhotoSensorSpec(photoSensorFormat).shortName;
+		if (sensor[0] != 0)
+			lens += QStringLiteral(" ") + QString::fromUtf8(sensor);
 		parts << lens;
 	}
 	if (photoFocusDistance != 0.)
