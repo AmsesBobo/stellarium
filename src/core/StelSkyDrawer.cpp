@@ -157,7 +157,7 @@ StelSkyDrawer::StelSkyDrawer(StelCore* acore) :
 	flagPhotoStarTrails = conf->value("viewing/flag_photographic_star_trails", true).toBool();
 	photoDetectionSnr = qBound(0.f, conf->value("viewing/photographic_detection_snr", 3.0).toFloat(), 20.f);
 	flagPhotoProgramExposure = conf->value("viewing/flag_photographic_program_exposure", false).toBool();
-	photoMount = qBound(static_cast<int>(PhotoMountTripod), conf->value("viewing/photographic_mount", static_cast<int>(PhotoMountTripod)).toInt(), static_cast<int>(PhotoMountTracker));
+	photoMount = qBound(static_cast<int>(PhotoMountTripod), conf->value("viewing/photographic_mount", static_cast<int>(PhotoMountTripod)).toInt(), static_cast<int>(PhotoMountView));
 	photoSensorFormat = qBound(0, conf->value("viewing/photographic_sensor_format", static_cast<int>(PhotoSensorFullFrame)).toInt(), PHOTO_SENSOR_FORMAT_COUNT - 1);
 	flagPhotoZoomWholeMillimeters = conf->value("viewing/flag_photographic_zoom_whole_millimeters", false).toBool();
 	flagPhotoPortrait = conf->value("viewing/flag_photographic_portrait", false).toBool();
@@ -1161,8 +1161,9 @@ void StelSkyDrawer::update(double)
 					// The direction of the rotation does not matter: the trail is symmetric about mid-exposure
 					photoTrailToStart = Mat4d::rotation(pole, 0.5*photoTrailAngle);
 					photoTrailToEnd = Mat4d::rotation(pole, -0.5*photoTrailAngle);
-					photoTrailsActive = photoMount != PhotoMountTracker;
-					photoGroundTrailActive = photoMount == PhotoMountTracker;
+					const bool tracker = getPhotoEffectiveMount() == PhotoMountTracker;
+					photoTrailsActive = !tracker;
+					photoGroundTrailActive = tracker;
 					// Extinction along the trails (the altitude changes during the exposure)
 					photoTrailExtinction = getFlagHasAtmosphere() && extinction.getExtinctionCoefficient() >= 0.01f;
 					photoTrailAltAzTransform = core->getAltAzModelViewTransform(StelCore::RefractionAuto);
@@ -3234,12 +3235,24 @@ StelProjectorP StelSkyDrawer::getPhotoImageSampleProjector(const StelProjectorP&
 
 void StelSkyDrawer::setPhotoMount(int mount)
 {
-	const int m = qBound(static_cast<int>(PhotoMountTripod), mount, static_cast<int>(PhotoMountTracker));
+	const int m = qBound(static_cast<int>(PhotoMountTripod), mount, static_cast<int>(PhotoMountView));
 	if (m == photoMount)
 		return;
 	photoMount = m;
 	StelApp::immediateSave("viewing/photographic_mount", m);
 	emit photoMountChanged(m);
+}
+
+int StelSkyDrawer::getPhotoEffectiveMount() const
+{
+	if (photoMount != PhotoMountView)
+		return photoMount;
+	// As the view: on the alt-azimuthal mount the camera stands still (the sky turns past it), on the others
+	// (equatorial, galactic) the view turns with the sky, like a star tracker
+	const StelMovementMgr* mvmgr = core ? core->getMovementMgr() : nullptr;
+	if (!mvmgr || mvmgr->getMountMode() == StelMovementMgr::MountAltAzimuthal)
+		return PhotoMountTripod;
+	return PhotoMountTracker;
 }
 
 bool StelSkyDrawer::beginPhotoGroundImage()
@@ -4459,7 +4472,7 @@ void StelSkyDrawer::applyPhotoProgram(double exposure)
 	// stay points), with a star tracker (it follows them) the longest time of the camera
 	const double focalMm = 1000.*getPhotoFocalLength(*core->getProjection(StelCore::FrameJ2000));
 	const double crop = PHOTO_SENSOR_DIAGONAL / getPhotoSensorDiagonal();
-	const bool tracker = flagPhotoStarTrails && photoMount == PhotoMountTracker;
+	const bool tracker = flagPhotoStarTrails && getPhotoEffectiveMount() == PhotoMountTracker;
 	const double tLimit = tracker ? PHOTO_AUTO_MAX_TIME
 	                              : qBound(PHOTO_PROGRAM_HAND_TIME, PHOTO_PROGRAM_RULE/qMax(1., focalMm*crop), PHOTO_AUTO_MAX_TIME);
 	const double S0 = PHOTO_PROGRAM_BASE_ISO, Smax = PHOTO_PROGRAM_MAX_ISO;

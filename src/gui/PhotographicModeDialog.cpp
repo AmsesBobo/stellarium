@@ -187,6 +187,7 @@ void PhotographicModeDialog::fillComboBoxes()
 		ui->mountComboBox->addItem(q_("No motion"), -1);
 		ui->mountComboBox->addItem(q_("Fixed tripod (star trails)"), StelSkyDrawer::PhotoMountTripod);
 		ui->mountComboBox->addItem(q_("Star tracker (landscape blurs)"), StelSkyDrawer::PhotoMountTracker);
+		ui->mountComboBox->addItem(q_("As the view's mount (alt-az: tripod, equatorial: tracker)"), StelSkyDrawer::PhotoMountView);
 	}
 	{
 		const QSignalBlocker blocker(ui->noiseComboBox);
