@@ -65,7 +65,10 @@ public:
 	//! Measure the scene texture (linear light, w x h pixels). The reading becomes available with
 	//! a later call of takeReading(). sceneScale and exposureTime describe how the frame was exposed.
 	//! @param vao a vertex array object with a full screen quad (2D vertices in [-1,1], attribute 0)
-	void measure(GLuint sceneTexture, int w, int h, double sceneScale, double exposureTime, QOpenGLVertexArrayObject* vao);
+	//! Only the part of the texture from (x0, y0) of the size w x h is measured (the frame of the sensor); the
+	//! texture itself is texWidth x texHeight (0: w x h).
+	void measure(GLuint sceneTexture, int w, int h, double sceneScale, double exposureTime, QOpenGLVertexArrayObject* vao,
+	             int x0 = 0, int y0 = 0, int texWidth = 0, int texHeight = 0);
 	//! Get the newest finished reading. Returns false if there is none (yet).
 	//! @param clipLevel scene value where the sensor saturates; brighter segments are left out of the grey world sums
 	bool takeReading(Reading& reading, double clipLevel = 1e30);

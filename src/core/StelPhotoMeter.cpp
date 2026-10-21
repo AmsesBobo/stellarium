@@ -57,7 +57,9 @@ void main()
 // Infinities and NaN (overflows of extreme sources) must not spoil the mean.
 const char* meterSource = R"(
 uniform sampler2D scene;
-uniform ivec2 sceneSize;
+uniform ivec2 sceneSize;   // the part that is measured (the frame of the sensor)
+uniform ivec2 sceneOrigin; // its lower left texel
+uniform ivec2 textureSize; // the whole texture
 const int GRID = )" "48" R"(;
 const int SUB = 4;       // sub-segments per direction
 const int SUBSAMPLES = 3; // samples per sub-segment and direction
@@ -66,7 +68,7 @@ void main()
 {
 	ivec2 cell = ivec2(gl_FragCoord.xy);
 	highp vec2 cellSize = vec2(sceneSize) / float(GRID);
-	highp vec2 origin = vec2(cell) * cellSize;
+	highp vec2 origin = vec2(sceneOrigin) + vec2(cell) * cellSize;
 	highp vec2 step = cellSize / float(SUB*SUBSAMPLES);
 	highp float sum = 0.;
 	highp float sumR = 0.;
@@ -80,7 +82,7 @@ void main()
 				for (int i = 0; i < SUBSAMPLES; ++i)
 				{
 					highp vec2 k = vec2(float(si*SUBSAMPLES + i), float(sj*SUBSAMPLES + j)) + 0.5;
-					ivec2 texel = clamp(ivec2(origin + k*step), ivec2(0), sceneSize - ivec2(1));
+					ivec2 texel = clamp(ivec2(origin + k*step), ivec2(0), textureSize - ivec2(1));
 					highp vec3 c = texelFetch(scene, texel, 0).rgb;
 					c = vec3(sane(c.r), sane(c.g), sane(c.b));
 					subSum += sane(dot(c, vec3(0.2126, 0.7152, 0.0722)));
@@ -153,7 +155,8 @@ void StelPhotoMeter::reset()
 	pending[0] = pending[1] = false;
 }
 
-void StelPhotoMeter::measure(GLuint sceneTexture, int w, int h, double sceneScale, double exposureTime, QOpenGLVertexArrayObject* vao)
+void StelPhotoMeter::measure(GLuint sceneTexture, int w, int h, double sceneScale, double exposureTime, QOpenGLVertexArrayObject* vao,
+                             int x0, int y0, int texWidth, int texHeight)
 {
 	if (!initTried)
 		init();
@@ -176,6 +179,8 @@ void StelPhotoMeter::measure(GLuint sceneTexture, int w, int h, double sceneScal
 	gl.glBindTexture(GL_TEXTURE_2D, sceneTexture);
 	program->setUniformValue("scene", 0);
 	gl.glUniform2i(program->uniformLocation("sceneSize"), w, h);
+	gl.glUniform2i(program->uniformLocation("sceneOrigin"), x0, y0);
+	gl.glUniform2i(program->uniformLocation("textureSize"), texWidth > 0 ? texWidth : x0 + w, texHeight > 0 ? texHeight : y0 + h);
 	vao->bind();
 	gl.glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 	vao->release();
