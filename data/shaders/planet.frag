@@ -79,7 +79,8 @@ uniform highp vec3 lightDirection;
     // Penumbra: the visible part of the solar disk. Umbra: only light refracted by the Earth's atmosphere,
     // about 1e-5 at the center and 2e-4 at the edge (10 to 12 magnitudes, as in Planet::getVMagnitude()),
     // with the color of the shadow texture (copper red, the turquoise band of ozone at the edge).
-    highp vec3 photoEclipseLight(highp float shadowPos)
+    // In the penumbra the direct light is the visible part of the solar disk (sunVisible, see photoSunVisible()).
+    highp vec3 photoEclipseLight(highp float shadowPos, highp vec3 sunVisible)
     {
         const highp float UMBRA_EDGE = 0.594;
         const highp float REFRACTED_CENTER = 1.0e-5;
@@ -92,8 +93,37 @@ uniform highp vec3 lightDirection;
             highp float u = shadowPos / UMBRA_EDGE;
             return exp(mix(log(REFRACTED_CENTER), log(REFRACTED_EDGE), u*u)) * tint;
         }
-        highp float direct = (shadowPos - UMBRA_EDGE) / (1. - UMBRA_EDGE);
-        return vec3(direct) + REFRACTED_EDGE * (1. - direct) * tint;
+        highp float direct = dot(sunVisible, vec3(0.2126, 0.7152, 0.0722));
+        return sunVisible + REFRACTED_EDGE * (1. - direct) * tint;
+    }
+    // The part of the light of the Sun (angular radius R) that is not hidden by the Earth (angular radius r, its
+    // center at the distance d from the Sun's): integrated over rings of the solar disk with the darkening towards
+    // its limb, I = 1 - u (1 - mu), stronger in blue (u for red, green, blue). Near the umbra the light comes from
+    // the solar limb only: it is fainter, and a little redder, than the visible area alone would give.
+    highp vec3 photoSunVisible(highp float R, highp float r, highp float d)
+    {
+        const highp vec3 limbDarkening = vec3(0.52, 0.62, 0.75);
+        const int RINGS = 24;
+        highp vec3 total = vec3(0.);
+        highp vec3 hidden = vec3(0.);
+        for (int i = 0; i < RINGS; ++i)
+        {
+            highp float x = (float(i) + 0.5) / float(RINGS);   // radius of the ring / R
+            highp float rho = x * R;
+            highp float mu = sqrt(max(0., 1. - x*x));
+            highp vec3 weight = x * (vec3(1.) - limbDarkening * (1. - mu));
+            // the part of this ring behind the Earth
+            highp float covered;
+            if (d <= r - rho)
+                covered = 1.;
+            else if (d >= r + rho || rho >= d + r)
+                covered = 0.;
+            else
+                covered = acos(clamp((rho*rho + d*d - r*r) / (2.*rho*d), -1., 1.)) / 3.14159265358979;
+            total += weight;
+            hidden += weight * covered;
+        }
+        return vec3(1.) - hidden / total;
     }
     uniform sampler2D normalMap;
     uniform sampler2D horizonMap;
@@ -238,6 +268,9 @@ void main()
     }
 #endif
     mediump float final_illumination = 1.0;
+#ifdef IS_MOON
+    highp vec3 photoSunFraction = vec3(1.0); // photographic mode: visible part of the solar disk (see photoSunVisible())
+#endif
 #ifdef OREN_NAYAR
     mediump float lum = 1.;
 #else
@@ -311,6 +344,8 @@ void main()
 #ifdef IS_MOON
                     //illumination = ((d - abs(R-r)) / (R + r - abs(R-r))) * 0.4 + 0.6;
                     illumination = ((d - r + R) / (2.0 * R )) * 0.406 + 0.594;
+                    if (photoMode)
+                        photoSunFraction = min(photoSunFraction, photoSunVisible(R, r, d));
 #else
                     mediump float x = (R * R + d * d - r * r) / (2.0 * d);
                     mediump float alpha = acos(x / R);
@@ -454,7 +489,7 @@ void main()
     highp vec3 eclipseLight = vec3(final_illumination);
 #ifdef IS_MOON
     if (photoMode && final_illumination < 0.9999)
-        eclipseLight = photoEclipseLight(final_illumination);
+        eclipseLight = photoEclipseLight(final_illumination, photoSunFraction);
 #endif
     highp vec4 litColor = vec4(lum * eclipseLight * diffuseLight + ambientLight, 1.0);
 
