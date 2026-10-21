@@ -301,10 +301,13 @@ public:
 	//! Optical vignetting: offset of the pupil image against the lens barrel in the corner of the frame,
 	//! in units of the barrel radius. 0.81 gives half the light in the corner when wide open.
 	static constexpr float PHOTO_VIGNETTING_SHIFT = 0.81f;
-	//! Coma: length of the comet in the corner, wide open, as a fraction of the image diagonal (scales with 1/N^2)
-	static constexpr float PHOTO_COMA_LENGTH = 0.006f;
-	//! Astigmatism: length of the line image in the corner, wide open, as a fraction of the diagonal (scales with 1/N)
-	static constexpr float PHOTO_ASTIGMATISM_LENGTH = 0.004f;
+	//! Coma: length of the comet in the corner, wide open, as a fraction of the image diagonal (scales with 1/N^2).
+	//! 0.002 is about 90 micrometers on a full frame sensor (15 pixels of 6 micrometers): a good fast lens wide
+	//! open, the comet clear in the corners but small; at f/2.8 a quarter of it.
+	static constexpr float PHOTO_COMA_LENGTH = 0.002f;
+	//! Astigmatism: length of the line image in the corner, wide open, as a fraction of the diagonal (scales with 1/N).
+	//! 0.0015 is about 65 micrometers on a full frame sensor.
+	static constexpr float PHOTO_ASTIGMATISM_LENGTH = 0.0015f;
 	//! Mounts of the camera (see photoMount)
 	enum PhotoMount {
 		PhotoMountTripod = 0, //!< fixed on the ground: the stars draw trails
