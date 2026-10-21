@@ -528,6 +528,9 @@ public:
 
 	//! Get the planet's heliocentric velocity in the solar system in ecliptical coordinates in AU/d.
 	Vec3d getHeliocentricEclipticVelocity() const;
+	//! The apparent motion against the stars as seen by the observer (with the rotation of the planet he stands on):
+	//! the change of the unit direction per second, J2000 equatorial frame (for the photographic mode)
+	Vec3d getApparentMotionJ2000(const StelCore* core) const;
 
 	//! Return the barycentric ecliptical velocity in the solar system in ecliptical coordinates in AU/d. Required for aberration!
 	Vec3d getBarycentricEclipticVelocity(double dateJDE) const;

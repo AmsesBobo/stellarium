@@ -1587,7 +1587,7 @@ bool StelSkyDrawer::drawPhotoBody(StelPainter* sPainter, const Vec3d& v, float d
 	++nbPhotoPointSources;
 	flushPhotoPointSources(sPainter, PhotoBatchCoreOnly);
 	if (rHalo > 0.f || rSpike > 0.f)
-		photoDeferredBodies.push_back({wings, v});
+		photoDeferredBodies.push_back({wings, v, photoBodyMotion});
 	return true;
 }
 
@@ -1608,11 +1608,14 @@ void StelSkyDrawer::drawDeferredPhotoBodies(StelCore* core)
 			const Vec4f& trail = body.instance.trail;
 			// A body larger than its trail is drawn without one (the shader trails point-like images only):
 			// its halo and spikes are trailed as an image of their own then
-			const bool trailImage = photoTrailsActive && trail[0] == 0.f && trail[1] == 0.f && trail[2] == 0.f && trail[3] == 0.f;
+			const bool trailImage = (photoTrailsActive || photoGroundTrailActive) && trail[0] == 0.f && trail[1] == 0.f && trail[2] == 0.f && trail[3] == 0.f;
 			if (trailImage)
 			{
 				flushPhotoPointSources(&sPainter, PhotoBatchWingsOnly);
-				if (beginPhotoBodyImage(body.posJ2000, body.instance.radius, true))
+				photoBodyMotion = body.motion;
+				const bool image = beginPhotoBodyImage(body.posJ2000, body.instance.radius, true);
+				photoBodyMotion = Vec3d(0.);
+				if (image)
 				{
 					photoInstances[nbPhotoPointSources++] = body.instance;
 					flushPhotoPointSources(&sPainter, PhotoBatchWingsOnly);
@@ -3271,9 +3274,17 @@ void main(void)
 		return;
 	}
 	dir = normalize(dir);
+	// Nothing of the landscape within reach of the arc (the sky, zoomed in): skip the samples. A coarse level of
+	// the mipmaps around this pixel, larger than the arc, holds the mean of everything the arc can reach.
+	highp float reach = angle * PROJECTOR_pixelPerRad * length(cross(axis, dir));
+	if (dot(textureLod(tex, here, log2(max(1., 2.*reach)) + 1.), vec4(1.)) <= 0.)
+	{
+		FRAG_COLOR = vec4(0.);
+		return;
+	}
 	// The camera turns with the sky: this pixel sees the ground that turns past it. The samples read
 	// a correspondingly smoothed image (mipmaps) where they lie far apart.
-	highp float spacing = angle * PROJECTOR_pixelPerRad * length(cross(axis, dir)) / float(samples);
+	highp float spacing = reach / float(samples);
 	highp float lod = log2(max(1., spacing));
 	highp vec4 sum = vec4(0.);
 	for (int i = 0; i < 256; ++i)
@@ -3451,22 +3462,7 @@ float StelSkyDrawer::computePhotoTrail(const StelProjector& prj, const Vec3d& v,
 	// The integrated profiles of the trails in the shader (moffatSegment3/15) are written for these exponents
 	static_assert(PHOTO_CORE_BETA == 3.f && PHOTO_HALO_BETA == 1.5f, "star trail profiles need beta 3 and 1.5");
 	trail.set(0.f, 0.f, 0.f, 0.f);
-	// On a star tracker the image stays in its place, but the altitude still changes during the exposure, and
-	// with it the extinction: the light is its mean (Simpson's rule over the start, the middle and the end)
-	if (photoGroundTrailActive && photoTrailExtinction)
-	{
-		Vec3d view = v;
-		prj.getModelViewTransform()->forward(view);
-		if (view.normSquared() > 0.)
-		{
-			const Vec3f fStart = photoTrailExtinctionFactor(photoTrailToStart*view, view);
-			const Vec3f fEnd = photoTrailExtinctionFactor(photoTrailToEnd*view, view);
-			for (int c=0; c<3; ++c)
-				instance.color[c] *= (fStart[c] + 4.f + fEnd[c])/6.f;
-		}
-		return 0.f;
-	}
-	if (!photoTrailsActive)
+	if (!photoTrailsActive && !photoGroundTrailActive)
 		return 0.f;
 	const auto mv = prj.getModelViewTransform();
 	Vec3d view = v;
@@ -3474,8 +3470,39 @@ float StelSkyDrawer::computePhotoTrail(const StelProjector& prj, const Vec3d& v,
 	const double norm = view.norm();
 	if (!(norm > 0.))
 		return 0.f;
-	// Quick estimate first (the arc near the image center): most faint stars drop out here, before projecting
-	const float estimate = static_cast<float>(photoTrailAngle * (photoTrailAxisView^view).norm()/norm * prj.getPixelPerRadAtCenter());
+	// A body that moves against the stars (the Moon): its own motion over half the exposure, in view coordinates
+	Vec3d halfMotion(0.);
+	if (photoBodyMotion.normSquared() > 0.)
+	{
+		Mat4d linear = mv->getApproximateLinearTransfo();
+		linear[12] = linear[13] = linear[14] = 0.;
+		halfMotion = linear.multiplyWithoutTranslation(photoBodyMotion) * (0.5*getPhotoEffectiveExposureTime()*norm);
+	}
+	// On a star tracker the stars stay in their place: only a body's own motion makes a trail. The altitude still
+	// changes during the exposure, and with it the extinction: without a trail the light is its mean (Simpson's
+	// rule over the start, the middle and the end), with one its change along the trail (as for the star trails).
+	const bool tracker = photoGroundTrailActive;
+	float estimate;
+	if (tracker)
+	{
+		estimate = static_cast<float>(2.*halfMotion.norm()/norm * prj.getPixelPerRadAtCenter());
+		if (estimate <= 2.f*diskRadius || estimate < 0.5f)
+		{
+			if (photoTrailExtinction)
+			{
+				const Vec3f fStart = photoTrailExtinctionFactor(photoTrailToStart*view, view);
+				const Vec3f fEnd = photoTrailExtinctionFactor(photoTrailToEnd*view, view);
+				for (int c=0; c<3; ++c)
+					instance.color[c] *= (fStart[c] + 4.f + fEnd[c])/6.f;
+			}
+			return 0.f;
+		}
+	}
+	else
+	{
+		// Quick estimate first (the arc near the image center): most faint stars drop out here, before projecting
+		estimate = static_cast<float>(photoTrailAngle * (photoTrailAxisView^view).norm()/norm * prj.getPixelPerRadAtCenter());
+	}
 	if (estimate <= 2.f*diskRadius || estimate < 0.5f)
 		return 0.f;
 	// The brightest point of the trailed image: along the trail the core is spread like flux/length, across it
@@ -3496,9 +3523,15 @@ float StelSkyDrawer::computePhotoTrail(const StelProjector& prj, const Vec3d& v,
 		if (!visible)
 			return -1.f;
 	}
-	// Positions at the start and the end of the exposure: turn the direction around the axis, then project
-	Vec3d a = photoTrailToStart*view;
-	Vec3d b = photoTrailToEnd*view;
+	// Positions at the start and the end of the exposure: the body's own motion, then (fixed tripod) the turn of
+	// the sky around its axis; then project
+	Vec3d a = view - halfMotion;
+	Vec3d b = view + halfMotion;
+	if (!tracker)
+	{
+		a = photoTrailToStart*a;
+		b = photoTrailToEnd*b;
+	}
 	mv->backward(a);
 	mv->backward(b);
 	Vec3d winA, winB;
