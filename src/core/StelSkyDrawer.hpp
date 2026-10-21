@@ -129,6 +129,7 @@ class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 	Q_PROPERTY(bool flagPhotoAberrations READ getFlagPhotoAberrations WRITE setFlagPhotoAberrations NOTIFY flagPhotoAberrationsChanged)
 	//! Lens: strength of the off-axis aberrations (1 = a typical fast lens; 0 ... 3)
 	Q_PROPERTY(double photoAberrationStrength READ getPhotoAberrationStrength WRITE setPhotoAberrationStrength NOTIFY photoAberrationStrengthChanged)
+	Q_PROPERTY(double photoDetectionSnr READ getPhotoDetectionSnr WRITE setPhotoDetectionSnr NOTIFY photoDetectionSnrChanged)
 	//! Lens: reflections inside the lens ("ghosts") of bright sources such as the Sun and the Moon
 	Q_PROPERTY(bool flagPhotoLensFlare READ getFlagPhotoLensFlare WRITE setFlagPhotoLensFlare NOTIFY flagPhotoLensFlareChanged)
 	//! Lens: strength of the reflections (1 = single-layer coated lens, less for multi-coating; 0 ... 3)
@@ -724,6 +725,11 @@ public slots:
 	bool getFlagPhotoAberrations() const {return flagPhotoAberrations;}
 	void setPhotoAberrationStrength(double s);
 	double getPhotoAberrationStrength() const {return static_cast<double>(photoAberrationStrength);}
+	//! Photographic mode: the detection limit, as a signal to noise ratio. A star is drawn only when the light of
+	//! its core stands out of the noise of the sky and the sensor by this factor (3: barely seen in the grain;
+	//! 5: the usual limit of detection). Higher: fewer faint stars, faster. 0: all stars are drawn.
+	void setPhotoDetectionSnr(double snr);
+	double getPhotoDetectionSnr() const {return static_cast<double>(photoDetectionSnr);}
 	//! Set the white balance (see PhotoWhiteBalance).
 	void setPhotoWhiteBalance(int wb);
 	int getPhotoWhiteBalance() const {return photoWhiteBalance;}
@@ -944,6 +950,7 @@ signals:
 	void flagPhotoPortraitChanged(bool b);
 	void flagPhotoFrameMaskChanged(bool b);
 	void photoAberrationStrengthChanged(double s);
+	void photoDetectionSnrChanged(double snr);
 	void photoEffectiveExposureTimeChanged(double seconds);
 
 	void extinctionCoefficientChanged(double coeff);

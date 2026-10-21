@@ -357,6 +357,47 @@
             </item>
            </layout>
           </item>
+          <item row="19" column="0">
+           <widget class="QLabel" name="detectionSnrLabel">
+            <property name="text">
+             <string>Faintest stars:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="19" column="1">
+           <widget class="QDoubleSpinBox" name="detectionSnrSpinBox">
+            <property name="toolTip">
+             <string>The detection limit: a star is drawn only when its light stands out of the noise of the sky and the sensor by this factor (signal to noise ratio). 3: the faintest stars are barely seen in the grain. 5: the usual limit of detection in astronomy, about half a magnitude brighter and faster to draw. Higher values leave out stars that would be seen in the picture. Off: all stars are drawn, as without noise (slow in wide fields).</string>
+            </property>
+            <property name="alignment">
+             <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+            </property>
+            <property name="keyboardTracking">
+             <bool>false</bool>
+            </property>
+            <property name="specialValueText">
+             <string>Off</string>
+            </property>
+            <property name="prefix">
+             <string>S/N </string>
+            </property>
+            <property name="decimals">
+             <number>1</number>
+            </property>
+            <property name="minimum">
+             <double>0.000000000000000</double>
+            </property>
+            <property name="maximum">
+             <double>20.000000000000000</double>
+            </property>
+            <property name="singleStep">
+             <double>0.500000000000000</double>
+            </property>
+            <property name="value">
+             <double>3.000000000000000</double>
+            </property>
+           </widget>
+          </item>
          </layout>
         </widget>
        </item>

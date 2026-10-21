@@ -331,6 +331,12 @@ void PhotographicModeDialog::createDialogContent()
 		drawer->setPhotoAberrationStrength(percent/100.);
 	});
 	connect(drawer, &StelSkyDrawer::photoAberrationStrengthChanged,    this, &PhotographicModeDialog::updateCameraWidgets);
+	// Detection limit of the stars (signal to noise ratio)
+	connect(ui->detectionSnrSpinBox, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [drawer](double snr)
+	{
+		drawer->setPhotoDetectionSnr(snr);
+	});
+	connect(drawer, &StelSkyDrawer::photoDetectionSnrChanged,         this, &PhotographicModeDialog::updateCameraWidgets);
 	connect(drawer, &StelSkyDrawer::flagPhotoAberrationsChanged,       this, &PhotographicModeDialog::updateCameraWidgets);
 	connect(ui->lensFlareStrengthSpinBox, QOverload<int>::of(&QSpinBox::valueChanged), this, [drawer](int percent)
 	{
@@ -431,6 +437,10 @@ void PhotographicModeDialog::updateCameraWidgets()
 		ui->aberrationStrengthSpinBox->setValue(qRound(100.*drawer->getPhotoAberrationStrength()));
 		ui->aberrationStrengthSpinBox->setEnabled(drawer->getFlagPhotoAberrations());
 		ui->aberrationStrengthLabel->setEnabled(drawer->getFlagPhotoAberrations());
+	}
+	{
+		const QSignalBlocker blocker(ui->detectionSnrSpinBox);
+		ui->detectionSnrSpinBox->setValue(drawer->getPhotoDetectionSnr());
 	}
 	{
 		const QSignalBlocker blocker(ui->lensFlareStrengthSpinBox);

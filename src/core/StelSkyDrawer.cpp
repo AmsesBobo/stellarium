@@ -3613,6 +3613,16 @@ void StelSkyDrawer::setPhotoAberrationStrength(double strength)
 	emit photoAberrationStrengthChanged(static_cast<double>(v));
 }
 
+void StelSkyDrawer::setPhotoDetectionSnr(double snr)
+{
+	const float v = qBound(0.f, static_cast<float>(snr), 20.f);
+	if (qFuzzyCompare(1.f+v, 1.f+photoDetectionSnr))
+		return;
+	photoDetectionSnr = v;
+	StelApp::immediateSave("viewing/photographic_detection_snr", static_cast<double>(v));
+	emit photoDetectionSnrChanged(static_cast<double>(v));
+}
+
 // ---- White balance ----
 
 namespace
@@ -4115,6 +4125,7 @@ void StelSkyDrawer::resetPhotographicSettings()
 	setFlagPhotoVignetting(true);
 	setFlagPhotoAberrations(true);
 	setPhotoAberrationStrength(1.);
+	setPhotoDetectionSnr(3.);
 	setFlagPhotoLensFlare(true);
 	setPhotoLensFlareStrength(1.);
 	setPhotoFocusDistance(0.);
