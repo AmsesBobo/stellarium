@@ -108,6 +108,9 @@ class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 	//! chooses the exposure time (1/8000 s ... 30 s) for the set aperture and ISO, like the "Av"/"A"
 	//! mode of a camera. The exposure compensation (photoExposureEV) then changes the exposure time.
 	Q_PROPERTY(bool flagPhotoAutoExposure READ getFlagPhotoAutoExposure WRITE setFlagPhotoAutoExposure NOTIFY flagPhotoAutoExposureChanged)
+	//! With the automatic exposure: program mode (P) with automatic ISO instead of aperture priority. The camera
+	//! chooses the exposure time, the aperture and the ISO along a program line (see applyPhotoMeterReading()).
+	Q_PROPERTY(bool flagPhotoProgramExposure READ getFlagPhotoProgramExposure WRITE setFlagPhotoProgramExposure NOTIFY flagPhotoProgramExposureChanged)
 	//! Metering mode of the automatic exposure: 0 = center-weighted average, 1 = spot, 2 = highlight-weighted
 	Q_PROPERTY(int photoMeteringMode READ getPhotoMeteringMode WRITE setPhotoMeteringMode NOTIFY photoMeteringModeChanged)
 	//! Photographic mode: show a line with the camera settings in use at the top of the screen
@@ -179,6 +182,17 @@ public:
 	static constexpr double PHOTO_AUTO_MAX_TIME = 30.;
 	//! Time constant of the smooth adaptation of the automatic exposure (seconds)
 	static constexpr double PHOTO_AUTO_TIME_CONSTANT = 0.3;
+	//! Program mode: the program line of a camera with automatic ISO, from bright to dark. In daylight the base
+	//! ISO and a medium aperture (stopped down further when 1/8000 s is not short enough); then the aperture opens
+	//! at a time that is safe by hand; then the time grows up to where the stars still stay points on a fixed
+	//! tripod (the "500 rule": 500 s / (focal length in mm x crop factor), at most 30 s; with a star tracker 30 s);
+	//! then the ISO rises up to its ceiling; then the time grows to the longest of the camera.
+	static constexpr double PHOTO_PROGRAM_BASE_ISO = 100.;
+	static constexpr double PHOTO_PROGRAM_MAX_ISO = 6400.;
+	static constexpr double PHOTO_PROGRAM_DAY_APERTURE = 8.;
+	static constexpr double PHOTO_PROGRAM_MIN_APERTURE = 22.;  //!< smallest opening (largest f-number)
+	static constexpr double PHOTO_PROGRAM_HAND_TIME = 1./125.;
+	static constexpr double PHOTO_PROGRAM_RULE = 500.;          //!< the "500 rule" (seconds x mm)
 	//! Font size (pixels) of the line with the camera settings
 	static constexpr int PHOTO_INFO_FONT_SIZE = 18;
 	//! White balance settings, with the color temperatures that cameras use for them
@@ -675,6 +689,10 @@ public slots:
 	//! Switch the automatic exposure (aperture priority) of the photographic mode on or off.
 	void setFlagPhotoAutoExposure(bool b);
 	bool getFlagPhotoAutoExposure() const {return flagPhotoAutoExposure;}
+	void setFlagPhotoProgramExposure(bool b);
+	bool getFlagPhotoProgramExposure() const {return flagPhotoProgramExposure;}
+	//! The program mode is in use (automatic exposure in program mode, photographic mode on)
+	bool getFlagPhotoProgramExposureActive() const {return flagPhotoProgramExposure && getFlagPhotoAutoExposureActive();}
 	//! Whether the automatic exposure is switched on AND the photographic mode is active.
 	bool getFlagPhotoAutoExposureActive() const;
 	//! Set the metering mode of the automatic exposure (see PhotoMeteringMode).
@@ -937,6 +955,7 @@ signals:
 	void photoSpikeStrengthChanged(double fraction);
 	void flagPhotoBloomChanged(bool b);
 	void flagPhotoAutoExposureChanged(bool b);
+	void flagPhotoProgramExposureChanged(bool b);
 	void photoMeteringModeChanged(int mode);
 	void flagPhotoInfoLineChanged(bool b);
 	void photoToneCurveChanged(int curve);
@@ -1299,6 +1318,16 @@ private:
 	double photoISO = 1600.;
 	//! Automatic exposure (aperture priority)
 	bool flagPhotoAutoExposure = false;
+	bool flagPhotoProgramExposure = false;
+	//! The aperture and the ISO set by the user: the program mode changes the ones in use, and gives these back
+	double photoUserAperture = 4.;
+	double photoUserISO = 400.;
+	bool photoProgramRunning = false;
+	//! Program mode: exposure (time x ISO / N^2) wanted by the meter, smoothed; and the settings it leads to
+	double photoProgramExposure = 0.;
+	void applyPhotoProgram(double exposure);
+	void startPhotoProgram();
+	void stopPhotoProgram();
 	int photoMeteringMode = 0;
 	bool flagPhotoInfoLine = true;
 	//! Tone curve of the camera

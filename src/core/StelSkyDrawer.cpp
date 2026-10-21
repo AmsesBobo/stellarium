@@ -156,6 +156,7 @@ StelSkyDrawer::StelSkyDrawer(StelCore* acore) :
 	setPhotoFocusDistance(conf->value("viewing/photographic_focus_distance", 0.0).toDouble());
 	flagPhotoStarTrails = conf->value("viewing/flag_photographic_star_trails", true).toBool();
 	photoDetectionSnr = qBound(0.f, conf->value("viewing/photographic_detection_snr", 3.0).toFloat(), 20.f);
+	flagPhotoProgramExposure = conf->value("viewing/flag_photographic_program_exposure", false).toBool();
 	photoMount = qBound(static_cast<int>(PhotoMountTripod), conf->value("viewing/photographic_mount", static_cast<int>(PhotoMountTripod)).toInt(), static_cast<int>(PhotoMountTracker));
 	photoSensorFormat = qBound(0, conf->value("viewing/photographic_sensor_format", static_cast<int>(PhotoSensorFullFrame)).toInt(), PHOTO_SENSOR_FORMAT_COUNT - 1);
 	flagPhotoZoomWholeMillimeters = conf->value("viewing/flag_photographic_zoom_whole_millimeters", false).toBool();
@@ -2413,6 +2414,13 @@ void StelSkyDrawer::setPhotoExposureTime(double seconds)
 void StelSkyDrawer::setPhotoAperture(double fNumber)
 {
 	fNumber = qBound(0.7, fNumber, 64.);
+	// The program mode chooses the aperture: a setting now is the user's, used again when it stops
+	if (photoProgramRunning)
+	{
+		photoUserAperture = fNumber;
+		StelApp::immediateSave("viewing/photographic_aperture", fNumber);
+		return;
+	}
 	if (qFuzzyCompare(fNumber, photoAperture))
 		return;
 	// Aperture priority: the camera keeps the exposure and changes the time at once
@@ -2426,6 +2434,12 @@ void StelSkyDrawer::setPhotoAperture(double fNumber)
 void StelSkyDrawer::setPhotoISO(double iso)
 {
 	iso = qBound(25., iso, 409600.);
+	if (photoProgramRunning)
+	{
+		photoUserISO = iso;
+		StelApp::immediateSave("viewing/photographic_iso", iso);
+		return;
+	}
 	if (qFuzzyCompare(iso, photoISO))
 		return;
 	if (flagPhotoAutoExposure)
@@ -4211,6 +4225,7 @@ void StelSkyDrawer::resetPhotographicSettings()
 	setPhotoSpikeStrength(0.02);
 	setFlagPhotoBloom(true);
 	setFlagPhotoAutoExposure(false);
+	setFlagPhotoProgramExposure(false);
 	setPhotoMeteringMode(0);
 	setPhotoToneCurve(PhotoToneStandard);
 	setFlagPhotoExtinctionColor(true);
@@ -4349,6 +4364,108 @@ void StelSkyDrawer::setFlagPhotoInfoLine(bool b)
 	emit flagPhotoInfoLineChanged(b);
 }
 
+void StelSkyDrawer::setFlagPhotoProgramExposure(bool b)
+{
+	if (b == flagPhotoProgramExposure)
+		return;
+	flagPhotoProgramExposure = b;
+	photoAutoExposureFresh = true;
+	if (!b)
+		stopPhotoProgram();
+	StelApp::immediateSave("viewing/flag_photographic_program_exposure", b);
+	emit flagPhotoProgramExposureChanged(b);
+	announcePhotoExposureTime();
+}
+
+void StelSkyDrawer::startPhotoProgram()
+{
+	if (photoProgramRunning)
+		return;
+	// Keep the user's settings: the program changes the ones in use, and gives these back when it stops
+	photoUserAperture = photoAperture;
+	photoUserISO = photoISO;
+	photoProgramRunning = true;
+}
+
+void StelSkyDrawer::stopPhotoProgram()
+{
+	if (!photoProgramRunning)
+		return;
+	photoProgramRunning = false;
+	const bool apertureChanged = !qFuzzyCompare(photoAperture, photoUserAperture);
+	const bool isoChanged = !qFuzzyCompare(photoISO, photoUserISO);
+	photoAperture = photoUserAperture;
+	photoISO = photoUserISO;
+	if (apertureChanged)
+		emit photoApertureChanged(photoAperture);
+	if (isoChanged)
+		emit photoISOChanged(photoISO);
+}
+
+void StelSkyDrawer::applyPhotoProgram(double exposure)
+{
+	// The longest time on the program line before the ISO rises: on a fixed tripod the "500 rule" (the stars
+	// stay points), with a star tracker (it follows them) the longest time of the camera
+	const double focalMm = 1000.*getPhotoFocalLength(*core->getProjection(StelCore::FrameJ2000));
+	const double crop = PHOTO_SENSOR_DIAGONAL / getPhotoSensorDiagonal();
+	const bool tracker = flagPhotoStarTrails && photoMount == PhotoMountTracker;
+	const double tLimit = tracker ? PHOTO_AUTO_MAX_TIME
+	                              : qBound(PHOTO_PROGRAM_HAND_TIME, PHOTO_PROGRAM_RULE/qMax(1., focalMm*crop), PHOTO_AUTO_MAX_TIME);
+	const double S0 = PHOTO_PROGRAM_BASE_ISO, Smax = PHOTO_PROGRAM_MAX_ISO;
+	const double Nday = PHOTO_PROGRAM_DAY_APERTURE, Nsmall = PHOTO_PROGRAM_MIN_APERTURE;
+	const double Nwide = PHOTO_LENS_MAX_APERTURE;
+	const double tMin = PHOTO_AUTO_MIN_TIME, tHand = PHOTO_PROGRAM_HAND_TIME, tMax = PHOTO_AUTO_MAX_TIME;
+	// exposure = t S / N^2: walk along the line from bright to dark
+	double t, N, S;
+	if (exposure <= tMin*S0/(Nday*Nday))
+	{
+		// very bright: the shortest time, stopping down
+		t = tMin; S = S0;
+		N = qMin(Nsmall, std::sqrt(tMin*S0/qMax(1e-30, exposure)));
+	}
+	else if (exposure <= tHand*S0/(Nday*Nday))
+	{
+		N = Nday; S = S0; t = exposure*N*N/S;
+	}
+	else if (exposure <= tHand*S0/(Nwide*Nwide))
+	{
+		t = tHand; S = S0; N = std::sqrt(tHand*S0/exposure);
+	}
+	else if (exposure <= tLimit*S0/(Nwide*Nwide))
+	{
+		N = Nwide; S = S0; t = exposure*N*N/S;
+	}
+	else if (exposure <= tLimit*Smax/(Nwide*Nwide))
+	{
+		N = Nwide; t = tLimit; S = exposure*N*N/t;
+	}
+	else
+	{
+		N = Nwide; S = Smax; t = exposure*N*N/S;
+	}
+	// A camera sets the aperture and the ISO in third stops; the time makes up the rest. Where the time is at
+	// its limit (the ISO rises), the ISO goes to the next step up, so that the time stays within the limit.
+	N = std::exp2(std::round(6.*std::log2(N))/6.);
+	const bool timeAtLimit = exposure > tLimit*S0/(Nwide*Nwide) && exposure <= tLimit*Smax/(Nwide*Nwide);
+	const double isoSteps = 3.*std::log2(S/S0);
+	S = qMin(Smax, S0*std::exp2((timeAtLimit ? std::ceil(isoSteps - 1e-6) : std::round(isoSteps))/3.));
+	t = exposure*N*N/S;
+	constexpr double tolerance = 1.12; // 1/6 stop
+	photoAutoExposureLimit = (t > tMax*tolerance) ? -1 : ((t < tMin/tolerance) ? 1 : 0);
+	t = qBound(tMin, t, tMax);
+	photoAutoExposureTime = t;
+	if (!qFuzzyCompare(N, photoAperture))
+	{
+		photoAperture = N;
+		emit photoApertureChanged(N);
+	}
+	if (!qFuzzyCompare(S, photoISO))
+	{
+		photoISO = S;
+		emit photoISOChanged(S);
+	}
+}
+
 void StelSkyDrawer::announcePhotoExposureTime()
 {
 	const double t = photoNominalExposureTime(getPhotoEffectiveExposureTime());
@@ -4384,6 +4501,7 @@ void StelSkyDrawer::applyPhotoMeterReading(const StelPhotoMeter::Reading& readin
 	if (!getFlagPhotoAutoExposureActive())
 	{
 		photoAutoExposureFresh = true;
+		stopPhotoProgram();
 		return;
 	}
 	if (!(reading.sceneScale > 0.))
@@ -4407,6 +4525,28 @@ void StelSkyDrawer::applyPhotoMeterReading(const StelPhotoMeter::Reading& readin
 		if (Lh > 0.)
 			wanted = std::min(wanted, compensation * highlightTarget * K * nn / (StelSkyDrawer::PHOTO_MIDDLE_GREY * photoISO * Lh));
 	}
+
+	// Program mode: the meter gives the exposure (time x ISO / N^2), smoothed like the live view of a camera; the
+	// program line turns it into the time, the aperture and the ISO
+	if (flagPhotoProgramExposure)
+	{
+		startPhotoProgram();
+		const double exposure = wanted * photoISO / nn;
+		if (photoAutoExposureFresh || !(photoProgramExposure > 0.))
+		{
+			photoProgramExposure = exposure;
+			photoAutoExposureFresh = false;
+		}
+		else
+		{
+			const double f = 1. - std::exp(-qBound(0., deltaTime, 1.)/PHOTO_AUTO_TIME_CONSTANT);
+			photoProgramExposure = std::exp(std::log(photoProgramExposure) + f*(std::log(exposure) - std::log(photoProgramExposure)));
+		}
+		applyPhotoProgram(photoProgramExposure);
+		announcePhotoExposureTime();
+		return;
+	}
+	stopPhotoProgram();
 
 	// The camera cannot go beyond its range of exposure times: the picture gets too dark or too bright
 	constexpr double tolerance = 1.12; // 1/6 stop
@@ -4440,9 +4580,24 @@ void StelSkyDrawer::drawPhotoInfoLine(StelCore* core) const
 	const double ev100 = std::log2(photoAperture*photoAperture/t) - std::log2(photoISO/100.) - (autoExposure ? 0. : photoExposureEV);
 	const QString sep = QStringLiteral("   ");
 	QStringList parts;
-	parts << (autoExposure ? qc_("Av", "camera mode: aperture priority") : qc_("M", "camera mode: manual"));
+	parts << (!autoExposure ? qc_("M", "camera mode: manual")
+	          : (flagPhotoProgramExposure ? qc_("P", "camera mode: program") : qc_("Av", "camera mode: aperture priority")));
 	parts << photoExposureTimeText(t);
-	parts << QString("f/%1").arg(QLocale().toString(photoAperture, 'g', 3));
+	// The nominal values a camera shows (its third stops are rounded: f/1.4 for 1.41, ISO 1250 for 1270)
+	auto nominal = [](double value, std::initializer_list<double> marks) {
+		double best = value, bestDiff = 1e30;
+		for (const double m : marks)
+		{
+			const double diff = std::fabs(std::log(value/m));
+			if (diff < bestDiff) { bestDiff = diff; best = m; }
+		}
+		return bestDiff < 0.06 ? best : value; // within 1/12 stop of a mark
+	};
+	const double apertureShown = nominal(photoAperture, {0.95, 1.0, 1.1, 1.2, 1.4, 1.6, 1.8, 2.0, 2.2, 2.5, 2.8, 3.2, 3.5, 4.0, 4.5,
+	                                                    5.0, 5.6, 6.3, 7.1, 8.0, 9.0, 10., 11., 13., 14., 16., 18., 20., 22., 32.});
+	const double isoShown = nominal(photoISO, {50, 64, 80, 100, 125, 160, 200, 250, 320, 400, 500, 640, 800, 1000, 1250, 1600, 2000,
+	                                           2500, 3200, 4000, 5000, 6400, 8000, 10000, 12800, 16000, 20000, 25600, 51200, 102400, 204800});
+	parts << QString("f/%1").arg(QLocale().toString(apertureShown, 'g', 3));
 	// Focal length of the lens for this field on the sensor in use, and the focus when it is not at infinity
 	{
 		QString lens = QString("%1 mm").arg(qRound(1000.*getPhotoFocalLength(*core->getProjection(StelCore::FrameJ2000))));
@@ -4453,7 +4608,7 @@ void StelSkyDrawer::drawPhotoInfoLine(StelCore* core) const
 	}
 	if (photoFocusDistance != 0.)
 		parts << QString("%1 %2").arg(qc_("focus", "camera: focus distance"), photoFocusDistanceText(photoFocusDistance));
-	parts << QString("ISO %1").arg(qRound(photoISO));
+	parts << QString("ISO %1").arg(qRound(isoShown));
 	parts << QString("EV100 %1").arg(QLocale().toString(ev100, 'f', 1));
 	if (std::fabs(photoExposureEV) > 0.01)
 		parts << QString("%1 EV").arg(QString::asprintf("%+.1f", photoExposureEV));
