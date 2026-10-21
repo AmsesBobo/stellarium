@@ -162,6 +162,11 @@ StelSkyDrawer::StelSkyDrawer(StelCore* acore) :
 	flagPhotoProgramExposure = conf->value("viewing/flag_photographic_program_exposure", false).toBool();
 	photoMount = qBound(static_cast<int>(PhotoMountTripod), conf->value("viewing/photographic_mount", static_cast<int>(PhotoMountTripod)).toInt(), static_cast<int>(PhotoMountView));
 	photoSensorFormat = qBound(0, conf->value("viewing/photographic_sensor_format", static_cast<int>(PhotoSensorFullFrame)).toInt(), PHOTO_SENSOR_FORMAT_COUNT - 1);
+	photoFilm = qBound(0, conf->value("viewing/photographic_film", 0).toInt(), PHOTO_FILM_COUNT - 1);
+	photoDigitalISO = photoISO;
+	if (photoFilm != PhotoFilmNone)
+		photoISO = getPhotoFilmSpec(photoFilm).iso;
+	updatePhotoToneCurve();
 	flagPhotoZoomWholeMillimeters = conf->value("viewing/flag_photographic_zoom_whole_millimeters", false).toBool();
 	flagPhotoPortrait = conf->value("viewing/flag_photographic_portrait", false).toBool();
 	flagPhotoFrameMask = conf->value("viewing/flag_photographic_frame_mask", true).toBool();
@@ -1119,6 +1124,23 @@ void StelSkyDrawer::update(double)
 		// The noise of the sky in a pixel of the picture, whether the noise is shown or not: a real sensor
 		// always has it, and a star that does not rise above it is not in the picture. A pixel of the screen
 		// holds several photosites (the view is the whole sensor), which average their noise.
+		if (getFlagPhotoFilmActive())
+		{
+			// Film: the grain. The data sheets give the RMS density fluctuation sigma_D in a 48 micrometer aperture;
+			// through the curve of the film (dD = gamma dlog10 E) it is a relative fluctuation of the exposure
+			// ln(10) sigma_D / gamma, smaller in a larger area (the square root of the areas). The level is the
+			// sky, but at least the toe of the curve (4 stops below middle grey): fainter light hardly blackens
+			// the film at all (its inertia), and a star must stand out of the grain there.
+			const PhotoFilmSpec& f = getPhotoFilmSpec(photoFilm);
+			const StelProjectorP prj = core->getProjection(StelCore::FrameJ2000);
+			const double diagonal = getPhotoFrameDiagonal(*prj);
+			const double pixel = diagonal > 0. ? getPhotoSensorDiagonal()/diagonal : 6e-6;  // on the film, meters
+			const double aperture = M_PI*24e-6*24e-6;
+			const double relative = std::log(10.)*f.granularity/1000./f.gamma * std::sqrt(aperture/(pixel*pixel));
+			const double level = qMax(static_cast<double>(photoSkyBackground), 0.18/16.);
+			photoNoiseSigma = static_cast<float>(relative*level);
+		}
+		else
 		{
 			const StelProjectorP prj = core->getProjection(StelCore::FrameJ2000);
 			PhotoNoiseParams noise = getPhotoNoiseParams(*prj);
@@ -2439,6 +2461,13 @@ void StelSkyDrawer::setPhotoAperture(double fNumber)
 void StelSkyDrawer::setPhotoISO(double iso)
 {
 	iso = qBound(25., iso, 409600.);
+	// With a film the speed is the film's: a setting now is the digital sensor's, used again without the film
+	if (photoFilm != PhotoFilmNone)
+	{
+		photoDigitalISO = iso;
+		StelApp::immediateSave("viewing/photographic_iso", iso);
+		return;
+	}
 	if (photoProgramRunning)
 	{
 		photoUserISO = iso;
@@ -2472,13 +2501,23 @@ void StelSkyDrawer::updatePhotoToneCurve()
 	// saturation-based ISO speed (ISO 12232) puts it: 0.18 * 7.8 = 1.4.
 	// Film: like a negative film, slightly soft, with 6 stops of room above middle grey (0.18 * 64).
 	float a = 1.f, d = 1.f, clip = 1.f;
+	double midOut = 0.18;
 	switch (photoToneCurve)
 	{
 		case PhotoToneStandard: a = 1.30f; d = 1.f; clip = 1.4f;  break;
 		case PhotoToneFilm:     a = 1.15f; d = 1.f; clip = 11.5f; break;
 		default: break;
 	}
-	constexpr double midIn = 0.18, midOut = 0.18;
+	// A film has its own curve (see getPhotoFilmSpec()): slide film steep, with little room above middle grey and
+	// a picture a little darker than middle grey at the metered exposure; negatives printed on paper soft
+	if (photoFilm != PhotoFilmNone)
+	{
+		const PhotoFilmSpec& f = getPhotoFilmSpec(photoFilm);
+		a = f.toneA;
+		clip = f.toneClip;
+		midOut = static_cast<double>(f.toneMid);
+	}
+	constexpr double midIn = 0.18;
 	const double ha = std::pow(static_cast<double>(clip), static_cast<double>(a));
 	const double had = std::pow(static_cast<double>(clip), static_cast<double>(a*d));
 	const double ma = std::pow(midIn, static_cast<double>(a));
@@ -2499,7 +2538,7 @@ void StelSkyDrawer::updatePhotoToneCurve()
 float StelSkyDrawer::photoToneCurveValue(float x) const
 {
 	x = qMax(0.f, x);
-	if (photoToneCurve == PhotoToneLinear)
+	if (getPhotoActiveToneCurve() == PhotoToneLinear)
 	{
 		constexpr float knee = PHOTO_SHOULDER_KNEE;
 		if (x <= knee)
@@ -2514,7 +2553,7 @@ float StelSkyDrawer::photoToneCurveValue(float x) const
 
 float StelSkyDrawer::photoToneCurveInverse(float y) const
 {
-	if (photoToneCurve == PhotoToneLinear)
+	if (getPhotoActiveToneCurve() == PhotoToneLinear)
 		return invertPhotoShoulder(qMax(0.f, y));
 	if (!(y > 0.f))
 		return 0.f;
@@ -2671,6 +2710,135 @@ const StelSkyDrawer::PhotoSensorSpec& StelSkyDrawer::getPhotoSensorSpec(int form
 	return specs[qBound(0, format, PHOTO_SENSOR_FORMAT_COUNT - 1)];
 }
 
+const StelSkyDrawer::PhotoFilmSpec& StelSkyDrawer::getPhotoFilmSpec(int film)
+{
+	// Reciprocity and color shifts: FUJIFILM data sheets (Provia 100F and Provia 400F AF3-066E: no
+	// correction up to 128 s and 32 s), Kodak E-28 (E200: none up to 10 s) and Kodak E-31 (T-Max 400 and Tri-X:
+	// the adjusted times for 1, 10 and 100 s). Where the data sheets stop, the Schwarzschild exponent is taken
+	// from the last points; for E200 ("unusually good reciprocity" in astrophotography) and Royal Gold 400 (not
+	// recommended beyond 10 s) it is an estimate (0.9 and 0.8).
+	// Granularity: diffuse RMS of the data sheets (Royal Gold 400: estimated, Kodak gives a print grain index).
+	// Curves: slide film has a gamma of about 1.7 and is viewed as it is, so the picture follows E^1.7; a negative
+	// (gamma about 0.65) printed on paper (about 1.8) gives a system gamma of about 1.15 and much more latitude.
+	// Black and white films are panchromatic: more red and blue than the eye, T-Max a little less blue.
+	static const PhotoFilmSpec films[PHOTO_FILM_COUNT] = {
+		{"Digital sensor", "", 0., PhotoFilmSlide, 0, {0,0,0,0}, {0,0,0,0}, 1., {0,0,0,0}, 0., 1., 1.f, 1.f, 0.18f, {0,0,0}},
+		{"Fujichrome Provia 100F", "Provia 100F", 100., PhotoFilmSlide,
+		 2, {128., 240., 0, 0}, {128., 190.5, 0, 0}, 0.63, {0., 0.025, 0, 0}, 8., 1.7, 1.7f, 1.0f, 0.15f, {0,0,0}},
+		{"Fujichrome Provia 400F", "Provia 400F", 400., PhotoFilmSlide,
+		 4, {32., 60., 120., 240.}, {32., 37.8, 60., 120.}, 0.66, {0., 0.05, 0.075, 0.075}, 13., 1.7, 1.7f, 1.0f, 0.15f, {0,0,0}},
+		{"Kodak Ektachrome E200", "E200", 200., PhotoFilmSlide,
+		 1, {10., 0, 0, 0}, {10., 0, 0, 0}, 0.9, {0,0,0,0}, 12., 1.7, 1.7f, 1.0f, 0.15f, {0,0,0}},
+		{"Kodak Royal Gold 400", "Royal Gold 400", 400., PhotoFilmNegative,
+		 1, {10., 0, 0, 0}, {10., 0, 0, 0}, 0.8, {0,0,0,0}, 5., 0.65, 1.15f, 11.5f, 0.18f, {0,0,0}},
+		{"Kodak T-Max 400", "T-Max 400", 400., PhotoFilmMonochrome,
+		 4, {0.4, 1.26, 15., 300.}, {0.4, 1., 10., 100.}, 0.77, {0,0,0,0}, 10., 0.65, 1.15f, 5.8f, 0.18f, {0.30f, 0.52f, 0.18f}},
+		{"Kodak Tri-X 400", "Tri-X 400", 400., PhotoFilmMonochrome,
+		 4, {0.17, 2., 50., 1200.}, {0.17, 1., 10., 100.}, 0.725, {0,0,0,0}, 17., 0.65, 1.15f, 5.8f, 0.18f, {0.27f, 0.50f, 0.23f}},
+	};
+	return films[qBound(0, film, PHOTO_FILM_COUNT - 1)];
+}
+
+double StelSkyDrawer::getPhotoFilmEffectiveTime(double t) const
+{
+	if (!getFlagPhotoFilmActive() || !(t > 0.))
+		return t;
+	const PhotoFilmSpec& f = getPhotoFilmSpec(photoFilm);
+	if (f.points <= 0 || t <= f.time[0])
+		return t;
+	for (int i = 1; i < f.points; ++i)
+	{
+		if (t <= f.time[i])
+		{
+			const double u = std::log(t/f.time[i-1]) / std::log(f.time[i]/f.time[i-1]);
+			return f.effective[i-1] * std::pow(f.effective[i]/f.effective[i-1], u);
+		}
+	}
+	const int last = f.points - 1;
+	return f.effective[last] * std::pow(t/f.time[last], f.exponent);
+}
+
+Vec3f StelSkyDrawer::getPhotoFilmTint(double t) const
+{
+	if (!getFlagPhotoFilmActive() || !(t > 0.))
+		return Vec3f(1.f);
+	const PhotoFilmSpec& f = getPhotoFilmSpec(photoFilm);
+	double green = 0.;
+	if (f.points > 0 && t > f.time[0])
+	{
+		green = f.green[f.points - 1];
+		for (int i = 1; i < f.points; ++i)
+			if (t <= f.time[i])
+			{
+				const double u = std::log(t/f.time[i-1]) / std::log(f.time[i]/f.time[i-1]);
+				green = f.green[i-1] + u*(f.green[i] - f.green[i-1]);
+				break;
+			}
+	}
+	// A CC green filter of density g corrects a green layer that has lost that much: 10^-g
+	return Vec3f(1.f, static_cast<float>(std::pow(10., -green)), 1.f);
+}
+
+Vec3f StelSkyDrawer::getPhotoFilmMonoWeights() const
+{
+	if (!getFlagPhotoFilmActive())
+		return Vec3f(0.f);
+	const PhotoFilmSpec& f = getPhotoFilmSpec(photoFilm);
+	if (f.type != PhotoFilmMonochrome)
+		return Vec3f(0.f);
+	return Vec3f(f.mono[0], f.mono[1], f.mono[2]);
+}
+
+const float* StelSkyDrawer::getPhotoWhiteBalanceMatrix() const
+{
+	if (!getFlagPhotoFilmActive())
+		return photoWBMatrix;
+	const PhotoFilmSpec& f = getPhotoFilmSpec(photoFilm);
+	if (f.type == PhotoFilmMonochrome)
+	{
+		// The black and white picture is made from the film's own sensitivity (see getPhotoFilmMonoWeights())
+		static const float identity[9] = {1,0,0, 0,1,0, 0,0,1};
+		return identity;
+	}
+	// The daylight balance of the film (photoWBMatrix, see updatePhotoWhiteBalanceMatrix()), after the layers'
+	// own reciprocity failure: the matrix acts on the light as the film recorded it
+	const Vec3f tint = getPhotoFilmTint(getPhotoEffectiveExposureTime());
+	for (int r = 0; r < 3; ++r)
+		for (int c = 0; c < 3; ++c)
+			photoWBMatrixFilm[r*3 + c] = photoWBMatrix[r*3 + c] * tint[c];
+	return photoWBMatrixFilm;
+}
+
+void StelSkyDrawer::setPhotoFilm(int film)
+{
+	const int f = qBound(0, film, PHOTO_FILM_COUNT - 1);
+	if (f == photoFilm)
+		return;
+	// The same lens: keep the focal length (a film is 35 mm, the sensor may have been another size)
+	const double focal = getPhotoFocalLengthForFov(core->getMovementMgr()->getAimFov());
+	// The film has its own speed: keep the ISO of the digital sensor for later
+	if (photoFilm == PhotoFilmNone)
+		photoDigitalISO = photoProgramRunning ? photoUserISO : photoISO;
+	photoFilm = f;
+	const double iso = (f != PhotoFilmNone) ? getPhotoFilmSpec(f).iso : photoDigitalISO;
+	if (photoProgramRunning)
+		photoUserISO = iso;
+	if (!qFuzzyCompare(iso, photoISO))
+	{
+		if (flagPhotoAutoExposure)
+			photoAutoExposureTime = qBound(PHOTO_AUTO_MIN_TIME, photoAutoExposureTime*photoISO/iso, PHOTO_AUTO_MAX_TIME);
+		photoISO = iso;
+		emit photoISOChanged(iso);
+	}
+	if (getFlagPhotographicModeActive())
+		core->getMovementMgr()->zoomTo(getPhotoFovForFocalLength(focal), 0.5f);
+	photoWBMatrixKelvin = -1.;
+	updatePhotoWhiteBalanceMatrix();
+	updatePhotoToneCurve();
+	StelApp::immediateSave("viewing/photographic_film", f);
+	emit photoFilmChanged(f);
+}
+
 Vec4f StelSkyDrawer::getPhotoFrame(const StelProjector& prj) const
 {
 	const double vx = prj.getViewportPosX(), vy = prj.getViewportPosY();
@@ -2679,7 +2847,7 @@ Vec4f StelSkyDrawer::getPhotoFrame(const StelProjector& prj) const
 	// The largest frame around the optical axis that stays in the viewport
 	const double halfW = qMax(1., qMin(c[0] - vx, vx + vw - c[0]));
 	const double halfH = qMax(1., qMin(c[1] - vy, vy + vh - c[1]));
-	double aspect = getPhotoSensorSpec(photoSensorFormat).aspect;
+	double aspect = getPhotoSensorSpec(getPhotoEffectiveSensorFormat()).aspect;
 	if (flagPhotoPortrait)
 		aspect = 1./aspect;
 	double w = 2.*halfW, h = 2.*halfH;
@@ -2772,7 +2940,7 @@ void StelSkyDrawer::setPhotoNoise(int mode)
 StelSkyDrawer::PhotoNoiseParams StelSkyDrawer::getPhotoNoiseParams(const StelProjector& prj) const
 {
 	PhotoNoiseParams p;
-	if (photoNoise == PhotoNoiseOff || !getFlagPhotographicModeActive())
+	if (photoNoise == PhotoNoiseOff || !getFlagPhotographicModeActive() || getFlagPhotoFilmActive())
 		return p;
 	p.enabled = true;
 	// The sensor collects the light in electrons. The scene buffer is scaled so that 1.0 is a saturated
@@ -3704,7 +3872,8 @@ void StelSkyDrawer::savePhotoSettings(QSettings* conf) const
 	conf->setValue("viewing/photographic_exposure_ev", getPhotoExposureEV());
 	conf->setValue("viewing/photographic_exposure_time", getPhotoExposureTime());
 	conf->setValue("viewing/photographic_aperture", photoProgramRunning ? photoUserAperture : photoAperture);
-	conf->setValue("viewing/photographic_iso", photoProgramRunning ? photoUserISO : photoISO);
+	conf->setValue("viewing/photographic_iso", photoFilm != PhotoFilmNone ? photoDigitalISO : (photoProgramRunning ? photoUserISO : photoISO));
+	conf->setValue("viewing/photographic_film", photoFilm);
 	conf->setValue("viewing/flag_photographic_zoom_whole_millimeters", getFlagPhotoZoomWholeMillimeters());
 	conf->setValue("viewing/flag_photographic_portrait", getFlagPhotoPortrait());
 	conf->setValue("viewing/photographic_eclipse_atmosphere", getPhotoEclipseAtmosphere());
@@ -3821,6 +3990,9 @@ double StelSkyDrawer::photoWhiteBalancePresetKelvin(int wb)
 
 double StelSkyDrawer::getPhotoWhiteBalanceTemperature() const
 {
+	// Daylight color films are balanced for about 5500 K
+	if (photoFilm != PhotoFilmNone)
+		return 5500.;
 	if (photoWhiteBalance == PhotoWBAuto)
 		return photoAutoWhiteBalanceKelvin;
 	if (photoWhiteBalance == PhotoWBCustom)
@@ -3830,12 +4002,12 @@ double StelSkyDrawer::getPhotoWhiteBalanceTemperature() const
 
 bool StelSkyDrawer::getFlagPhotoAutoWhiteBalanceActive() const
 {
-	return photoWhiteBalance == PhotoWBAuto && getFlagPhotographicModeActive();
+	return photoWhiteBalance == PhotoWBAuto && photoFilm == PhotoFilmNone && getFlagPhotographicModeActive();
 }
 
 double StelSkyDrawer::getPhotoMeterClipLevel() const
 {
-	const double clip = (photoToneCurve == PhotoToneLinear) ? 1. : static_cast<double>(photoToneParams.clip);
+	const double clip = (getPhotoActiveToneCurve() == PhotoToneLinear) ? 1. : static_cast<double>(photoToneParams.clip);
 	return clip / static_cast<double>(getPhotoExposureFactor());
 }
 
@@ -3869,7 +4041,7 @@ void StelSkyDrawer::updatePhotoWhiteBalanceMatrix()
 		return;
 	photoWBMatrixKelvin = T;
 	M3 m{1,0,0, 0,1,0, 0,0,1};
-	if (photoWhiteBalance != PhotoWBNeutral)
+	if (photoWhiteBalance != PhotoWBNeutral || photoFilm != PhotoFilmNone)
 	{
 		// Von Kries adaptation in Bradford cone space: light of temperature T becomes the display white (D65).
 		// The light of temperature T at luminance 1 stays at luminance 1.
@@ -4372,6 +4544,7 @@ void StelSkyDrawer::resetPhotographicSettings()
 	setFlagPhotoStarTrails(true);
 	setPhotoMount(PhotoMountTripod);
 	setPhotoNoise(PhotoNoiseImage);
+	setPhotoFilm(PhotoFilmNone);
 	setPhotoSensorFormat(PhotoSensorFullFrame);
 	setFlagPhotoZoomWholeMillimeters(false);
 	setFlagPhotoPortrait(false);
@@ -4384,7 +4557,10 @@ float StelSkyDrawer::getPhotoSceneScale() const
 	// Reflected-light meter calibration constant K (ISO 2720), and middle grey
 	constexpr double K = 12.5;
 	constexpr double middleGrey = 0.18;
-	return static_cast<float>(middleGrey * getPhotoEffectiveExposureTime() * photoISO / (K * photoAperture * photoAperture));
+	// With a film, the time that counts after the reciprocity failure (Schwarzschild: the density follows I t^p,
+	// the same factor at every brightness for a given time). The meter of the camera does not know it.
+	const double t = getPhotoFilmEffectiveTime(getPhotoEffectiveExposureTime());
+	return static_cast<float>(middleGrey * t * photoISO / (K * photoAperture * photoAperture));
 }
 
 // ---- Automatic exposure (aperture priority) ----
@@ -4397,7 +4573,7 @@ const double nominalExposureTimes[] = {
 	1./800, 1./640, 1./500, 1./400, 1./320, 1./250, 1./200, 1./160, 1./125, 1./100,
 	1./80, 1./60, 1./50, 1./40, 1./30, 1./25, 1./20, 1./15, 1./13, 1./10,
 	1./8, 1./6, 1./5, 1./4, 0.3, 0.4, 0.5, 0.6, 0.8, 1., 1.3, 1.6, 2., 2.5, 3.2, 4., 5., 6., 8., 10.,
-	13., 15., 20., 25., 30., 45., 60., 90., 120., 180., 240., 300., 600., 900., 1200., 1800., 3600. };
+	13., 15., 20., 25., 30., 40., 50., 60., 90., 120., 180., 240., 300., 600., 900., 1200., 1800., 3600. };
 
 float linearToSRGB(float c)
 {
@@ -4543,7 +4719,10 @@ void StelSkyDrawer::applyPhotoProgram(double exposure)
 	const bool tracker = flagPhotoStarTrails && getPhotoEffectiveMount() == PhotoMountTracker;
 	const double tLimit = tracker ? PHOTO_AUTO_MAX_TIME
 	                              : qBound(PHOTO_PROGRAM_HAND_TIME, PHOTO_PROGRAM_RULE/qMax(1., focalMm*crop), PHOTO_AUTO_MAX_TIME);
-	const double S0 = PHOTO_PROGRAM_BASE_ISO, Smax = PHOTO_PROGRAM_MAX_ISO;
+	// With a film the speed is fixed: the program changes only the time and the aperture
+	const bool film = photoFilm != PhotoFilmNone;
+	const double S0 = film ? getPhotoFilmSpec(photoFilm).iso : PHOTO_PROGRAM_BASE_ISO;
+	const double Smax = film ? S0 : PHOTO_PROGRAM_MAX_ISO;
 	const double Nday = PHOTO_PROGRAM_DAY_APERTURE, Nsmall = PHOTO_PROGRAM_MIN_APERTURE;
 	const double Nwide = PHOTO_LENS_MAX_APERTURE;
 	const double tMin = PHOTO_AUTO_MIN_TIME, tHand = PHOTO_PROGRAM_HAND_TIME, tMax = PHOTO_AUTO_MAX_TIME;
@@ -4715,6 +4894,18 @@ void StelSkyDrawer::drawPhotoInfoLine(StelCore* core) const
 	parts << (!autoExposure ? qc_("M", "camera mode: manual")
 	          : (flagPhotoProgramExposure ? qc_("P", "camera mode: program") : qc_("Av", "camera mode: aperture priority")));
 	parts << photoExposureTimeText(t);
+	// Film: what the long exposure counted for (reciprocity failure), when it is noticeably less
+	if (getFlagPhotoFilmActive())
+	{
+		const double effective = getPhotoFilmEffectiveTime(t);
+		if (effective < 0.94*t)
+		{
+			// not rounded to the steps of the camera: it is a computed value
+			const QString text = effective < 60. ? QString("%1 %2").arg(QLocale().toString(effective, 'g', 2), qc_("s", "unit of time: seconds"))
+			                                     : QString("%1 %2").arg(QLocale().toString(effective/60., 'g', 2), qc_("min", "unit of time: minutes"));
+			parts << QString("(%1 %2)").arg(qc_("as", "film: effective exposure time after the reciprocity failure"), text);
+		}
+	}
 	// The nominal values a camera shows (its third stops are rounded: f/1.4 for 1.41, ISO 1250 for 1270)
 	auto nominal = [](double value, std::initializer_list<double> marks) {
 		double best = value, bestDiff = 1e30;
@@ -4733,7 +4924,8 @@ void StelSkyDrawer::drawPhotoInfoLine(StelCore* core) const
 	// Focal length of the lens for this field on the sensor in use, and the focus when it is not at infinity
 	{
 		QString lens = QString("%1 mm").arg(qRound(1000.*getPhotoFocalLength(*core->getProjection(StelCore::FrameJ2000))));
-		const char* sensor = getPhotoSensorSpec(photoSensorFormat).shortName;
+		const char* sensor = getFlagPhotoFilmActive() ? getPhotoFilmSpec(photoFilm).shortName
+		                                              : getPhotoSensorSpec(photoSensorFormat).shortName;
 		if (sensor[0] != 0)
 			lens += QStringLiteral(" ") + QString::fromUtf8(sensor);
 		parts << lens;
@@ -4744,6 +4936,7 @@ void StelSkyDrawer::drawPhotoInfoLine(StelCore* core) const
 	parts << QString("EV100 %1").arg(QLocale().toString(ev100, 'f', 1));
 	if (std::fabs(photoExposureEV) > 0.01)
 		parts << QString("%1 EV").arg(QString::asprintf("%+.1f", photoExposureEV));
+	if (!getFlagPhotoFilmActive())
 	{
 		const int kelvin = 50*qRound(getPhotoWhiteBalanceTemperature()/50.);
 		parts << QString("%1 %2 K").arg(photoWhiteBalance == PhotoWBAuto ? qc_("AWB", "camera: automatic white balance") : qc_("WB", "camera: white balance")).arg(kelvin);

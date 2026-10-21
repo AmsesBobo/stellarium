@@ -916,6 +916,9 @@ uniform highp vec4 photoTone;
 uniform highp float photoToneClip;
 // White balance: light of the chosen color temperature -> display white (linear sRGB)
 uniform highp mat3 photoWhiteBalance;
+// Black and white film: the picture is the film's sensitivity to red, green and blue (photoMonoWeights)
+uniform bool photoMonochrome;
+uniform highp vec3 photoMonoWeights;
 // Lens vignetting (see StelSkyDrawer::getPhotoLens()): window pixels
 uniform bool photoVignetting;
 uniform highp vec2 photoLensCenter;
@@ -1024,6 +1027,8 @@ highp vec3 cameraResponse(highp vec3 lin)
 	// The light on the sensor (the vignetting takes photons away); in manual mode the exposure compensation
 	// (photoExposure) acts afterwards, like brightening the raw file: it does not add photons
 	highp vec3 sensor = min(max(lin, vec3(0)), vec3(1e30)) * v;
+	if (photoMonochrome)
+		sensor = vec3(dot(sensor, photoMonoWeights));
 	if (photoNoise)
 		sensor = sensorNoise(sensor, gl_FragCoord.xy);
 	highp vec3 x = min(max((photoWhiteBalance * sensor) * photoExposure, vec3(0)), vec3(1e30));
@@ -1060,7 +1065,10 @@ void setPhotoToneUniforms(QOpenGLShaderProgram& program, const StelSkyDrawer& dr
 	program.setUniformValue("photoFrameMask", drawer.getFlagPhotoFrameMask());
 	program.setUniformValue("photoFrame", QVector4D(frame[0], frame[1], frame[0] + frame[2], frame[1] + frame[3]));
 	const StelSkyDrawer::PhotoToneParams& p = drawer.getPhotoToneParams();
-	program.setUniformValue("photoToneCurve", drawer.getPhotoToneCurve());
+	program.setUniformValue("photoToneCurve", drawer.getPhotoActiveToneCurve());
+	const Vec3f mono = drawer.getPhotoFilmMonoWeights();
+	program.setUniformValue("photoMonochrome", mono[0] + mono[1] + mono[2] > 0.f);
+	program.setUniformValue("photoMonoWeights", mono[0], mono[1], mono[2]);
 	program.setUniformValue("photoTone", p.a, p.ad, p.b, p.c);
 	program.setUniformValue("photoToneClip", p.clip);
 	program.setUniformValue("photoWhiteBalance", QMatrix3x3(drawer.getPhotoWhiteBalanceMatrix()));

@@ -63,7 +63,7 @@ const QVector<double> PhotographicModeDialog::exposureTimes = {
 	1./800, 1./640, 1./500, 1./400, 1./320, 1./250, 1./200, 1./160, 1./125, 1./100,
 	1./80, 1./60, 1./50, 1./40, 1./30, 1./25, 1./20, 1./15, 1./13, 1./10,
 	1./8, 1./6, 1./5, 1./4, 0.3, 0.4, 0.5, 0.6, 0.8, 1., 1.3, 1.6, 2., 2.5, 3.2, 4., 5., 6., 8., 10.,
-	13., 15., 20., 25., 30., 45., 60., 90., 120., 180., 240., 300., 600., 900., 1200., 1800., 3600. };
+	13., 15., 20., 25., 30., 40., 50., 60., 90., 120., 180., 240., 300., 600., 900., 1200., 1800., 3600. };
 const QVector<double> PhotographicModeDialog::apertures = {
 	0.95, 1.0, 1.1, 1.2, 1.4, 1.6, 1.8, 2.0, 2.2, 2.5, 2.8, 3.2, 3.5, 4.0, 4.5, 5.0, 5.6, 6.3, 7.1,
 	8.0, 9.0, 10., 11., 13., 14., 16., 18., 20., 22., 32. };
@@ -158,6 +158,18 @@ void PhotographicModeDialog::fillComboBoxes()
 		ui->sensorComboBox->addItem(q_("APS-C Canon (22.3 x 14.9 mm)"), StelSkyDrawer::PhotoSensorAPSCCanon);
 		ui->sensorComboBox->addItem(q_("Micro Four Thirds (17.3 x 13 mm)"), StelSkyDrawer::PhotoSensorMicroFourThirds);
 		ui->sensorComboBox->addItem(q_("1-inch (13.2 x 8.8 mm)"), StelSkyDrawer::PhotoSensorOneInch);
+	}
+	{
+		const QSignalBlocker blocker(ui->filmComboBox);
+		ui->filmComboBox->clear();
+		ui->filmComboBox->addItem(q_("None (digital sensor)"), StelSkyDrawer::PhotoFilmNone);
+		for (int film = 1; film < StelSkyDrawer::PHOTO_FILM_COUNT; ++film)
+		{
+			const StelSkyDrawer::PhotoFilmSpec& f = StelSkyDrawer::getPhotoFilmSpec(film);
+			const QString type = f.type == StelSkyDrawer::PhotoFilmSlide ? q_("slide")
+			                   : (f.type == StelSkyDrawer::PhotoFilmNegative ? q_("color negative") : q_("black and white"));
+			ui->filmComboBox->addItem(QString("%1 (ISO %2, %3)").arg(f.name).arg(qRound(f.iso)).arg(type), film);
+		}
 	}
 	{
 		const QSignalBlocker blocker(ui->eclipseAtmosphereComboBox);
@@ -350,6 +362,12 @@ void PhotographicModeDialog::createDialogContent()
 	});
 	connect(drawer, &StelSkyDrawer::photoEclipseAtmosphereChanged,     this, &PhotographicModeDialog::updateCameraWidgets);
 	// Sensor and lens
+	connect(ui->filmComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this, drawer](int index)
+	{
+		if (index >= 0)
+			drawer->setPhotoFilm(ui->filmComboBox->itemData(index).toInt());
+	});
+	connect(drawer, &StelSkyDrawer::photoFilmChanged,                 this, &PhotographicModeDialog::updateCameraWidgets);
 	connect(ui->sensorComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this, drawer](int index)
 	{
 		if (index >= 0)
@@ -510,6 +528,30 @@ void PhotographicModeDialog::updateCameraWidgets()
 		if (focusDistanceFromSlider(ui->focusSlider->value()) != s)
 			ui->focusSlider->setValue(focusSliderFromDistance(s));
 		ui->focusValueLabel->setText(StelSkyDrawer::photoFocusDistanceText(s));
+	}
+
+	{
+		// A film sets the speed, the color balance, the curve and the grain, and it is 35 mm
+		const bool film = drawer->getPhotoFilm() != StelSkyDrawer::PhotoFilmNone;
+		const QSignalBlocker blocker(ui->filmComboBox);
+		ui->filmComboBox->setCurrentIndex(qMax(0, ui->filmComboBox->findData(drawer->getPhotoFilm())));
+		if (film)
+		{
+			ui->isoComboBox->setEnabled(false);
+			ui->sensorComboBox->setEnabled(false);
+			ui->noiseComboBox->setEnabled(false);
+			ui->toneCurveComboBox->setEnabled(false);
+			ui->whiteBalanceComboBox->setEnabled(false);
+			ui->whiteBalanceKelvinSpinBox->setEnabled(false);
+			ui->whiteBalanceKelvinLabel->setEnabled(false);
+		}
+		else
+		{
+			ui->sensorComboBox->setEnabled(true);
+			ui->noiseComboBox->setEnabled(true);
+			ui->toneCurveComboBox->setEnabled(true);
+			ui->whiteBalanceComboBox->setEnabled(true);
+		}
 	}
 
 	// Exposure value at ISO 100, the usual way photographers compare exposures.
