@@ -230,14 +230,56 @@
            </widget>
           </item>
           <item row="11" column="0" colspan="2">
-           <widget class="QCheckBox" name="extinctionColorCheckBox">
-            <property name="toolTip">
-             <string>Near the horizon the atmosphere takes the blue light first, so stars, planets, the Sun, the Moon, the Milky Way and the zodiacal light turn yellow, orange or red. The color comes from the spectral transmission of the atmosphere model; the amount of extinction follows the extinction coefficient.</string>
-            </property>
-            <property name="text">
-             <string>Color of the atmospheric extinction</string>
-            </property>
-           </widget>
+           <layout class="QHBoxLayout" name="atmosphereCheckBoxLayout">
+            <item>
+             <widget class="QCheckBox" name="extinctionColorCheckBox">
+              <property name="toolTip">
+               <string>Near the horizon the atmosphere takes the blue light first, so stars, planets, the Sun, the Moon, the Milky Way and the zodiacal light turn yellow, orange or red. The color comes from the spectral transmission of the atmosphere model; the amount of extinction follows the extinction coefficient.</string>
+              </property>
+              <property name="text">
+               <string>Color of the atmospheric extinction</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QCheckBox" name="airglowCheckBox">
+              <property name="toolTip">
+               <string>The airglow: the faint light of the upper atmosphere, about 90 km high (oxygen, sodium, OH), which is the natural night sky at a dark site. About 22.3 magnitudes per square arc second at the zenith, brighter near the maximum of the solar cycle, brightest about 10 degrees above the horizon; a warm, brownish grey in daylight white balance. Below the end of the astronomical twilight the scattered sunlight then fades away. With the default (lightweight) atmosphere model.</string>
+              </property>
+              <property name="text">
+               <string>Airglow</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QSpinBox" name="airglowStrengthSpinBox">
+              <property name="toolTip">
+               <string>The brightness of the airglow against its mean (100%: about 22.5 magnitudes per square arc second at the zenith at a mean solar activity). It changes from night to night by about a factor of two, and with the solar cycle by about 30% (that part is computed from the date).</string>
+              </property>
+              <property name="alignment">
+               <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+              </property>
+              <property name="keyboardTracking">
+               <bool>false</bool>
+              </property>
+              <property name="suffix">
+               <string> %</string>
+              </property>
+              <property name="minimum">
+               <number>25</number>
+              </property>
+              <property name="maximum">
+               <number>200</number>
+              </property>
+              <property name="singleStep">
+               <number>5</number>
+              </property>
+              <property name="value">
+               <number>100</number>
+              </property>
+             </widget>
+            </item>
+           </layout>
           </item>
           <item row="12" column="0" colspan="2">
            <widget class="QCheckBox" name="infoLineCheckBox">

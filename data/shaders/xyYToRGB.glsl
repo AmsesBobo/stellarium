@@ -33,6 +33,25 @@ uniform bool flagUseTmGamma;
 // is applied later, in the final camera pass.
 uniform bool photoMode;
 uniform highp float photoScale;
+// Photographic mode: the airglow at the zenith above the atmosphere (linear RGB of the scene buffer, 0 = none),
+// and its extinction per airmass in red, green and blue (magnitudes)
+uniform highp vec3 photoAirglow;
+uniform highp vec3 photoAirglowExtinction;
+
+// Photographic mode: the airglow towards a direction at the sine of the altitude sinElev (below the horizon: as
+// above, like the sky). It shines from a layer about 90 km high: looking lower, the line of sight runs longer
+// through it (van Rhijn), so it brightens towards the horizon until the extinction takes over, about 10 degrees
+// above the horizon.
+highp vec3 photoAirglowLight(highp float sinElev)
+{
+	if (!photoMode)
+		return vec3(0.);
+	const highp float r = 6371. / (6371. + 90.);
+	highp float cosZ = clamp(abs(sinElev), 0., 1.);
+	highp float vanRhijn = 1. / sqrt(max(1e-4, 1. - r*r*(1. - cosZ*cosZ)));
+	highp float airmass = 1. / (cosZ + 0.025*exp(-11.*cosZ));
+	return photoAirglow * vanRhijn * exp(-0.921034 * photoAirglowExtinction * airmass) * brightnessScale;
+}
 
 float applyTMAndGamma(highp float Y)
 {
