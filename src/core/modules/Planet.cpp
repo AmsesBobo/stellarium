@@ -3427,16 +3427,59 @@ float Planet::getVMagnitude(const StelCore* core, double eclipseFactor) const
 				const double od = 180. - aberratedElongation * (180.0/M_PI); // opposition distance [degrees]
 
 				if (od>p+r) shadowFactor=1.0;
-				else if (od>u+r) // penumbral transition zone: gradual decline (square curve)
-					shadowFactor=0.6+0.4*sqrt((od-u-r)/(p-u));
-				else if (od>u-r) // umbral transition zone
-					shadowFactor=totalityFactor+(0.6-totalityFactor)*(od-u+r)/(2.*r);
-				else // totality. Still, center is darker...
+				else
 				{
-					// Fit a more realistic magnitude for the Moon case.
-					// I used some empirical data for fitting. --AW
-					// TODO: This factor should be improved!
-					shadowFactor=totalityFactor*0.5*(1+od/(u-r));
+					// The light of the Moon: the mean over its disk of the light at each point. In the penumbra
+					// that is the part of the solar disk seen from the point, with the darkening towards the
+					// solar limb (as in the shader, see photoSunVisible() in planet.frag): seen from the point the
+					// Earth (angular radius (p+u)/2) and the Sun ((p-u)/2) are as far apart as the point from the
+					// shadow axis. In the umbra the light refracted by the Earth's atmosphere, from 1e-5 at the
+					// center to 2e-4 at the edge (as in the shader).
+					const double sunR = 0.5*(p-u), earthR = 0.5*(p+u);
+					auto sunVisible = [sunR, earthR](double sep) -> double
+					{
+						constexpr double limbDarkening = 0.62; // V band
+						constexpr int rings = 24;
+						double total = 0., hidden = 0.;
+						for (int i=0; i<rings; ++i)
+						{
+							const double x = (i+0.5)/rings;
+							const double rho = x*sunR;
+							const double weight = x*(1. - limbDarkening*(1. - std::sqrt(std::max(0., 1.-x*x))));
+							double covered;
+							if (sep <= earthR - rho) covered = 1.;
+							else if (sep >= earthR + rho || rho >= sep + earthR) covered = 0.;
+							else covered = std::acos(std::clamp((rho*rho + sep*sep - earthR*earthR)/(2.*rho*sep), -1., 1.))/M_PI;
+							total += weight;
+							hidden += weight*covered;
+						}
+						return 1. - hidden/total;
+					};
+					auto light = [&](double sep) -> double
+					{
+						if (sep >= u)
+						{
+							const double direct = sunVisible(sep);
+							return direct + 2.0e-4*(1. - direct);
+						}
+						const double x = sep/u;
+						return std::exp(std::log(1.0e-5) + (std::log(2.0e-4) - std::log(1.0e-5))*x*x);
+					};
+					// a grid of points over the lunar disk (the Moon is full: all of it is lit)
+					constexpr int n = 7;
+					double sum = 0.;
+					int count = 0;
+					for (int j=0; j<n; ++j)
+						for (int i=0; i<n; ++i)
+						{
+							const double x = (2.*(i+0.5)/n - 1.), y = (2.*(j+0.5)/n - 1.);
+							if (x*x + y*y > 1.)
+								continue;
+							sum += light(std::hypot(od + x*r, y*r));
+							++count;
+						}
+					shadowFactor = count > 0 ? sum/count : light(od);
+					Q_UNUSED(totalityFactor)
 				}
 			}
 			else
