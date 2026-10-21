@@ -1195,6 +1195,13 @@ private:
 	float photoVisibleThreshold = 1e-4f;
 	//! Estimated linear value of the sky background in the scene buffer (used for the visibility threshold)
 	float photoSkyBackground = 0.f;
+	//! Precomputed each frame in update(): the noise of the sky background in a pixel of the picture (scene units,
+	//! like the light of a star): photon noise of the sky, read noise and dark signal of its photosites. A star
+	//! counts as recorded (and is drawn) only above it, see computePhotoRCMag().
+	float photoNoiseSigma = 0.f;
+	//! Signal-to-noise ratio (over the image of the star, a matched filter) from which a star shows in the noise
+	//! (config: viewing/photographic_detection_snr; 0 = no limit by the noise)
+	float photoDetectionSnr = 3.f;
 	//! Smallest PSF width (FWHM) in pixels, given by the sensor and the optics
 	float photoMinFwhmPixels = 2.f;
 	//! Seeing (FWHM) in arc seconds; it matters only when zoomed in
