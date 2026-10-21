@@ -338,23 +338,33 @@ void main(void)
     vec4 texColor;
 	if (photoMode)
 	{
-		// Averaged over the exposure: the sky turns past the pixel (star trails). The display stretch
-		// of the image is undone for each sample, before the light is added up.
+		// Averaged over the exposure (the sky turns past the pixel: star trails) and over the blur disk of a
+		// defocused lens (the light of the points around). The display stretch of the image is undone for each
+		// sample, before the light is added up.
 		texColor = vec4(0);
+		float weights = 0.;
 		for (int i = 0; i < 128; ++i)
 		{
 			if (i >= photoSkyTrailSamples)
 				break;
-			vec3 dir = photoSkyTrailDirection(modelPos, i);
-			vec4 c = texture2D(mainTex, vec2(atan(dir.x, dir.y)/(2.*PI), acos(-dir.z)/PI));
+			vec4 smp = photoSkySample(i);
+			vec3 p = modelPos;
+			if (photoSkyDefocus != 0.)
+			{
+				bool okSample = false;
+				p = applyAberrationToViewDir(normalize(unProject(winPos.x + smp.x, winPos.y + smp.y, okSample).xyz));
+			}
+			vec3 dir = photoSkyTurn(p, smp.w);
+			vec4 c = PHOTO_SKY_TEXTURE(mainTex, vec2(atan(dir.x, dir.y)/(2.*PI), acos(-dir.z)/PI));
 			if (photoDestretch != 1.)
 			{
 				float luminance = dot(c.rgb, vec3(0.2126, 0.7152, 0.0722));
 				c.rgb *= luminance > 0. ? pow(luminance, photoDestretch - 1.) : 0.;
 			}
-			texColor += c;
+			texColor += smp.z * c;
+			weights += smp.z;
 		}
-		texColor /= float(photoSkyTrailSamples);
+		texColor /= max(weights, 1e-6);
 	}
 	else
 		texColor = texture2D(mainTex, texc);

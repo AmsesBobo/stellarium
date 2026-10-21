@@ -431,16 +431,26 @@ void main(void)
 
 	if (photoMode)
 	{
-		// Averaged over the exposure: the sky turns past the pixel (star trails)
+		// Averaged over the exposure (the sky turns past the pixel: star trails) and over the blur disk of a
+		// defocused lens
 		float zodiacal = 0.;
+		float weights = 0.;
 		for (int i = 0; i < 128; ++i)
 		{
 			if (i >= photoSkyTrailSamples)
 				break;
-			vec3 dir = photoSkyTrailDirection(modelPos, i);
-			zodiacal += texture2D(photoTex, vec2((atan(dir.x, dir.y) + lambdaSun)/(2.*PI), acos(-dir.z)/PI)).r;
+			vec4 smp = photoSkySample(i);
+			vec3 p = modelPos;
+			if (photoSkyDefocus != 0.)
+			{
+				bool okSample = false;
+				p = normalize(unProject(winPos.x + smp.x, winPos.y + smp.y, okSample).xyz);
+			}
+			vec3 dir = photoSkyTurn(p, smp.w);
+			zodiacal += smp.z * PHOTO_SKY_TEXTURE(photoTex, vec2((atan(dir.x, dir.y) + lambdaSun)/(2.*PI), acos(-dir.z)/PI)).r;
+			weights += smp.z;
 		}
-		zodiacal /= float(photoSkyTrailSamples);
+		zodiacal /= max(weights, 1e-6);
 		FRAG_COLOR = vec4(zodiacal * brightness * extinctionColor * extinctionFactor, 1);
 		return;
 	}
