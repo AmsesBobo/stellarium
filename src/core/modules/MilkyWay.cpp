@@ -124,6 +124,14 @@ void MilkyWay::init()
 		// The scale belongs to the expansion: changing astro/milky_way_photo_destretch needs a new scale
 		photoLuminanceScale = conf->value("astro/milky_way_photo_luminance", 1.16e-3).toDouble();
 		photoDestretch = conf->value("astro/milky_way_photo_destretch", 1.5).toFloat();
+		// The colors of that image are a display choice: bluish white (its mean, weighted with the light after the
+		// expansion, is linear sRGB 0.92 1.02 1.07 at luminance 1), while the integrated starlight of the Milky Way
+		// is redder than sunlight, B-V about 0.9 against 0.65 (Leinert et al. 1998, A&AS 127, 1): as a 5000 K star
+		// seen in sunlight white balance, 1.09 0.99 0.84. These gains move the mean there and keep the variations of
+		// the image (the reddened dust lanes, the bluer young regions); the luminance does not change.
+		const QStringList gain = conf->value("astro/milky_way_photo_color_gain", "1.179,0.969,0.779").toString().split(',');
+		if (gain.size() == 3)
+			photoColorGain.set(gain[0].trimmed().toFloat(), gain[1].trimmed().toFloat(), gain[2].trimmed().toFloat());
 	}
 	setFlagShow(conf->value("astro/flag_milky_way").toBool());
 	setIntensity(conf->value("astro/milky_way_intensity",1.).toDouble());
@@ -419,7 +427,8 @@ void main(void)
 		photoTex->bind(mainTexSampler);
 		renderProgram->setUniformValue(shaderVars.mainTex, mainTexSampler);
 		renderProgram->setUniformValue(shaderVars.projectionMatrixInverse, projector->getProjectionMatrix().toQMatrix().inverted());
-		renderProgram->setUniformValue(shaderVars.brightness, QVector3D(lin.x()*k, lin.y()*k, lin.z()*k));
+		const Vec3f& g = photoColorGain;
+		renderProgram->setUniformValue(shaderVars.brightness, QVector3D(lin.x()*k*g[0], lin.y()*k*g[1], lin.z()*k*g[2]));
 		renderProgram->setUniformValue(shaderVars.saturation, GLfloat(saturation));
 		core->setAberrationUniforms(*renderProgram);
 		projector->setUnProjectUniforms(*renderProgram);
