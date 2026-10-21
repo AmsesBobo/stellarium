@@ -60,13 +60,17 @@
             </property>
            </widget>
           </item>
-          <item row="1" column="0" colspan="2">
-           <widget class="QCheckBox" name="autoExposureCheckBox">
-            <property name="toolTip">
-             <string>The camera meters the picture and sets the exposure time (1/8000 s to 30 s) for the chosen aperture and ISO, like the aperture priority mode (Av, A) of a camera. The exposure compensation then changes the exposure time.</string>
-            </property>
+          <item row="1" column="0">
+           <widget class="QLabel" name="exposureModeLabel">
             <property name="text">
-             <string>Automatic exposure (aperture priority)</string>
+             <string>Exposure mode:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="1">
+           <widget class="QComboBox" name="exposureModeComboBox">
+            <property name="toolTip">
+             <string>Manual (M): you set the time, the aperture and the ISO. Aperture priority (Av, A): the camera meters the picture and sets the exposure time (1/8000 s to 30 s) for your aperture and ISO. Program (P) with automatic ISO: the camera sets all three, from ISO 100 and f/8 in daylight, through a wider aperture at dusk and longer times (on a fixed tripod as long as the stars stay points, the "500 rule"), up to ISO 6400 at night. The exposure compensation acts in both automatic modes.</string>
             </property>
            </widget>
           </item>

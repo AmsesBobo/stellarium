@@ -160,6 +160,13 @@ void PhotographicModeDialog::fillComboBoxes()
 		ui->sensorComboBox->addItem(q_("1-inch (13.2 x 8.8 mm)"), StelSkyDrawer::PhotoSensorOneInch);
 	}
 	{
+		const QSignalBlocker blocker(ui->exposureModeComboBox);
+		ui->exposureModeComboBox->clear();
+		ui->exposureModeComboBox->addItem(q_("Manual (M)"), 0);
+		ui->exposureModeComboBox->addItem(q_("Aperture priority (Av)"), 1);
+		ui->exposureModeComboBox->addItem(q_("Program, auto ISO (P)"), 2);
+	}
+	{
 		const QSignalBlocker blocker(ui->frameOrientationComboBox);
 		ui->frameOrientationComboBox->clear();
 		ui->frameOrientationComboBox->addItem(q_("Landscape"), false);
@@ -236,7 +243,15 @@ void PhotographicModeDialog::createDialogContent()
 	connectDoubleProperty(ui->fwhmDoubleSpinBox,      "StelSkyDrawer.photoPsfMinFwhm");
 	connectDoubleProperty(ui->seeingDoubleSpinBox,    "StelSkyDrawer.photoSeeing");
 	connectBoolProperty(ui->bloomCheckBox,            "StelSkyDrawer.flagPhotoBloom");
-	connectBoolProperty(ui->autoExposureCheckBox,     "StelSkyDrawer.flagPhotoAutoExposure");
+	connect(ui->exposureModeComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this, drawer](int index)
+	{
+		if (index < 0)
+			return;
+		const int mode = ui->exposureModeComboBox->itemData(index).toInt();
+		drawer->setFlagPhotoProgramExposure(mode == 2);
+		drawer->setFlagPhotoAutoExposure(mode != 0);
+	});
+	connect(drawer, &StelSkyDrawer::flagPhotoProgramExposureChanged,   this, &PhotographicModeDialog::updateCameraWidgets);
 	connectBoolProperty(ui->infoLineCheckBox,         "StelSkyDrawer.flagPhotoInfoLine");
 	connectBoolProperty(ui->extinctionColorCheckBox,  "StelSkyDrawer.flagPhotoExtinctionColor");
 	connectBoolProperty(ui->vignettingCheckBox,       "StelSkyDrawer.flagPhotoVignetting");
@@ -395,6 +410,14 @@ void PhotographicModeDialog::updateCameraWidgets()
 	selectNearest(ui->apertureComboBox, apertures, n);
 	selectNearest(ui->isoComboBox, isoValues, iso);
 	ui->exposureTimeComboBox->setEnabled(!autoExposure);
+	// In the program mode the camera chooses the aperture and the ISO as well: the lists show them
+	const bool program = autoExposure && drawer->getFlagPhotoProgramExposure();
+	ui->apertureComboBox->setEnabled(!program);
+	ui->isoComboBox->setEnabled(!program);
+	{
+		const QSignalBlocker blocker(ui->exposureModeComboBox);
+		ui->exposureModeComboBox->setCurrentIndex(qMax(0, ui->exposureModeComboBox->findData(!autoExposure ? 0 : (program ? 2 : 1))));
+	}
 	ui->meteringComboBox->setEnabled(autoExposure);
 	ui->meteringLabel->setEnabled(autoExposure);
 	{
