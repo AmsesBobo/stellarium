@@ -132,14 +132,19 @@ private:
 		int projectionMatrixInverse;
 		int photoMode;
 		int photoDestretch;
+		int photoCurve;
+		int photoCurveTop;
 	} shaderVars;
 
 	//! Photographic mode: luminance (cd/m^2) of a linear value of 1.0 in photoTex. It calibrates the
 	//! texture against measured surface brightness of the Milky Way (config: astro/milky_way_photo_luminance).
 	double photoLuminanceScale = 1.16e-3;
 	//! Photographic mode: power applied to the luminance of photoTex, undoing the display stretch of the
-	//! image (config: astro/milky_way_photo_destretch)
-	float photoDestretch = 1.5f;
+	//! image (config: astro/milky_way_photo_destretch); 0: photoCurve
+	float photoDestretch = 0.f;
+	//! Photographic mode: the expansion of photoTex fitted to a photometric panorama (c0, c1, c2, x0; see init())
+	Vec4f photoCurve = Vec4f(0.f, 1.f, 0.f, -100.f);
+	float photoCurveTop = 100.f;
 	//! Photographic mode: gains on the linear red, green and blue of photoTex (luminance kept), which bring its mean
 	//! color to the measured one of the integrated starlight (config: astro/milky_way_photo_color_gain)
 	Vec3f photoColorGain = Vec3f(1.f);

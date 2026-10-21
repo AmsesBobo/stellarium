@@ -96,13 +96,24 @@ void MilkyWay::init()
 	// and free of the stars that Stellarium draws itself. photoLuminanceScale is the luminance (cd/m^2)
 	// of a linear texture value of 1.0.
 	// Default: milkyway_gaia.png, made from the Gaia Sky Milky Way cubemap (based on ESA Gaia EDR3 data).
-	// That image is stretched for display (its contrast compressed, like most astronomical pictures), so
-	// the photographic mode expands it again: the luminance is raised to the power photoDestretch (1.5,
-	// as for the nebula images, see StelSkyDrawer). The bright star clouds of Sagittarius and Scutum then
-	// reach about 20 mag/arcsec^2 (V), the Cygnus clouds about 21, the anticenter about 22.5.
-	// The result is calibrated to the mean integrated starlight at the zenith at 40N (75 nW/m^2/sr in V,
-	// Masana et al. 2021, MNRAS 501, 5443) minus the ~20% contributed by Hipparcos-bright stars:
-	// 1.0 = 1400 S10(V). (Without the expansion, 1.0 = 565 S10(V) would give that mean.)
+	// That image is stretched for display (its contrast compressed, like most astronomical pictures), so the
+	// photographic mode expands it again (photoCurve, see below): its luminance L becomes exp(f(ln L)), with
+	// f(x) = c0 + c1 x + c2 x^2 between x0 and x1, and straight lines (the slopes of the parabola) outside.
+	// The parabola is fitted (0.4 mag rms, 26000 points of 0.5 degrees, |b| < 30, brighter than 23.5) to Axel
+	// Mellinger's panorama, which is photometrically calibrated against Pioneer 10 (Mellinger 2009, PASP 121, 1180):
+	// the image needs more expansion the brighter it is, slope 1.7 at the median of the Milky Way band, 3.5 in its
+	// brightest percent (a single power of 1.5 left the star clouds of the center too flat and their surroundings
+	// too bright). Above the 70th percentile of the band (x1) it goes on straight (slope 2.1): fewer points hold the
+	// parabola there, and so the brightest star clouds stand out against their surroundings as much as in a camera
+	// picture of the center from a dark site (Namibia, Canon EOS 600D: brightest to median 5.3; Stellarium 5.6, with
+	// the parabola up to the 90th percentile 7.6). Below x0 the slope is 0.68, where the parabola levels off: the
+	// galactic poles come to about 24.9 mag/arcsec^2 (Pioneer 10: about 24.1), the power of 1.5 gave 27. The star
+	// clouds of Sagittarius reach about 20.4 mag/arcsec^2 (V), 10 degrees below them 21.9, Scutum 21.4, Carina 21.3,
+	// Cygnus 22.8, the anticenter 22.6. (x1 can be changed with astro/milky_way_photo_curve_top.)
+	// The scale keeps the calibration to the mean integrated starlight at the zenith at 40N (75 nW/m^2/sr in V,
+	// Masana et al. 2021, MNRAS 501, 5443) minus the ~20% contributed by Hipparcos-bright stars: the mean over
+	// declinations 30-50 is that of the earlier expansion (1.0 = 1400 S10(V) with a power of 1.5).
+	// astro/milky_way_photo_destretch > 0 uses a single power instead (with its own astro/milky_way_photo_luminance).
 	// Without it, Axel Mellinger's panorama is used: its 99.9th percentile (linear 0.21) is set to
 	// about 20.5 mag/arcsec^2 (V).
 	const QString photoTextureName = conf->value("astro/milky_way_photo_texture", "milkyway_gaia.png").toString();
@@ -122,14 +133,16 @@ void MilkyWay::init()
 		gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
 		photoTex->release();
 		// The scale belongs to the expansion: changing astro/milky_way_photo_destretch needs a new scale
-		photoLuminanceScale = conf->value("astro/milky_way_photo_luminance", 1.16e-3).toDouble();
-		photoDestretch = conf->value("astro/milky_way_photo_destretch", 1.5).toFloat();
+		photoDestretch = conf->value("astro/milky_way_photo_destretch", 0.0).toFloat();
+		photoLuminanceScale = conf->value("astro/milky_way_photo_luminance", photoDestretch > 0.f ? 1.16e-3 : 5.096e-3).toDouble();
+		photoCurve.set(-0.48191f, 4.11797f, 1.14056f, -1.50713f);
+		photoCurveTop = conf->value("astro/milky_way_photo_curve_top", -0.8882).toFloat();
 		// The colors of that image are a display choice: bluish white (its mean, weighted with the light after the
-		// expansion, is linear sRGB 0.92 1.02 1.07 at luminance 1), while the integrated starlight of the Milky Way
+		// expansion, is linear sRGB 0.91 1.02 1.11 at luminance 1), while the integrated starlight of the Milky Way
 		// is redder than sunlight, B-V about 0.9 against 0.65 (Leinert et al. 1998, A&AS 127, 1): as a 5000 K star
 		// seen in sunlight white balance, 1.09 0.99 0.84. These gains move the mean there and keep the variations of
 		// the image (the reddened dust lanes, the bluer young regions); the luminance does not change.
-		const QStringList gain = conf->value("astro/milky_way_photo_color_gain", "1.179,0.969,0.779").toString().split(',');
+		const QStringList gain = conf->value("astro/milky_way_photo_color_gain", "1.197,0.967,0.750").toString().split(',');
 		if (gain.size() == 3)
 			photoColorGain.set(gain[0].trimmed().toFloat(), gain[1].trimmed().toFloat(), gain[2].trimmed().toFloat());
 	}
@@ -305,7 +318,9 @@ uniform mat4 projectionMatrixInverse;
 uniform bool extinctionEnabled;
 uniform float bortleIntensity;
 uniform bool photoMode;  // photographic mode: texture is linear luminance, brightness holds the calibration
-uniform float photoDestretch; // photographic mode: power applied to the luminance of the texture (keeps the color)
+uniform float photoDestretch; // photographic mode: power applied to the luminance of the texture (keeps the color), 0: photoCurve
+uniform vec4 photoCurve;      // photographic mode: the expansion of the texture (c0, c1, c2, x0), see MilkyWay::init()
+uniform float photoCurveTop;  // photographic mode: x1 of that expansion
 void main(void)
 {
 	const float PI = 3.14159265;
@@ -364,7 +379,21 @@ void main(void)
 			}
 			vec3 dir = photoSkyTurn(p, smp.w);
 			vec4 c = PHOTO_SKY_TEXTURE(mainTex, vec2(atan(dir.x, dir.y)/(2.*PI), acos(-dir.z)/PI));
-			if (photoDestretch != 1.)
+			if (photoDestretch <= 0.)
+			{
+				// L -> exp(f(ln L)): a parabola in log-log between x0 and x1, straight lines outside (keeps the color)
+				float luminance = dot(c.rgb, vec3(0.2126, 0.7152, 0.0722));
+				if (luminance > 0.)
+				{
+					float x = log(luminance);
+					float xe = clamp(x, photoCurve.w, photoCurveTop);
+					float f = photoCurve.x + xe*(photoCurve.y + xe*photoCurve.z) + (photoCurve.y + 2.*photoCurve.z*xe)*(x - xe);
+					c.rgb *= exp(f - x);
+				}
+				else
+					c.rgb = vec3(0.);
+			}
+			else if (photoDestretch != 1.)
 			{
 				float luminance = dot(c.rgb, vec3(0.2126, 0.7152, 0.0722));
 				c.rgb *= luminance > 0. ? pow(luminance, photoDestretch - 1.) : 0.;
@@ -402,6 +431,8 @@ void main(void)
 		shaderVars.projectionMatrixInverse = renderProgram->uniformLocation("projectionMatrixInverse");
 		shaderVars.photoMode        = renderProgram->uniformLocation("photoMode");
 		shaderVars.photoDestretch   = renderProgram->uniformLocation("photoDestretch");
+		shaderVars.photoCurve       = renderProgram->uniformLocation("photoCurve");
+		shaderVars.photoCurveTop    = renderProgram->uniformLocation("photoCurveTop");
 		renderProgram->release();
 	}
 	if(!renderProgram || !renderProgram->isLinked())
@@ -421,6 +452,8 @@ void main(void)
 		renderProgram->bind();
 		renderProgram->setUniformValue(shaderVars.photoMode, true);
 		renderProgram->setUniformValue(shaderVars.photoDestretch, photoDestretch);
+		renderProgram->setUniformValue(shaderVars.photoCurve, photoCurve[0], photoCurve[1], photoCurve[2], photoCurve[3]);
+		renderProgram->setUniformValue(shaderVars.photoCurveTop, photoCurveTop);
 		renderProgram->setUniformValue(shaderVars.extinctionEnabled, drawer->getFlagHasAtmosphere() && extinction.getExtinctionCoefficient()>=0.01f);
 		renderProgram->setUniformValue(shaderVars.bortleIntensity, 1.f);
 		const int mainTexSampler = 0;
