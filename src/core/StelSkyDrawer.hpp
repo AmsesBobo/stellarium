@@ -241,6 +241,11 @@ public:
 	//! @param glow false: the disk of a body, trailed and blurred, covering what is behind it. true: light that
 	//! arises in the lens (the halo and the spikes of a bright body), only trailed and added to the scene.
 	bool beginPhotoBodyImage(const Vec3d& posJ2000, float radius, bool glow = false);
+	//! Photographic mode: the apparent motion of the body drawn next against the stars (the change of its unit
+	//! direction per second, J2000 frame), e.g. the Moon, about 0.5 degrees per hour. During the exposure it adds to
+	//! the turn of the sky (a fixed tripod), or makes the only trail (a star tracker follows the stars, not the
+	//! body). Set it before drawing a body (drawPhotoBody(), beginPhotoBodyImage()), and back to zero after.
+	void setPhotoBodyMotion(const Vec3d& motionJ2000) {photoBodyMotion = motionJ2000;}
 	void endPhotoBodyImage();
 	//! Photographic mode: one copy of an extended image (a picture of a nebula) among the copies whose sum is
 	//! what the camera records of it during the exposure (the star trail) and over the blur disk of the lens.
@@ -1211,7 +1216,10 @@ private:
 	{
 		PhotoStarInstance instance;
 		Vec3d posJ2000;
+		Vec3d motion; //!< apparent motion against the stars (see setPhotoBodyMotion())
 	};
+	//! Apparent motion of the body being drawn (see setPhotoBodyMotion())
+	Vec3d photoBodyMotion = Vec3d(0.);
 	std::vector<PhotoDeferredBody> photoDeferredBodies;
 
 	//! Precomputed each frame in update(): total recorded light (linear units) of a magnitude-0 star

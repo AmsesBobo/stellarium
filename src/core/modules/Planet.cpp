@@ -3040,6 +3040,20 @@ void Planet::setHeliocentricEclipticPos(const Vec3d &pos)
 }
 
 // Return heliocentric velocity of planet.
+Vec3d Planet::getApparentMotionJ2000(const StelCore* core) const
+{
+	// Relative position and velocity (AU, AU/day; heliocentric ecliptic J2000). The part of the velocity across
+	// the line of sight, divided by the distance, turns the direction.
+	const Vec3d r = getHeliocentricEclipticPos() - core->getObserverHeliocentricEclipticPos();
+	const Vec3d v = getHeliocentricEclipticVelocity() - core->getObserverHeliocentricEclipticVelocity();
+	const double d = r.norm();
+	if (!(d > 0.))
+		return Vec3d(0.);
+	const Vec3d u = r/d;
+	const Vec3d across = (v - u*(v*u)) / (d*86400.); // rad/s
+	return StelCore::matVsop87ToJ2000.multiplyWithoutTranslation(across);
+}
+
 Vec3d Planet::getHeliocentricEclipticVelocity() const
 {
 	if (parent == Q_NULLPTR)  // the Sun
@@ -4522,6 +4536,18 @@ void Planet::draw3dModel(StelCore* core, StelProjector::ModelViewTranformP trans
 		const double pixPerRad = static_cast<double>(core->getProjection(StelCore::FrameJ2000)->getPixelPerRadAtCenter());
 		photoDiskPixRadius = static_cast<float>(getSpheroidAngularRadius(core)*M_PI_180*pixPerRad);
 		photoDiskFraction = skyDrawer->getPhotoDiskFraction(photoDiskPixRadius);
+	}
+	// Photographic mode: the body moves against the stars during the exposure (the Moon visibly). Its trail and
+	// image use this motion; it is set back to zero whichever way this method returns.
+	struct PhotoMotionScope
+	{
+		StelSkyDrawer* drawer;
+		~PhotoMotionScope() { if (drawer) drawer->setPhotoBodyMotion(Vec3d(0.)); }
+	} photoMotionScope{nullptr};
+	if (photoMode && core->getCurrentPlanet().data() != this)
+	{
+		skyDrawer->setPhotoBodyMotion(getApparentMotionJ2000(core));
+		photoMotionScope.drawer = skyDrawer;
 	}
 
 	if (isSun && currentLocationIsEarth)

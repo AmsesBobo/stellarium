@@ -764,7 +764,9 @@ void LandscapeMgr::draw(StelCore* core)
 
 	// Photographic mode on a star tracker: the camera turns with the sky, so the landscape blurs (its horizon
 	// line and labels are annotations and stay sharp)
-	const bool groundImage = !flagPolyLineDisplayedOnly && drawer->beginPhotoGroundImage();
+	// (only while a landscape shows: the image costs)
+	const bool landscapeShows = landscape->getEffectiveLandFadeValue() > 0.f || (oldLandscape && oldLandscape->getEffectiveLandFadeValue() > 0.f);
+	const bool groundImage = !flagPolyLineDisplayedOnly && landscapeShows && drawer->beginPhotoGroundImage();
 	Landscape::setPhotoGroundCapture(groundImage);
 	if (oldLandscape)
 	{
