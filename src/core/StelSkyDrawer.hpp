@@ -158,6 +158,9 @@ class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 	//! Sensor format (see PhotoSensorFormat): full frame or APS-C. It sets the focal length for the field of view
 	//! (and so the depth of field), and the light the sensor collects for the picture (and so the noise).
 	Q_PROPERTY(int photoSensorFormat READ getPhotoSensorFormat WRITE setPhotoSensorFormat NOTIFY photoSensorFormatChanged)
+	//! Photographic mode: film in the camera instead of the digital sensor (see PhotoFilm; 0 = the digital sensor).
+	//! The film sets the speed, the color balance, the characteristic curve and the grain; it is 35 mm (36 x 24 mm).
+	Q_PROPERTY(int photoFilm READ getPhotoFilm WRITE setPhotoFilm NOTIFY photoFilmChanged)
 	//! Zooming with the mouse wheel steps the focal length in whole millimeters, as marked on a zoom lens
 	Q_PROPERTY(bool flagPhotoZoomWholeMillimeters READ getFlagPhotoZoomWholeMillimeters WRITE setFlagPhotoZoomWholeMillimeters NOTIFY flagPhotoZoomWholeMillimetersChanged)
 	//! The camera is turned for a portrait (upright) picture: the long side of the sensor is vertical
@@ -296,8 +299,8 @@ public:
 	//! Diagonal of the frame of the sensor in the view (pixels)
 	double getPhotoFrameDiagonal(const StelProjector& prj) const;
 	//! The sensor in use: diagonal and pitch of a photosite (m)
-	double getPhotoSensorDiagonal() const {return getPhotoSensorSpec(photoSensorFormat).diagonal;}
-	double getPhotoSensorPitch() const {return getPhotoSensorSpec(photoSensorFormat).pitch;}
+	double getPhotoSensorDiagonal() const {return getPhotoSensorSpec(getPhotoEffectiveSensorFormat()).diagonal;}
+	double getPhotoSensorPitch() const {return getPhotoSensorSpec(getPhotoEffectiveSensorFormat()).pitch;}
 	//! The focal length (m) of a lens that gives the field of view fov (degrees, as StelMovementMgr) on the sensor in use
 	double getPhotoFocalLengthForFov(double fov) const;
 	//! The field of view (degrees, as StelMovementMgr) of a lens of the focal length f (m) on the sensor in use
@@ -350,6 +353,55 @@ public:
 		double aspect; //!< width / height (long side over short side)
 	};
 	static const PhotoSensorSpec& getPhotoSensorSpec(int format);
+	//! Films (the values are stored in the settings: keep them)
+	enum PhotoFilm {
+		PhotoFilmNone = 0,           //!< the digital sensor
+		PhotoFilmProvia100F = 1,     //!< Fujichrome Provia 100F (RDP III), color slide film
+		PhotoFilmProvia400F = 2,     //!< Fujichrome Provia 400F (RHP III), color slide film
+		PhotoFilmEktachromeE200 = 3, //!< Kodak Ektachrome E200 (EPD, as Elite Chrome 200), color slide film
+		PhotoFilmRoyalGold400 = 4,   //!< Kodak Royal Gold 400, color negative film (printed)
+		PhotoFilmTMax400 = 5,        //!< Kodak T-Max 400, black and white negative film (printed)
+		PhotoFilmTriX400 = 6         //!< Kodak Tri-X 400, black and white negative film (printed)
+	};
+	static constexpr int PHOTO_FILM_COUNT = 7;
+	enum PhotoFilmType { PhotoFilmSlide = 0, PhotoFilmNegative = 1, PhotoFilmMonochrome = 2 };
+	//! The data of a film, from the manufacturers' data sheets where they give them
+	struct PhotoFilmSpec
+	{
+		const char* name;
+		const char* shortName;
+		double iso;
+		int type;            //!< PhotoFilmType
+		//! Reciprocity failure: pairs (exposure time, effective time) in seconds, increasing. Up to the first time
+		//! the film follows the reciprocity law; between the points log-log interpolation; after the last point
+		//! the Schwarzschild exponent (the effective time grows as t^p).
+		int points;
+		double time[4];
+		double effective[4];
+		double exponent;
+		//! The color shift of long exposures: the green filter the data sheet asks for at the times of time[]
+		//! (CC density; the film loses green, the picture turns magenta)
+		double green[4];
+		double granularity;  //!< diffuse RMS granularity x 1000 (48 micrometer aperture, density 1 above the base)
+		double gamma;        //!< slope of the characteristic curve of the film (density per log exposure)
+		float toneA;         //!< tone curve of the picture: slope (system gamma), clipping point and middle grey
+		float toneClip;
+		float toneMid;
+		float mono[3];       //!< black and white films: their sensitivity to linear red, green and blue (sum 1)
+	};
+	static const PhotoFilmSpec& getPhotoFilmSpec(int film);
+	//! Whether a film is in use now (photographic mode on)
+	bool getFlagPhotoFilmActive() const {return photoFilm != PhotoFilmNone && getFlagPhotographicModeActive();}
+	//! The exposure time that counts for the film (reciprocity failure), for the exposure time t (seconds)
+	double getPhotoFilmEffectiveTime(double t) const;
+	//! The relative sensitivity of the red, green and blue layers of the film after the exposure time t (seconds)
+	Vec3f getPhotoFilmTint(double t) const;
+	//! Black and white film: the weights of linear red, green and blue (0 otherwise)
+	Vec3f getPhotoFilmMonoWeights() const;
+	//! The tone curve in use: the film's own (PhotoToneFilm with the film's parameters), or photoToneCurve
+	int getPhotoActiveToneCurve() const {return photoFilm != PhotoFilmNone ? static_cast<int>(PhotoToneFilm) : photoToneCurve;}
+	//! The sensor format in use: a film is 35 mm (full frame)
+	int getPhotoEffectiveSensorFormat() const {return photoFilm != PhotoFilmNone ? static_cast<int>(PhotoSensorFullFrame) : photoSensorFormat;}
 	//! Full frame: the reference of the noise model (see PHOTO_SENSOR_PITCH)
 	static constexpr double PHOTO_SENSOR_DIAGONAL = 0.043267;
 	//! Focus: the closest focus distance of the lens (meters)
@@ -751,6 +803,9 @@ public slots:
 	//! is put on the other camera.
 	void setPhotoSensorFormat(int format);
 	int getPhotoSensorFormat() const {return photoSensorFormat;}
+	//! Put a film in the camera (see PhotoFilm), or the digital sensor back (0). The lens stays.
+	void setPhotoFilm(int film);
+	int getPhotoFilm() const {return photoFilm;}
 	//! Zoom the view to the field of a lens of the given focal length (millimeters) on the sensor in use
 	void setPhotoFocalLength(double millimeters);
 	//! Zooming with the mouse wheel in whole millimeters of focal length (see flagPhotoZoomWholeMillimeters)
@@ -789,7 +844,8 @@ public slots:
 	//! Whether the automatic white balance is in use (photographic mode active)
 	bool getFlagPhotoAutoWhiteBalanceActive() const;
 	//! The white balance as a matrix on linear sRGB (light of the chosen color temperature -> display white)
-	const float* getPhotoWhiteBalanceMatrix() const {return photoWBMatrix;}
+	//! (with a film: its fixed daylight balance and the color shift of long exposures)
+	const float* getPhotoWhiteBalanceMatrix() const;
 	//! Scene value where the sensor saturates (for the exposure meter): the clipping point of the tone curve
 	//! before the exposure compensation
 	double getPhotoMeterClipLevel() const;
@@ -1012,6 +1068,7 @@ signals:
 	void photoMountChanged(int mount);
 	void photoNoiseChanged(int mode);
 	void photoSensorFormatChanged(int format);
+	void photoFilmChanged(int film);
 	void flagPhotoZoomWholeMillimetersChanged(bool b);
 	void flagPhotoPortraitChanged(bool b);
 	void flagPhotoFrameMaskChanged(bool b);
@@ -1431,6 +1488,9 @@ private:
 	int photoNoise = PhotoNoiseImage;
 	//! Sensor format
 	int photoSensorFormat = PhotoSensorFullFrame;
+	int photoFilm = PhotoFilmNone;
+	double photoDigitalISO = 1600.;            //!< the ISO of the digital sensor, kept while a film is in use
+	mutable float photoWBMatrixFilm[9] = {1,0,0, 0,1,0, 0,0,1};
 	//! Mouse wheel zoom in whole millimeters of focal length
 	bool flagPhotoZoomWholeMillimeters = false;
 	//! Frame of the sensor: portrait orientation, and the dimming outside it
