@@ -299,6 +299,10 @@ public:
 	//! whole millimeters (flagPhotoZoomWholeMillimeters, in photographic mode): the nearest whole focal length,
 	//! at least one millimeter away in the direction of the zoom. Otherwise @a targetFov.
 	double getPhotoWheelZoomFov(double currentFov, double targetFov) const;
+	//! Write all the settings of the photographic mode to @a conf ("Save settings" of the configuration dialog;
+	//! with immediate saving on, each setter writes its own). While the program mode runs, the aperture and the
+	//! ISO it chose are not saved: the user's are, which it gives back when it stops.
+	void savePhotoSettings(QSettings* conf) const;
 	//! Lens model: the lens is wide open at this f-number (optical vignetting is strongest there)
 	static constexpr float PHOTO_LENS_MAX_APERTURE = 1.4f;
 	//! Optical vignetting: offset of the pupil image against the lens barrel in the corner of the frame,

@@ -29,6 +29,7 @@
 #include "StelApp.hpp"
 #include "StelFileMgr.hpp"
 #include "StelCore.hpp"
+#include "StelSkyDrawer.hpp"
 #include "StelLocaleMgr.hpp"
 #include "StelProjector.hpp"
 #include "StelActionMgr.hpp"
@@ -1133,17 +1134,8 @@ void ConfigurationDialog::saveAllSettings()
         conf->setValue("astro/flag_nebula_magnitude_limit",             propMgr->getStelPropertyValue("StelSkyDrawer.flagNebulaMagnitudeLimit").toBool());
         conf->setValue("astro/nebula_magnitude_limit",                  QString::number(propMgr->getStelPropertyValue("StelSkyDrawer.customNebulaMagLimit").toDouble(), 'f', 2));
         conf->setValue("viewing/use_luminance_adaptation",              propMgr->getStelPropertyValue("StelSkyDrawer.flagLuminanceAdaptation").toBool());
-        conf->setValue("viewing/flag_photographic_mode",                propMgr->getStelPropertyValue("StelSkyDrawer.flagPhotographicMode").toBool());
-        conf->setValue("viewing/photographic_exposure_ev",              propMgr->getStelPropertyValue("StelSkyDrawer.photoExposureEV").toDouble());
-        conf->setValue("viewing/photographic_exposure_time",            propMgr->getStelPropertyValue("StelSkyDrawer.photoExposureTime").toDouble());
-        conf->setValue("viewing/photographic_aperture",                 propMgr->getStelPropertyValue("StelSkyDrawer.photoAperture").toDouble());
-        conf->setValue("viewing/photographic_iso",                      propMgr->getStelPropertyValue("StelSkyDrawer.photoISO").toDouble());
-        conf->setValue("viewing/photographic_psf_min_fwhm",             propMgr->getStelPropertyValue("StelSkyDrawer.photoPsfMinFwhm").toDouble());
-        conf->setValue("viewing/photographic_seeing",                   propMgr->getStelPropertyValue("StelSkyDrawer.photoSeeing").toDouble());
-        conf->setValue("viewing/photographic_halo_strength",            propMgr->getStelPropertyValue("StelSkyDrawer.photoHaloStrength").toDouble());
-        conf->setValue("viewing/photographic_aperture_blades",          propMgr->getStelPropertyValue("StelSkyDrawer.photoApertureBlades").toInt());
-        conf->setValue("viewing/photographic_spike_strength",           propMgr->getStelPropertyValue("StelSkyDrawer.photoSpikeStrength").toDouble());
-        conf->setValue("viewing/flag_photographic_bloom",               propMgr->getStelPropertyValue("StelSkyDrawer.flagPhotoBloom").toBool());
+        // all the settings of the photographic mode (camera, lens, star images)
+        core->getSkyDrawer()->savePhotoSettings(conf);
         conf->setValue("astro/flag_planets",                            propMgr->getStelPropertyValue("SolarSystem.planetsDisplayed").toBool());
         conf->setValue("astro/flag_planets_hints",                      propMgr->getStelPropertyValue("SolarSystem.flagHints").toBool());
         conf->setValue("astro/flag_planets_markers",                    propMgr->getStelPropertyValue("SolarSystem.flagMarkers").toBool());

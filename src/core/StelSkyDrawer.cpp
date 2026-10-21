@@ -3681,6 +3681,45 @@ void StelSkyDrawer::setPhotoDetectionSnr(double snr)
 	emit photoDetectionSnrChanged(static_cast<double>(v));
 }
 
+void StelSkyDrawer::savePhotoSettings(QSettings* conf) const
+{
+	Q_ASSERT(conf);
+	conf->setValue("viewing/flag_photographic_mode", getFlagPhotographicMode());
+	conf->setValue("viewing/photographic_exposure_ev", getPhotoExposureEV());
+	conf->setValue("viewing/photographic_exposure_time", getPhotoExposureTime());
+	conf->setValue("viewing/photographic_aperture", photoProgramRunning ? photoUserAperture : photoAperture);
+	conf->setValue("viewing/photographic_iso", photoProgramRunning ? photoUserISO : photoISO);
+	conf->setValue("viewing/flag_photographic_zoom_whole_millimeters", getFlagPhotoZoomWholeMillimeters());
+	conf->setValue("viewing/flag_photographic_portrait", getFlagPhotoPortrait());
+	conf->setValue("viewing/photographic_eclipse_atmosphere", getPhotoEclipseAtmosphere());
+	conf->setValue("viewing/flag_photographic_frame_mask", getFlagPhotoFrameMask());
+	conf->setValue("viewing/photographic_sensor_format", getPhotoSensorFormat());
+	conf->setValue("viewing/photographic_focus_distance", getPhotoFocusDistance());
+	conf->setValue("viewing/photographic_noise", getPhotoNoise());
+	conf->setValue("viewing/photographic_mount", getPhotoMount());
+	conf->setValue("viewing/flag_photographic_star_trails", getFlagPhotoStarTrails());
+	conf->setValue("viewing/flag_photographic_vignetting", getFlagPhotoVignetting());
+	conf->setValue("viewing/flag_photographic_lens_flare", getFlagPhotoLensFlare());
+	conf->setValue("viewing/photographic_lens_flare_strength", getPhotoLensFlareStrength());
+	conf->setValue("viewing/flag_photographic_aberrations", getFlagPhotoAberrations());
+	conf->setValue("viewing/photographic_aberration_strength", getPhotoAberrationStrength());
+	conf->setValue("viewing/photographic_detection_snr", getPhotoDetectionSnr());
+	conf->setValue("viewing/photographic_white_balance", getPhotoWhiteBalance());
+	conf->setValue("viewing/photographic_white_balance_kelvin", getPhotoWhiteBalanceKelvin());
+	conf->setValue("viewing/flag_photographic_extinction_color", getFlagPhotoExtinctionColor());
+	conf->setValue("viewing/photographic_tone_curve", getPhotoToneCurve());
+	conf->setValue("viewing/photographic_psf_min_fwhm", getPhotoPsfMinFwhm());
+	conf->setValue("viewing/photographic_seeing", getPhotoSeeing());
+	conf->setValue("viewing/photographic_halo_strength", getPhotoHaloStrength());
+	conf->setValue("viewing/photographic_aperture_blades", getPhotoApertureBlades());
+	conf->setValue("viewing/photographic_spike_strength", getPhotoSpikeStrength());
+	conf->setValue("viewing/flag_photographic_bloom", getFlagPhotoBloom());
+	conf->setValue("viewing/flag_photographic_auto_exposure", getFlagPhotoAutoExposure());
+	conf->setValue("viewing/photographic_metering_mode", getPhotoMeteringMode());
+	conf->setValue("viewing/flag_photographic_info_line", getFlagPhotoInfoLine());
+	conf->setValue("viewing/flag_photographic_program_exposure", getFlagPhotoProgramExposure());
+}
+
 // ---- White balance ----
 
 namespace
