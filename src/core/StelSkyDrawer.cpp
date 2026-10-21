@@ -155,6 +155,7 @@ StelSkyDrawer::StelSkyDrawer(StelCore* acore) :
 	photoLensFlareStrength = qBound(0.f, conf->value("viewing/photographic_lens_flare_strength", 1.0).toFloat(), 3.f);
 	setPhotoFocusDistance(conf->value("viewing/photographic_focus_distance", 0.0).toDouble());
 	flagPhotoStarTrails = conf->value("viewing/flag_photographic_star_trails", true).toBool();
+	photoDetectionSnr = qBound(0.f, conf->value("viewing/photographic_detection_snr", 3.0).toFloat(), 20.f);
 	photoMount = qBound(static_cast<int>(PhotoMountTripod), conf->value("viewing/photographic_mount", static_cast<int>(PhotoMountTripod)).toInt(), static_cast<int>(PhotoMountTracker));
 	photoSensorFormat = qBound(0, conf->value("viewing/photographic_sensor_format", static_cast<int>(PhotoSensorFullFrame)).toInt(), PHOTO_SENSOR_FORMAT_COUNT - 1);
 	flagPhotoZoomWholeMillimeters = conf->value("viewing/flag_photographic_zoom_whole_millimeters", false).toBool();
@@ -1108,6 +1109,19 @@ void StelSkyDrawer::update(double)
 		const float nextOnScreen = photoToneCurveInverse(nextDisplay);
 		// A saturated (white) sky hides everything
 		photoVisibleThreshold = (nextOnScreen > skyOnScreen) ? (nextOnScreen - skyOnScreen) / exposure : 1e30f;
+		// The noise of the sky in a pixel of the picture, whether the noise is shown or not: a real sensor
+		// always has it, and a star that does not rise above it is not in the picture. A pixel of the screen
+		// holds several photosites (the view is the whole sensor), which average their noise.
+		{
+			const StelProjectorP prj = core->getProjection(StelCore::FrameJ2000);
+			PhotoNoiseParams noise = getPhotoNoiseParams(*prj);
+			const double diagonal = std::hypot(prj->getViewportWidth(), prj->getViewportHeight());
+			const double pixel = diagonal > 0. ? getPhotoSensorDiagonal()/diagonal : getPhotoSensorPitch();
+			const float sites = static_cast<float>(qMax(1., (pixel*pixel)/(getPhotoSensorPitch()*getPhotoSensorPitch())));
+			const float skyElectrons = photoSkyBackground * noise.white * sites;
+			const float variance = skyElectrons + sites*(noise.read2 + noise.dark);
+			photoNoiseSigma = std::sqrt(qMax(0.f, variance)) / (noise.white * sites);
+		}
 	}
 
 	updatePhotoExtinction();
@@ -1269,7 +1283,15 @@ bool StelSkyDrawer::computePhotoRCMag(float mag, RCMag* rcMag) const
 	const float coreFlux = flux*(1.f-photoHaloFraction-spikeFraction);
 	const float rCore = defocusR > 0.f ? photoDefocusCoreRadius(coreFlux, defocusR)
 	                                   : radiusAtThreshold(coreFlux, photoCoreAlpha, PHOTO_CORE_BETA);
-	if (rCore <= 0.f)
+	// It must also rise above the noise of the sky: signal-to-noise ratio over its image (matched filter: the
+	// noise of the effective area of the PSF, pi alpha^2 (2 beta - 1)/(beta - 1)^2 for a Moffat profile, or of
+	// the blur disk). The faint stars drowned in the noise are not in the picture, and the long lists of them
+	// are not drawn. This limit grows with the focal length (a larger aperture at the same f-number collects
+	// more light of a star, the sky per pixel stays the same) and the exposure, and drops in a bright sky.
+	const float effectiveArea = M_PIf*photoCoreAlpha*photoCoreAlpha*(2.f*PHOTO_CORE_BETA - 1.f)/((PHOTO_CORE_BETA - 1.f)*(PHOTO_CORE_BETA - 1.f))
+	                            + M_PIf*defocusR*defocusR;
+	const bool detected = coreFlux > photoDetectionSnr * photoNoiseSigma * std::sqrt(effectiveArea);
+	if (rCore <= 0.f || !detected)
 	{
 		rcMag->radius = 0.f;
 		rcMag->luminance = 0.f;
