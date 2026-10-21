@@ -52,6 +52,7 @@
 #include "StelHips.hpp"
 #include "RefractionExtinction.hpp"
 #include "StelSkyCultureMgr.hpp"
+#include "LunarEclipseLight.hpp"
 
 #include <limits>
 #include <QByteArray>
@@ -3433,37 +3434,17 @@ float Planet::getVMagnitude(const StelCore* core, double eclipseFactor) const
 					// that is the part of the solar disk seen from the point, with the darkening towards the
 					// solar limb (as in the shader, see photoSunVisible() in planet.frag): seen from the point the
 					// Earth (angular radius (p+u)/2) and the Sun ((p-u)/2) are as far apart as the point from the
-					// shadow axis. In the umbra the light refracted by the Earth's atmosphere, from 1e-5 at the
-					// center to 2e-4 at the edge (as in the shader).
+					// shadow axis. Plus the light of the Earth's atmosphere (see LunarEclipseLight): refracted into
+					// the umbra, a small loss near the limb in the penumbra.
 					const double sunR = 0.5*(p-u), earthR = 0.5*(p+u);
-					auto sunVisible = [sunR, earthR](double sep) -> double
-					{
-						constexpr double limbDarkening = 0.62; // V band
-						constexpr int rings = 24;
-						double total = 0., hidden = 0.;
-						for (int i=0; i<rings; ++i)
-						{
-							const double x = (i+0.5)/rings;
-							const double rho = x*sunR;
-							const double weight = x*(1. - limbDarkening*(1. - std::sqrt(std::max(0., 1.-x*x))));
-							double covered;
-							if (sep <= earthR - rho) covered = 1.;
-							else if (sep >= earthR + rho || rho >= sep + earthR) covered = 0.;
-							else covered = std::acos(std::clamp((rho*rho + sep*sep - earthR*earthR)/(2.*rho*sep), -1., 1.))/M_PI;
-							total += weight;
-							hidden += weight*covered;
-						}
-						return 1. - hidden/total;
-					};
+					double earthAngle, sunAngle;
+					getEclipseRadii(earthAngle, sunAngle);
+					LunarEclipseLight& model = LunarEclipseLight::instance();
+					model.update(earthAngle, sunAngle, core->getSkyDrawer()->getPhotoEclipseAtmosphere());
 					auto light = [&](double sep) -> double
 					{
-						if (sep >= u)
-						{
-							const double direct = sunVisible(sep);
-							return direct + 2.0e-4*(1. - direct);
-						}
-						const double x = sep/u;
-						return std::exp(std::log(1.0e-5) + (std::log(2.0e-4) - std::log(1.0e-5))*x*x);
+						const double direct = LunarEclipseLight::sunVisible(sunR, earthR, sep, 0.62); // V band limb darkening
+						return std::max(0., direct + model.luminance(LunarEclipseLight::coordinate(sep, earthR, sunR)));
 					};
 					// a grid of points over the lunar disk (the Moon is full: all of it is lit)
 					constexpr int n = 7;
@@ -5383,6 +5364,48 @@ void Planet::releaseMoonVAO()
 	}
 }
 
+void Planet::getEclipseRadii(double& earth, double& sun) const
+{
+	earth = sun = 0.;
+	if (!parent || !parent->parent)
+		return;
+	const Vec3d toParent = parent->getHeliocentricEclipticPos() - getHeliocentricEclipticPos();
+	const Vec3d toSun = -getHeliocentricEclipticPos();
+	earth = std::asin(std::min(1., parent->getEquatorialRadius()/toParent.norm()));
+	sun = std::asin(std::min(1., parent->parent->getEquatorialRadius()/toSun.norm()));
+}
+
+void Planet::bindPhotoEclipseLight(QOpenGLShaderProgram& program, int unit) const
+{
+	double earth, sun;
+	getEclipseRadii(earth, sun);
+	LunarEclipseLight& model = LunarEclipseLight::instance();
+	model.update(earth, sun, StelApp::getInstance().getCore()->getSkyDrawer()->getPhotoEclipseAtmosphere());
+	static GLuint texture = 0;
+	static int uploadedVersion = -1;
+	auto& gl = *QOpenGLContext::currentContext()->functions();
+	gl.glActiveTexture(GL_TEXTURE0 + static_cast<GLenum>(unit));
+	if (!texture)
+	{
+		gl.glGenTextures(1, &texture);
+		gl.glBindTexture(GL_TEXTURE_2D, texture);
+		gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	}
+	else
+		gl.glBindTexture(GL_TEXTURE_2D, texture);
+	if (uploadedVersion != model.version())
+	{
+		const auto& values = model.table();
+		gl.glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, LunarEclipseLight::TABLE_SIZE, 1, 0, GL_RGBA, GL_FLOAT, values.data());
+		uploadedVersion = model.version();
+	}
+	gl.glActiveTexture(GL_TEXTURE0);
+	program.setUniformValue("photoUmbraTex", unit);
+}
+
 float Planet::computeEclipsePush() const
 {
 	const SolarSystem* ssm = GETSTELMODULE(SolarSystem);
@@ -5517,6 +5540,8 @@ bool Planet::drawMoon(const StelPainterLight& light, StelPainter& painter)
 		GL(moonShaderProgram->setUniformValue(moonShaderVars.earthShadow, earthShadowTexUnit));
 		const auto push = computeEclipsePush();
 		GL(moonShaderProgram->setUniformValue(moonShaderVars.eclipsePush, push)); // constant for now...
+		if (StelApp::getInstance().getCore()->getSkyDrawer()->getFlagPhotographicModeActive())
+			bindPhotoEclipseLight(*moonShaderProgram, 6);
 	}
 	GL(moonShaderProgram->setUniformValue(moonShaderVars.horizonMap, horizonTexUnit));
 
@@ -5673,6 +5698,8 @@ void Planet::drawSphere(const StelPainterLight& light, StelPainter* painter, flo
 			GL(sphereMoonShaderProgram->setUniformValue(sphereMoonShaderVars.earthShadow, 3));
 			const auto push = computeEclipsePush();
 			GL(sphereMoonShaderProgram->setUniformValue(sphereMoonShaderVars.eclipsePush, push)); // constant for now...
+			if (StelApp::getInstance().getCore()->getSkyDrawer()->getFlagPhotographicModeActive())
+				bindPhotoEclipseLight(*sphereMoonShaderProgram, 6);
 		}
 		GL(horizonMap->bind(4));
 		GL(sphereMoonShaderProgram->setUniformValue(sphereMoonShaderVars.horizonMap, 4));
@@ -5895,6 +5922,8 @@ void Planet::drawSurvey(const StelPainterLight& light, StelCore* core, StelPaint
 			GL(sphereMoonShaderProgram->setUniformValue(sphereMoonShaderVars.earthShadow, 3));
 			const auto push = computeEclipsePush();
 			GL(sphereMoonShaderProgram->setUniformValue(sphereMoonShaderVars.eclipsePush, push)); // constant for now...
+			if (StelApp::getInstance().getCore()->getSkyDrawer()->getFlagPhotographicModeActive())
+				bindPhotoEclipseLight(*sphereMoonShaderProgram, 6);
 		}
 		GL(sphereMoonShaderProgram->setUniformValue(sphereMoonShaderVars.horizonMap, 4));
 	}

@@ -160,6 +160,14 @@ void PhotographicModeDialog::fillComboBoxes()
 		ui->sensorComboBox->addItem(q_("1-inch (13.2 x 8.8 mm)"), StelSkyDrawer::PhotoSensorOneInch);
 	}
 	{
+		const QSignalBlocker blocker(ui->eclipseAtmosphereComboBox);
+		ui->eclipseAtmosphereComboBox->clear();
+		ui->eclipseAtmosphereComboBox->addItem(q_("Clean air (bright)"), 0);
+		ui->eclipseAtmosphereComboBox->addItem(q_("Typical"), 1);
+		ui->eclipseAtmosphereComboBox->addItem(q_("Volcanic aerosols (dark)"), 2);
+		ui->eclipseAtmosphereComboBox->addItem(q_("Major eruption (very dark)"), 3);
+	}
+	{
 		const QSignalBlocker blocker(ui->exposureModeComboBox);
 		ui->exposureModeComboBox->clear();
 		ui->exposureModeComboBox->addItem(q_("Manual (M)"), 0);
@@ -326,6 +334,12 @@ void PhotographicModeDialog::createDialogContent()
 			drawer->setFlagPhotoPortrait(ui->frameOrientationComboBox->itemData(index).toBool());
 	});
 	connect(drawer, &StelSkyDrawer::flagPhotoPortraitChanged,          this, &PhotographicModeDialog::updateCameraWidgets);
+	connect(ui->eclipseAtmosphereComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this, drawer](int index)
+	{
+		if (index >= 0)
+			drawer->setPhotoEclipseAtmosphere(ui->eclipseAtmosphereComboBox->itemData(index).toInt());
+	});
+	connect(drawer, &StelSkyDrawer::photoEclipseAtmosphereChanged,     this, &PhotographicModeDialog::updateCameraWidgets);
 	// Sensor and lens
 	connect(ui->sensorComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this, drawer](int index)
 	{
@@ -440,6 +454,10 @@ void PhotographicModeDialog::updateCameraWidgets()
 	{
 		const QSignalBlocker blocker(ui->frameOrientationComboBox);
 		ui->frameOrientationComboBox->setCurrentIndex(drawer->getFlagPhotoPortrait() ? 1 : 0);
+	}
+	{
+		const QSignalBlocker blocker(ui->eclipseAtmosphereComboBox);
+		ui->eclipseAtmosphereComboBox->setCurrentIndex(qMax(0, ui->eclipseAtmosphereComboBox->findData(drawer->getPhotoEclipseAtmosphere())));
 	}
 	{
 		const QSignalBlocker blocker(ui->mountComboBox);

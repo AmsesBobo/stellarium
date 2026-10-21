@@ -157,6 +157,9 @@ class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 	Q_PROPERTY(bool flagPhotoPortrait READ getFlagPhotoPortrait WRITE setFlagPhotoPortrait NOTIFY flagPhotoPortraitChanged)
 	//! Dim the view outside the frame of the sensor (what the picture holds), like a viewfinder
 	Q_PROPERTY(bool flagPhotoFrameMask READ getFlagPhotoFrameMask WRITE setFlagPhotoFrameMask NOTIFY flagPhotoFrameMaskChanged)
+	//! Lunar eclipses: the state of the Earth's atmosphere that refracts sunlight into its shadow (see
+	//! LunarEclipseLight::Atmosphere): from a bright eclipse (clean air) to a very dark one (after a major eruption)
+	Q_PROPERTY(int photoEclipseAtmosphere READ getPhotoEclipseAtmosphere WRITE setPhotoEclipseAtmosphere NOTIFY photoEclipseAtmosphereChanged)
 	//! The exposure time in use (seconds): the set one, or the one chosen by the automatic exposure.
 	//! The change signal is only emitted when the value shown by a camera (1/3-stop steps) changes.
 	Q_PROPERTY(double photoEffectiveExposureTime READ getPhotoEffectiveExposureTime NOTIFY photoEffectiveExposureTimeChanged)
@@ -743,6 +746,8 @@ public slots:
 	bool getFlagPhotoPortrait() const {return flagPhotoPortrait;}
 	void setFlagPhotoFrameMask(bool b);
 	bool getFlagPhotoFrameMask() const {return flagPhotoFrameMask;}
+	void setPhotoEclipseAtmosphere(int state);
+	int getPhotoEclipseAtmosphere() const {return photoEclipseAtmosphere;}
 	//! Photographic mode: a bright body whose light can be reflected inside the lens (see StelPhotoLensFlare).
 	//! It may lie outside the frame. Collected while drawing, the ghosts are drawn by drawDeferredPhotoBodies().
 	//! @param v position (J2000 frame), @param mag magnitude (with extinction and landscape), @param color display color
@@ -977,6 +982,7 @@ signals:
 	void flagPhotoZoomWholeMillimetersChanged(bool b);
 	void flagPhotoPortraitChanged(bool b);
 	void flagPhotoFrameMaskChanged(bool b);
+	void photoEclipseAtmosphereChanged(int state);
 	void photoAberrationStrengthChanged(double s);
 	void photoDetectionSnrChanged(double snr);
 	void photoEffectiveExposureTimeChanged(double seconds);
@@ -1395,6 +1401,8 @@ private:
 	//! Frame of the sensor: portrait orientation, and the dimming outside it
 	bool flagPhotoPortrait = false;
 	bool flagPhotoFrameMask = true;
+	//! State of the Earth's atmosphere for lunar eclipses (LunarEclipseLight::Atmosphere)
+	int photoEclipseAtmosphere = 1;
 	//! Measuring the mean of textures (see photoTextureMeanLuminance())
 	std::unique_ptr<class QOpenGLShaderProgram> photoTextureMeanProgram;
 	std::unique_ptr<class QOpenGLFramebufferObject> photoTextureMeanFbo;

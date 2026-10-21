@@ -720,6 +720,20 @@
             </property>
            </widget>
           </item>
+          <item row="6" column="0">
+           <widget class="QLabel" name="eclipseAtmosphereLabel">
+            <property name="text">
+             <string>Lunar eclipses:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="6" column="1">
+           <widget class="QComboBox" name="eclipseAtmosphereComboBox">
+            <property name="toolTip">
+             <string>In the shadow of the Earth the Moon is lit by sunlight that the Earth's atmosphere bends into the shadow, reddened on its long way through the air, with a turquoise band from ozone at the edge of the umbra. How bright and how red the totality is depends on the state of the atmosphere: aerosols in the stratosphere (after volcanic eruptions) and clouds take light away. Clean air gives a bright orange totality (Danjon L about 3 to 4), a typical one copper red (L about 2); after volcanic eruptions it is dark red (L about 1), after a major eruption such as Pinatubo 1991 the Moon nearly disappears (L about 0).</string>
+            </property>
+           </widget>
+          </item>
          </layout>
         </widget>
        </item>

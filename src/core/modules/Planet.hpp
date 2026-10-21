@@ -804,6 +804,11 @@ protected:
 	void drawHints(const StelCore* core, StelPainter &sPainter, const QFont& planetNameFont);
 
 	float computeEclipsePush() const;
+	//! Lunar eclipse, photographic mode: the light that the Earth's atmosphere refracts into its shadow (see
+	//! LunarEclipseLight), updated for the current distances; bound as a texture to the given unit for the shader
+	void bindPhotoEclipseLight(class QOpenGLShaderProgram& program, int unit) const;
+	//! The angular radii of the Earth and of the Sun seen from this body (radians), for LunarEclipseLight
+	void getEclipseRadii(double& earth, double& sun) const;
 
 	PlanetOBJModel* loadObjModel() const;
 

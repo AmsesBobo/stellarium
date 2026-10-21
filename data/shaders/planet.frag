@@ -72,43 +72,46 @@ uniform highp vec3 lightDirection;
 #ifdef IS_MOON
     uniform sampler2D earthShadow;
     uniform mediump float eclipsePush;
+    // Photographic mode: the light of the Earth's atmosphere in its shadow (see LunarEclipseLight), linear RGB
+    // relative to sunlight, over the coordinate t: 0.5 d/(r-R) in the umbra, from 0.5 at its edge to 1 at the
+    // outer edge of the penumbra (see photoShadowCoordinate())
+    uniform sampler2D photoUmbraTex;
 
-    // Photographic mode: the light that reaches the Moon in the Earth's shadow, relative to full sunlight.
-    // shadowPos is the coordinate of the shadow texture: 0 at the center of the umbra, 0.594 at its edge,
-    // 1 at the outer edge of the penumbra.
-    // Penumbra: the visible part of the solar disk. Umbra: only light refracted by the Earth's atmosphere,
-    // about 1e-5 at the center and 2e-4 at the edge (10 to 12 magnitudes, as in Planet::getVMagnitude()),
-    // with the color of the shadow texture (copper red, the turquoise band of ozone at the edge).
-    // In the penumbra the direct light is the visible part of the solar disk (sunVisible, see photoSunVisible()).
-    highp vec3 photoEclipseLight(highp float shadowPos, highp vec3 sunVisible)
+    // Photographic mode: the coordinate of photoUmbraTex for the distance d from the center of the shadow, with
+    // the radii of the Earth (r) and the Sun (R) seen from this point. The edge of the umbra is always at 0.5, so
+    // the direct light (photoSunVisible()) and the light of the atmosphere meet exactly there.
+    highp float photoShadowCoordinate(highp float R, highp float r, highp float d)
     {
-        const highp float UMBRA_EDGE = 0.594;
-        const highp float REFRACTED_CENTER = 1.0e-5;
-        const highp float REFRACTED_EDGE = 2.0e-4;
-        highp vec3 tint = srgbToLinear(texture2D(earthShadow, vec2(min(shadowPos, UMBRA_EDGE), 0.5)).rgb);
-        highp float Y = dot(tint, vec3(0.2126, 0.7152, 0.0722));
-        tint = Y > 0. ? tint / Y : vec3(1.);
-        if (shadowPos < UMBRA_EDGE)
-        {
-            highp float u = shadowPos / UMBRA_EDGE;
-            return exp(mix(log(REFRACTED_CENTER), log(REFRACTED_EDGE), u*u)) * tint;
-        }
-        highp float direct = dot(sunVisible, vec3(0.2126, 0.7152, 0.0722));
-        return sunVisible + REFRACTED_EDGE * (1. - direct) * tint;
+        if (d <= r - R)
+            return 0.5 * d / (r - R);
+        return min(1., 0.5 + 0.25 * (d - r + R) / R);
+    }
+    // Photographic mode: the light that reaches the Moon in the Earth's shadow, relative to full sunlight.
+    // The direct light is the visible part of the solar disk (sunVisible, see photoSunVisible(); 0 in the umbra),
+    // the rest comes from the atmosphere: sunlight refracted into the shadow, computed by LunarEclipseLight from the
+    // refraction and the transmission of the grazing paths (copper red, the turquoise band of ozone at the edge
+    // of the umbra); in the penumbra it is the small loss near the Earth's limb.
+    highp vec3 photoEclipseLight(highp float t, highp vec3 sunVisible)
+    {
+        const highp float N = 257.; // LunarEclipseLight::TABLE_SIZE
+        highp vec3 atmosphere = texture2D(photoUmbraTex, vec2((clamp(t, 0., 1.)*(N - 1.) + 0.5)/N, 0.5)).rgb;
+        return max(sunVisible + atmosphere, vec3(0.));
     }
     // The part of the light of the Sun (angular radius R) that is not hidden by the Earth (angular radius r, its
     // center at the distance d from the Sun's): integrated over rings of the solar disk with the darkening towards
     // its limb, I = 1 - u (1 - mu), stronger in blue (u for red, green, blue). Near the umbra the light comes from
     // the solar limb only: it is fainter, and a little redder, than the visible area alone would give.
+    // The rings span only the radii that can be visible (those inside r - d are hidden), so it is accurate also
+    // close to the edge of the umbra (as LunarEclipseLight::sunVisible()).
     highp vec3 photoSunVisible(highp float R, highp float r, highp float d)
     {
         const highp vec3 limbDarkening = vec3(0.52, 0.62, 0.75);
         const int RINGS = 24;
-        highp vec3 total = vec3(0.);
-        highp vec3 hidden = vec3(0.);
+        highp float x0 = clamp((r - d) / R, 0., 1.);
+        highp vec3 visible = vec3(0.);
         for (int i = 0; i < RINGS; ++i)
         {
-            highp float x = (float(i) + 0.5) / float(RINGS);   // radius of the ring / R
+            highp float x = x0 + (1. - x0) * (float(i) + 0.5) / float(RINGS);   // radius of the ring / R
             highp float rho = x * R;
             highp float mu = sqrt(max(0., 1. - x*x));
             highp vec3 weight = x * (vec3(1.) - limbDarkening * (1. - mu));
@@ -120,10 +123,10 @@ uniform highp vec3 lightDirection;
                 covered = 0.;
             else
                 covered = acos(clamp((rho*rho + d*d - r*r) / (2.*rho*d), -1., 1.)) / 3.14159265358979;
-            total += weight;
-            hidden += weight * covered;
+            visible += weight * (1. - covered);
         }
-        return vec3(1.) - hidden / total;
+        // relative to the whole disk: the integral of x (1 - u (1 - mu)) from 0 to 1 is 1/2 - u/6
+        return visible * (1. - x0) / float(RINGS) / (vec3(0.5) - limbDarkening / 6.);
     }
     uniform sampler2D normalMap;
     uniform sampler2D horizonMap;
@@ -270,6 +273,7 @@ void main()
     mediump float final_illumination = 1.0;
 #ifdef IS_MOON
     highp vec3 photoSunFraction = vec3(1.0); // photographic mode: visible part of the solar disk (see photoSunVisible())
+    highp float photoShadowX = 2.0;          // photographic mode: coordinate in the shadow of the Earth (see photoShadowCoordinate())
 #endif
 #ifdef OREN_NAYAR
     mediump float lum = 1.;
@@ -330,6 +334,11 @@ void main()
                 {
 #ifdef IS_MOON
                     illumination = (d / (r - R)) * 0.594; // prepare texture coordinate. 0.6=umbra edge. Smaller number->larger shadow.
+                    if (photoMode)
+                    {
+                        photoSunFraction = vec3(0.);
+                        photoShadowX = min(photoShadowX, photoShadowCoordinate(R, r, d));
+                    }
 #else
                     illumination = 0.0;
 #endif
@@ -345,7 +354,10 @@ void main()
                     //illumination = ((d - abs(R-r)) / (R + r - abs(R-r))) * 0.4 + 0.6;
                     illumination = ((d - r + R) / (2.0 * R )) * 0.406 + 0.594;
                     if (photoMode)
+                    {
                         photoSunFraction = min(photoSunFraction, photoSunVisible(R, r, d));
+                        photoShadowX = min(photoShadowX, photoShadowCoordinate(R, r, d));
+                    }
 #else
                     mediump float x = (R * R + d * d - r * r) / (2.0 * d);
                     mediump float alpha = acos(x / R);
@@ -489,7 +501,7 @@ void main()
     highp vec3 eclipseLight = vec3(final_illumination);
 #ifdef IS_MOON
     if (photoMode && final_illumination < 0.9999)
-        eclipseLight = photoEclipseLight(final_illumination, photoSunFraction);
+        eclipseLight = photoEclipseLight(photoShadowX, photoSunFraction);
 #endif
     highp vec4 litColor = vec4(lum * eclipseLight * diffuseLight + ambientLight, 1.0);
 
