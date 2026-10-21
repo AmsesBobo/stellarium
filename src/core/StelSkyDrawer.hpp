@@ -808,6 +808,10 @@ public slots:
 	//! The airglow at the zenith above the atmosphere, in linear RGB of the scene buffer (photographic mode, on the
 	//! Earth, with the airglow on; otherwise 0). The brightness follows the solar cycle as in Skybright (Schaefer).
 	Vec3f getPhotoAirglow() const;
+	//! The luminance of the airglow at the zenith as observed (cd/m^2; 0 when it is not drawn). The light pollution
+	//! setting of Stellarium is the whole brightness of the night sky (a Bortle 1 sky is natural): the atmosphere
+	//! models draw only the part above this as artificial light, so that the natural sky is not counted twice.
+	double getPhotoAirglowZenithLuminance() const;
 	//! The extinction of the airglow per airmass in red, green and blue (magnitudes; the green one is the
 	//! extinction coefficient)
 	Vec3f getPhotoAirglowExtinction() const;

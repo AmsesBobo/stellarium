@@ -3979,25 +3979,33 @@ void StelSkyDrawer::setPhotoAirglowStrength(double strength)
 	emit photoAirglowStrengthChanged(static_cast<double>(v));
 }
 
-Vec3f StelSkyDrawer::getPhotoAirglow() const
+double StelSkyDrawer::getPhotoAirglowZenithLuminance() const
 {
 	if (!flagPhotoAirglow || !getFlagPhotographicModeActive() || !getFlagHasAtmosphere()
 	    || core->getCurrentLocation().planetName != QStringLiteral("Earth"))
-		return Vec3f(0.f);
+		return 0.;
 	// The solar cycle, as in Skybright (Schaefer 1998): brightest near the maxima (1990, 2001, 2012...)
 	int year, month, day;
 	StelUtils::getDateFromJulianDay(core->getJD(), &year, &month, &day);
 	const double y = year + (month - 0.5)/12.;
 	const double cycle = 1. + 0.3*std::cos(0.57118*(y - 1992.));
-	// Surface brightness to luminance: L [cd/m^2] = 10.8e4 x 10^(-0.4 mag/arcsec^2); observed at the zenith,
-	// so above the atmosphere it is brighter by the extinction of one airmass
 	// The surface brightness at the zenith (V, magnitudes per square arc second, as observed through the atmosphere)
 	// at a mean solar activity; the cycle changes it by +-30% (about +-0.3 mag), and it varies from night to night
 	// (photoAirglowStrength). The whole dark sky is about 21.9-22.0 at the best sites: the airglow, plus the
 	// zodiacal light and the starlight that Stellarium draws by themselves.
+	// Surface brightness to luminance: L [cd/m^2] = 10.8e4 x 10^(-0.4 mag/arcsec^2)
 	constexpr double zenithMagnitude = 22.5;
+	return 10.8e4*std::pow(10., -0.4*zenithMagnitude)*cycle*static_cast<double>(photoAirglowStrength);
+}
+
+Vec3f StelSkyDrawer::getPhotoAirglow() const
+{
+	const double zenith = getPhotoAirglowZenithLuminance();
+	if (!(zenith > 0.))
+		return Vec3f(0.f);
+	// Observed at the zenith, so above the atmosphere it is brighter by the extinction of one airmass
 	const double k = static_cast<double>(extinction.getExtinctionCoefficient());
-	const double luminance = 10.8e4*std::pow(10., -0.4*zenithMagnitude)*cycle*static_cast<double>(photoAirglowStrength)*std::pow(10., 0.4*k);
+	const double luminance = zenith*std::pow(10., 0.4*k);
 	// The color: the night sky at dark observatories is much redder than sunlight (B-V about 0.95, V-R about 0.8,
 	// against 0.65 and 0.36 for the Sun; Benn & Ellison 1998, Patat 2003): the green line of oxygen (558 nm),
 	// sodium (589 nm), the red oxygen lines (630 nm) and the OH bands. As linear sRGB against white sunlight

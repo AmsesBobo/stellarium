@@ -205,6 +205,16 @@ vec3 calcViewDir()
 
 void AtmosphereShowMySky::loadShaders()
 {
+	const auto& core = StelApp::getInstance().getCore();
+	const auto projector = core->getProjection(StelCore::FrameAltAz, StelCore::RefractionOff);
+	compileLuminanceToScreenProgram(*projector);
+	const auto shaderSources = getViewDirShaderSources(*projector);
+	renderer_->initDataLoading(shaderSources.first, shaderSources.second,
+	                           {std::pair<std::string,GLuint>{"vertex", SKY_VERTEX_ATTRIB_INDEX}});
+}
+
+void AtmosphereShowMySky::compileLuminanceToScreenProgram(const StelProjector& projector)
+{
 	const auto handleCompileStatus=[](bool success, QOpenGLShader const& shader, const char* what)
 	{
 		if(!success)
@@ -218,64 +228,87 @@ void AtmosphereShowMySky::loadShaders()
 		}
 	};
 
-	// Shader program that converts XYZW texture to sRGB image
-	{
-		static constexpr char vShaderSrc[]=R"(
+	// Shader program that converts XYZW texture to sRGB image. In the photographic mode it adds the airglow,
+	// which needs the view direction of each pixel: the program depends on the projection.
+	static constexpr char vShaderSrc[]=R"(
 #version 330
 in vec4 vertex;
 out vec2 texCoord;
+out vec2 ndcXY;
 void main()
 {
 	gl_Position=vertex;
 	texCoord=vertex.xy*0.5+0.5;
+	ndcXY=vertex.xy;
 }
 )";
-		static constexpr char fShaderSrc[]=R"(
-#version 330
+	const QByteArray fShaderSrc = "#version 330\n" + projector.getUnProjectShader() + R"(
 
 uniform sampler2D luminanceXYZW;
+uniform mat4 projectionMatrixInverse;
+uniform bool photoMode;
 
 in vec2 texCoord;
+in vec2 ndcXY;
 out vec4 color;
 
 vec3 xyYToRGB(float x, float y, float Y);
+vec3 photoAirglowLight(float sinElev);
+vec3 linearColorToFramebuffer(vec3 c);
 
 void main()
 {
 	vec3 XYZ=texture(luminanceXYZW, texCoord).xyz;
 	vec3 srgb=xyYToRGB(XYZ.x/(XYZ.x+XYZ.y+XYZ.z), XYZ.y/(XYZ.x+XYZ.y+XYZ.z), XYZ.y);
+	if (photoMode)
+	{
+		// The airglow (the models hold the scattered light of the Sun, the Moon and the light pollution)
+		vec4 winPos = projectionMatrixInverse * vec4(ndcXY, 0., 1.);
+		bool ok = false;
+		vec3 viewDir = normalize(unProject(winPos.x, winPos.y, ok).xyz);
+		srgb += linearColorToFramebuffer(photoAirglowLight(viewDir.z));
+	}
 	color=vec4(srgb,1);
 }
 )";
 
-		QOpenGLShader vShader(QOpenGLShader::Vertex);
-		handleCompileStatus(vShader.compileSourceCode(vShaderSrc), vShader,
-		                    "ShowMySky atmosphere luminance-to-screen vertex shader");
-		luminanceToScreenProgram_->addShader(&vShader);
+	luminanceToScreenProgram_.reset(new QOpenGLShaderProgram());
 
-		QOpenGLShader toneReproducerShader(QOpenGLShader::Fragment);
-		auto xyYToRGBFile = QFile(":/shaders/xyYToRGB.glsl");
-		if(!xyYToRGBFile.open(QFile::ReadOnly))
-			throw InitFailure("Failed to open atmosphere tone reproducer fragment shader file");
-		const auto xyYToRGBShader = xyYToRGBFile.readAll();
-		const auto fPrefix = StelOpenGL::globalShaderPrefix(StelOpenGL::FRAGMENT_SHADER);
-		handleCompileStatus(toneReproducerShader.compileSourceCode(fPrefix + makeSRGBUtilsShader() + xyYToRGBShader),
-		                    toneReproducerShader, "ShowMySky atmosphere tone reproducer fragment shader");
-		luminanceToScreenProgram_->addShader(&toneReproducerShader);
+	QOpenGLShader vShader(QOpenGLShader::Vertex);
+	handleCompileStatus(vShader.compileSourceCode(vShaderSrc), vShader,
+	                    "ShowMySky atmosphere luminance-to-screen vertex shader");
+	luminanceToScreenProgram_->addShader(&vShader);
 
-		QOpenGLShader luminanceToScreenShader(QOpenGLShader::Fragment);
-		handleCompileStatus(luminanceToScreenShader.compileSourceCode(fShaderSrc), luminanceToScreenShader,
-		                    "ShowMySky atmosphere luminance-to-screen fragment shader");
-		luminanceToScreenProgram_->addShader(&luminanceToScreenShader);
+	QOpenGLShader toneReproducerShader(QOpenGLShader::Fragment);
+	auto xyYToRGBFile = QFile(":/shaders/xyYToRGB.glsl");
+	if(!xyYToRGBFile.open(QFile::ReadOnly))
+		throw InitFailure("Failed to open atmosphere tone reproducer fragment shader file");
+	const auto xyYToRGBShader = xyYToRGBFile.readAll();
+	const auto fPrefix = StelOpenGL::globalShaderPrefix(StelOpenGL::FRAGMENT_SHADER);
+	handleCompileStatus(toneReproducerShader.compileSourceCode(fPrefix + makeSRGBUtilsShader() + xyYToRGBShader),
+	                    toneReproducerShader, "ShowMySky atmosphere tone reproducer fragment shader");
+	luminanceToScreenProgram_->addShader(&toneReproducerShader);
 
-		if(!StelPainter::linkProg(luminanceToScreenProgram_.get(), "atmosphere luminance-to-screen"))
-			throw InitFailure("Shader program linking failed");
-	}
-	const auto& core = StelApp::getInstance().getCore();
-	const auto projector = core->getProjection(StelCore::FrameAltAz, StelCore::RefractionOff);
-	const auto shaderSources = getViewDirShaderSources(*projector);
-	renderer_->initDataLoading(shaderSources.first, shaderSources.second,
-	                           {std::pair<std::string,GLuint>{"vertex", SKY_VERTEX_ATTRIB_INDEX}});
+	QOpenGLShader luminanceToScreenShader(QOpenGLShader::Fragment);
+	handleCompileStatus(luminanceToScreenShader.compileSourceCode(fShaderSrc), luminanceToScreenShader,
+	                    "ShowMySky atmosphere luminance-to-screen fragment shader");
+	luminanceToScreenProgram_->addShader(&luminanceToScreenShader);
+
+	if(!StelPainter::linkProg(luminanceToScreenProgram_.get(), "atmosphere luminance-to-screen"))
+		throw InitFailure("Shader program linking failed");
+
+	auto& prog=*luminanceToScreenProgram_;
+	prog.bind();
+	shaderAttribLocations.doSRGB                 = prog.uniformLocation("doSRGB");
+	shaderAttribLocations.oneOverGamma           = prog.uniformLocation("oneOverGamma");
+	shaderAttribLocations.brightnessScale        = prog.uniformLocation("brightnessScale");
+	shaderAttribLocations.luminanceTexture       = prog.uniformLocation("luminanceXYZW");
+	shaderAttribLocations.alphaWaOverAlphaDa     = prog.uniformLocation("alphaWaOverAlphaDa");
+	shaderAttribLocations.term2TimesOneOverMaxdL = prog.uniformLocation("term2TimesOneOverMaxdL");
+	shaderAttribLocations.term2TimesOneOverMaxdLpOneOverGamma
+	                                             = prog.uniformLocation("term2TimesOneOverMaxdLpOneOverGamma");
+	shaderAttribLocations.flagUseTmGamma         = prog.uniformLocation("flagUseTmGamma");
+	prog.release();
 }
 
 void AtmosphereShowMySky::resizeRenderTarget(int width, int height)
@@ -417,22 +450,6 @@ AtmosphereShowMySky::AtmosphereShowMySky(const double initialAltitude)
 	catch(ShowMySky::Error const& error)
 	{
 		throw InitFailure(error.what());
-	}
-	{
-		auto& prog=*luminanceToScreenProgram_;
-		prog.bind();
-
-		shaderAttribLocations.doSRGB                 = prog.uniformLocation("doSRGB");
-		shaderAttribLocations.oneOverGamma           = prog.uniformLocation("oneOverGamma");
-		shaderAttribLocations.brightnessScale        = prog.uniformLocation("brightnessScale");
-		shaderAttribLocations.luminanceTexture       = prog.uniformLocation("luminanceXYZW");
-		shaderAttribLocations.alphaWaOverAlphaDa     = prog.uniformLocation("alphaWaOverAlphaDa");
-		shaderAttribLocations.term2TimesOneOverMaxdL = prog.uniformLocation("term2TimesOneOverMaxdL");
-		shaderAttribLocations.term2TimesOneOverMaxdLpOneOverGamma
-		                                             = prog.uniformLocation("term2TimesOneOverMaxdLpOneOverGamma");
-		shaderAttribLocations.flagUseTmGamma         = prog.uniformLocation("flagUseTmGamma");
-
-		prog.release();
 	}
 }
 
@@ -661,6 +678,7 @@ void AtmosphereShowMySky::computeColor(StelCore* core, const double JD, const Pl
 			const auto shaderSources = getViewDirShaderSources(*prj);
 			renderer_->setViewDirShaders(shaderSources.first, shaderSources.second,
 			                             {std::pair<std::string,GLuint>{"vertex", SKY_VERTEX_ATTRIB_INDEX}});
+			compileLuminanceToScreenProgram(*prj);
 			prevProjector_ = prj;
 		}
 
@@ -734,7 +752,11 @@ void AtmosphereShowMySky::computeColor(StelCore* core, const double JD, const Pl
 		const auto moonAzimuth = std::atan2(moonDir[1], moonDir[0]);
 		const auto moonZenithAngle = std::acos(moonDir[2]);
 
-		const auto lightPollutionRelativeBrightness = fader.getInterstate() * lightPollutionLuminance / lightPollutionUnitLuminance_;
+		// Photographic mode with the airglow: the light pollution setting is the whole night sky, of which the
+		// airglow is the natural part (see StelSkyDrawer::getPhotoAirglowZenithLuminance())
+		const float naturalLuminance = static_cast<float>(core->getSkyDrawer()->getPhotoAirglowZenithLuminance());
+		const float artificialLuminance = std::max(0.f, lightPollutionLuminance - naturalLuminance);
+		const auto lightPollutionRelativeBrightness = fader.getInterstate() * artificialLuminance / lightPollutionUnitLuminance_;
 		const auto airglowRelativeBrightness = 1.f;
 		const auto sunRelativeBrightness = noScatter ? 0.f : 1.f;
 		drawAtmosphere(prj->getProjectionMatrix(), sunAzimuth, sunZenithAngle, sunAngularRadius, moonAzimuth, moonZenithAngle, earthMoonDistance,
@@ -792,6 +814,14 @@ void AtmosphereShowMySky::draw(StelCore* core)
 		const StelSkyDrawer* skyDrawer = core->getSkyDrawer();
 		GL(luminanceToScreenProgram_->setUniformValue("photoMode", skyDrawer->getFlagPhotographicModeActive()));
 		GL(luminanceToScreenProgram_->setUniformValue("photoScale", skyDrawer->getPhotoSceneScale()));
+		// The airglow, and the view direction of each pixel for it
+		const Vec3f airglow = skyDrawer->getPhotoAirglow();
+		const Vec3f k = skyDrawer->getPhotoAirglowExtinction();
+		GL(luminanceToScreenProgram_->setUniformValue("photoAirglow", airglow[0], airglow[1], airglow[2]));
+		GL(luminanceToScreenProgram_->setUniformValue("photoAirglowExtinction", k[0], k[1], k[2]));
+		const auto prj = core->getProjection(StelCore::FrameAltAz, StelCore::RefractionOff);
+		prj->setUnProjectUniforms(*luminanceToScreenProgram_);
+		GL(luminanceToScreenProgram_->setUniformValue("projectionMatrixInverse", prj->getProjectionMatrix().toQMatrix().inverted()));
 	}
 
 	StelPainter sPainter(core->getProjection2d());
