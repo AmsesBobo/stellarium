@@ -3892,13 +3892,52 @@ highp vec3 photoExtinctionTint(highp float sinAltitude)
 QByteArray StelSkyDrawer::getPhotoSkyTrailShader()
 {
 	return QByteArray(R"(
-uniform int photoSkyTrailSamples;      // 1: no trail
-uniform highp vec3 photoSkyTrailAxis;  // rotation axis of the sky (model frame)
-uniform highp float photoSkyTrailAngle; // angle the sky turns during the exposure (radians)
-// The direction seen at sample i of the exposure (centered on the current time) by the pixel looking at dir now
-highp vec3 photoSkyTrailDirection(highp vec3 dir, int i)
+uniform int photoSkyTrailSamples;        // number of samples (1: neither trail nor blur)
+uniform highp vec3 photoSkyTrailAxis;    // rotation axis of the sky (model frame)
+uniform highp float photoSkyTrailAngle;  // angle the sky turns during the exposure (radians), 0: no trail
+uniform highp float photoSkyDefocus;     // signed radius of the blur disk of the lens (pixels), 0: sharp
+uniform highp float photoSkyDefocusSA;   // spherical aberration: brightness change across the blur disk
+uniform int photoSkyBlades;              // 0: round aperture
+uniform highp float photoSkyStraightness;
+uniform highp float photoSkyBladeRotation;
+uniform highp float photoSkyLodBias;     // the samples lie apart: they read a correspondingly smoothed texture
+// (texture2D is a macro with two arguments in Stellarium's shader prefix: the version with the bias)
+#if __VERSION__ >= 130
+#define PHOTO_SKY_TEXTURE(sampler, uv) texture(sampler, uv, photoSkyLodBias)
+#else
+#define PHOTO_SKY_TEXTURE(sampler, uv) texture2D(sampler, uv, photoSkyLodBias)
+#endif
+// Sample i of the exposure and of the blur disk of a defocused lens: the offset (window coordinates) of the
+// point whose light the lens spreads onto this pixel and its weight (xyz), and the turn of the sky at its time (w)
+highp vec4 photoSkySample(int i)
 {
-	highp float a = photoSkyTrailAngle*((float(i) + 0.5)/float(photoSkyTrailSamples) - 0.5);
+	highp float n = float(photoSkyTrailSamples);
+	highp float fi = float(i) + 0.5;
+	// Time along the exposure: in order for a pure trail, else well spread over the disk (golden ratio)
+	highp float t = photoSkyDefocus != 0. ? fract(fi*0.6180339887) : fi/n;
+	highp vec2 offset = vec2(0.);
+	highp float w = 1.;
+	if (photoSkyDefocus != 0.)
+	{
+		// A point of the image of the aperture (golden-angle spiral, even density)
+		highp float rr = sqrt(fi/n);
+		highp float a = float(i)*2.39996323;
+		highp float scale = 1.;
+		if (photoSkyBlades >= 3 && photoSkyStraightness > 0.)
+		{
+			highp float nb = float(photoSkyBlades);
+			highp float sector = 6.28318530718/nb;
+			highp float d = mod(a - photoSkyBladeRotation, sector) - 0.5*sector;
+			scale = 1. / mix(1., cos(d)/cos(3.14159265359/nb), photoSkyStraightness);
+		}
+		offset = (photoSkyDefocus > 0. ? -1. : 1.) * abs(photoSkyDefocus) * rr * scale * vec2(cos(a), sin(a));
+		w = max(0., 1. + photoSkyDefocusSA*(rr*rr - 0.5));
+	}
+	return vec4(offset, w, photoSkyTrailAngle*(t - 0.5));
+}
+// The direction dir turned by the angle a around the rotation axis of the sky
+highp vec3 photoSkyTurn(highp vec3 dir, highp float a)
+{
 	highp float c = cos(a), s = sin(a);
 	return dir*c + cross(photoSkyTrailAxis, dir)*s + photoSkyTrailAxis*(dot(photoSkyTrailAxis, dir)*(1. - c));
 }
@@ -3907,9 +3946,14 @@ highp vec3 photoSkyTrailDirection(highp vec3 dir, int i)
 
 void StelSkyDrawer::setPhotoSkyTrailUniforms(QOpenGLShaderProgram& program, const StelProjector::ModelViewTranformP& modelView, double texturePixelsPerRad) const
 {
-	int samples = 1;
+	const bool photo = getFlagPhotographicModeActive();
+	const double pixelPerRad = static_cast<double>(core->getProjection(StelCore::FrameJ2000)->getPixelPerRadAtCenter());
+	// Detail finer than half a texel is not in the texture: the samples need not be closer
+	const double detail = qMin(1., 2.*texturePixelsPerRad/qMax(1e-9, pixelPerRad));
+	// The trail: the longest (on the celestial equator) decides, about one sample per screen pixel
+	double length = 0.;
 	Vec3d axis(0., 0., 1.);
-	if (photoTrailsActive && getFlagPhotographicModeActive())
+	if (photoTrailsActive && photo)
 	{
 		// The axis from the view frame to the frame of the texture (the inverse of the rotation; refraction
 		// does not turn the sky)
@@ -3917,18 +3961,35 @@ void StelSkyDrawer::setPhotoSkyTrailUniforms(QOpenGLShaderProgram& program, cons
 		if (axis.normSquared() > 0.)
 		{
 			axis.normalize();
-			// Samples about one screen pixel apart, but no closer than half a texel: the longest trail
-			// (on the celestial equator) decides
-			const double pixelPerRad = static_cast<double>(core->getProjection(StelCore::FrameJ2000)->getPixelPerRadAtCenter());
-			const double length = photoTrailAngle * qMin(pixelPerRad, 2.*texturePixelsPerRad);
-			samples = qBound(1, static_cast<int>(std::ceil(length)), 128);
+			length = photoTrailAngle * pixelPerRad * detail;
 		}
 		else
 			axis.set(0., 0., 1.);
 	}
+	// The blur disk of a defocused lens: about one sample per two square pixels (as for the nebula images)
+	float defocus = photo ? photoLensCache.defocus : 0.f;
+	const double R = std::fabs(static_cast<double>(defocus));
+	const double Rdetail = R * detail;
+	if (Rdetail < 0.5)
+		defocus = 0.f;
+	const double area = defocus != 0.f ? 0.5*M_PI*Rdetail*Rdetail : 0.;
+	const int samples = qBound(1, static_cast<int>(std::ceil(length + area)), 128);
+	if (samples <= 1)
+		defocus = 0.f;
+	// How much of the screen the samples cover, per sample: the texture is read smoothed to that size
+	const double covered = (length > 0. ? photoTrailAngle*pixelPerRad*qMax(1., 2.*R) : 0.) + (defocus != 0.f ? M_PI*R*R : 0.);
+	const float lodBias = samples > 1 ? static_cast<float>(qMax(0., 0.5*std::log2(qMax(1., covered/samples)))) : 0.f;
+	const int blades = photoApertureBlades >= 3 ? photoApertureBlades : 0;
+	const float sector = blades > 0 ? 2.f*M_PIf/static_cast<float>(blades) : 0.f;
 	program.setUniformValue("photoSkyTrailSamples", samples);
 	program.setUniformValue("photoSkyTrailAxis", QVector3D(static_cast<float>(axis[0]), static_cast<float>(axis[1]), static_cast<float>(axis[2])));
-	program.setUniformValue("photoSkyTrailAngle", static_cast<float>(samples > 1 ? photoTrailAngle : 0.));
+	program.setUniformValue("photoSkyTrailAngle", static_cast<float>(samples > 1 && length > 0. ? photoTrailAngle : 0.));
+	program.setUniformValue("photoSkyDefocus", defocus);
+	program.setUniformValue("photoSkyDefocusSA", defocus > 0.f ? -photoLensCache.sphericalAberration : photoLensCache.sphericalAberration);
+	program.setUniformValue("photoSkyBlades", blades);
+	program.setUniformValue("photoSkyStraightness", blades > 0 ? getPhotoApertureStraightness() : 0.f);
+	program.setUniformValue("photoSkyBladeRotation", PHOTO_SPIKE_ANGLE - 0.5f*sector);
+	program.setUniformValue("photoSkyLodBias", lodBias);
 }
 
 void StelSkyDrawer::setPhotoExtinctionUniforms(QOpenGLShaderProgram& program, int textureUnit)
