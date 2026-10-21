@@ -259,7 +259,7 @@
           <item row="13" column="1">
            <widget class="QComboBox" name="mountComboBox">
             <property name="toolTip">
-             <string>What happens while the Earth turns during the exposure (centered on the current time). "No motion": the picture of an instant. "Fixed tripod": the stars, planets and nebulae draw arcs around the celestial pole; the longer the exposure and the focal length, the longer the trails, and faint stars fade as their light is spread out. "Star tracker": the camera turns with the sky, so the stars stay sharp and the landscape blurs instead.</string>
+             <string>What happens while the Earth turns during the exposure (centered on the current time). "No motion": the picture of an instant. "Fixed tripod": the stars, planets and nebulae draw arcs around the celestial pole; the longer the exposure and the focal length, the longer the trails, and faint stars fade as their light is spread out. "Star tracker": the camera turns with the sky, so the stars stay sharp and the landscape blurs instead. "As the view's mount": a fixed tripod while the view is on the alt-azimuthal mount, a star tracker on the equatorial one (switch the mount of the view with Ctrl+M).</string>
             </property>
            </widget>
           </item>

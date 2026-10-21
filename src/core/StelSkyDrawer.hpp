@@ -144,7 +144,8 @@ class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 	//! with the diurnal motion and draw arcs around the celestial pole
 	Q_PROPERTY(bool flagPhotoStarTrails READ getFlagPhotoStarTrails WRITE setFlagPhotoStarTrails NOTIFY flagPhotoStarTrailsChanged)
 	//! What the camera stands on while the sky turns during the exposure (with flagPhotoStarTrails, see PhotoMount):
-	//! a fixed tripod (star trails) or a star tracker that follows the sky (the landscape blurs)
+	//! a fixed tripod (star trails), a star tracker that follows the sky (the landscape blurs), or as the mount of
+	//! the view (alt-azimuthal: tripod, equatorial: tracker)
 	Q_PROPERTY(int photoMount READ getPhotoMount WRITE setPhotoMount NOTIFY photoMountChanged)
 	//! Sensor noise (see PhotoNoise): off, as in the whole picture on the screen, or as in a 100% view of the sensor
 	Q_PROPERTY(int photoNoise READ getPhotoNoise WRITE setPhotoNoise NOTIFY photoNoiseChanged)
@@ -318,7 +319,9 @@ public:
 	//! Mounts of the camera (see photoMount)
 	enum PhotoMount {
 		PhotoMountTripod = 0, //!< fixed on the ground: the stars draw trails
-		PhotoMountTracker = 1 //!< turns with the sky (around the pole): the stars stay sharp, the landscape blurs
+		PhotoMountTracker = 1, //!< turns with the sky (around the pole): the stars stay sharp, the landscape blurs
+		PhotoMountView = 2     //!< as the mount of the view (StelMovementMgr): a tripod on the alt-azimuthal mount,
+		                       //!< a tracker on the equatorial one (and the galactic ones, which turn with the sky too)
 	};
 	//! Sensor formats (the values are stored in the settings: keep them)
 	enum PhotoSensorFormat {
@@ -725,6 +728,8 @@ public slots:
 	//! Set the mount of the camera (see PhotoMount)
 	void setPhotoMount(int mount);
 	int getPhotoMount() const {return photoMount;}
+	//! The mount in effect: PhotoMountTripod or PhotoMountTracker (PhotoMountView resolved with the mount of the view)
+	int getPhotoEffectiveMount() const;
 	//! Photographic mode, star tracker: the landscape turns past the camera during the exposure. The landscape is
 	//! drawn into an offscreen image between these calls (its horizon line and labels after, see Landscape), which
 	//! endPhotoGroundImage() then puts into the scene averaged along that motion. Returns false (draw directly)
