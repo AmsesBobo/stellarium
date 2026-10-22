@@ -23,6 +23,7 @@
 #include <memory>
 #include <vector>
 #include <qopengl.h>
+#include <QVector2D>
 
 class QOpenGLShaderProgram;
 class QOpenGLFramebufferObject;
@@ -57,8 +58,18 @@ public:
 	//! @param spikeLines number of lines through each point (spikes/2, at most 9); 0 for no spikes
 	//! @param spikeAngle direction of the first line on the screen, radians
 	//! @param spikeLength length scale l of the spike profile, pixels
+	//! @param halationRadius film only: radius of the halation ring (total reflection in the film base), pixels; 0: none
+	//! @param halationDensity film only: optical density of the antihalation layer (one pass, at normal incidence)
 	bool process(GLuint sceneTexture, int w, int h, float haloAlpha, float haloBeta,
-	             int spikeLines, float spikeAngle, float spikeLength, QOpenGLVertexArrayObject* vao);
+	             int spikeLines, float spikeAngle, float spikeLength, QOpenGLVertexArrayObject* vao,
+	             float halationRadius = 0.f, float halationDensity = 0.f);
+	//! The halation image (unit integral of its profile), or 0. Its texture coordinates are those of the scene
+	//! times halationScale().
+	GLuint halationTexture() const;
+	//! The share of the diffuse light at the back of the emulsion that the film base sends back (see
+	//! computeHalationWeights()), for an antihalation layer of the given density
+	static double halationReturned(float density);
+	QVector2D halationScale() const;
 	//! The halo image (full resolution, unit integral of the halo profile): add it, times the halo
 	//! fraction, to the scene. Only valid after a successful process().
 	GLuint haloTexture() const;
@@ -88,6 +99,16 @@ private:
 	std::unique_ptr<QOpenGLShaderProgram> spikeProgram;
 	std::unique_ptr<QOpenGLFramebufferObject> spikeFBO;
 	bool spikesDone = false;
+	//! Halation of a film: the ring at the level of the pyramid that suits its radius
+	std::unique_ptr<QOpenGLShaderProgram> halationProgram;
+	std::unique_ptr<QOpenGLFramebufferObject> halationFBO;
+	int halationLevel = -1;
+	bool halationDone = false;
+	float halationWeightsDensity = -1.f;
+	int halationRings = 0;
+	float halationOffsets[12] = {};   //!< radii of the rings of taps, in units of the critical radius
+	float halationWeights[12] = {};   //!< their shares of the light (sum 1)
+	void computeHalationWeights(float density);
 	bool shadersOk = false;
 	bool shadersTried = false;
 

@@ -29,6 +29,7 @@
 #include <QDebug>
 #include <QVector2D>
 #include <cmath>
+#include <algorithm>
 
 namespace
 {
@@ -146,6 +147,39 @@ void main()
 	return src;
 }
 
+// Halation of a film: rings of taps around each point, on the blurred level (taps about 2 texels apart, so
+// that the rings are smooth; every other ring turned by half a step)
+const char* halationSource = R"(
+VARYING vec2 texcoord;
+uniform sampler2D src;
+uniform vec2 texelUV;      // one texel of this level, in texture coordinates
+uniform highp float radius; // the critical radius, in texels
+uniform int rings;
+uniform highp float offsets[12];
+uniform highp float weights[12];
+void main()
+{
+	const highp float TWO_PI = 6.28318530718;
+	highp vec3 sum = vec3(0);
+	for (int i = 0; i < 12; ++i)
+	{
+		if (i >= rings) break;
+		highp float r = radius * offsets[i];
+		int taps = int(clamp(ceil(TWO_PI * r / 2.), 12., 96.));
+		highp float turn = (i == 2*(i/2)) ? 0. : 0.5;
+		highp vec3 ring = vec3(0);
+		for (int a = 0; a < 96; ++a)
+		{
+			if (a >= taps) break;
+			highp float angle = (float(a) + turn) * TWO_PI / float(taps);
+			ring += texture2D(src, texcoord + r * vec2(cos(angle), sin(angle)) * texelUV).rgb;
+		}
+		sum += weights[i] / float(taps) * ring;
+	}
+	FRAG_COLOR = vec4(sum, 1.);
+}
+)";
+
 void setTextureParams(QOpenGLFunctions& gl, GLuint tex, GLint filter)
 {
 	gl.glBindTexture(GL_TEXTURE_2D, tex);
@@ -190,7 +224,8 @@ void StelPhotoBloom::initShaders()
 	blurProgram = makeProgram(blurSource, "photographic bloom: blur");
 	combineProgram = makeProgram(combineSource, "photographic bloom: combination");
 	spikeProgram = makeProgram(makeSpikeSource(), "photographic bloom: diffraction spikes");
-	shadersOk = downProgram && blurProgram && combineProgram && spikeProgram;
+	halationProgram = makeProgram(halationSource, "photographic bloom: halation of the film");
+	shadersOk = downProgram && blurProgram && combineProgram && spikeProgram && halationProgram;
 	if (!shadersOk)
 		qWarning() << "Photographic mode: the bloom shaders could not be built, bloom is off";
 }
@@ -219,6 +254,8 @@ void StelPhotoBloom::resize(int w, int h)
 		levels.push_back(std::move(level));
 	}
 	spikeFBO = makeFBO(gl, w, h);
+	halationFBO.reset();
+	halationLevel = -1;
 	weightsAlpha = -1.f; // recompute the weights for the new number of levels
 }
 
@@ -280,10 +317,81 @@ void StelPhotoBloom::computeWeights(float alpha, float beta)
 	weightsLevels = n;
 }
 
+// Halation: light that has passed the emulsion is scattered (diffuse, about Lambertian), crosses the film base
+// (thickness t, refractive index n), is reflected at its back and exposes the emulsion again, at r = 2 t tan(theta)
+// from where it entered. Beyond the critical angle (sin theta_c = 1/n) it is reflected totally, before it only
+// partly (Fresnel): a disk with a bright rim at r_c = 2 t tan(theta_c). The light per area of the emulsion goes as
+// R(theta) T(theta) cos^4(theta), with the antihalation layer (density D at normal incidence) passed twice,
+// obliquely: T = 10^(-2 D / cos theta). It takes away most of the light, and most of all the oblique light, so
+// the halo is a narrow ring just outside r_c. The profile is split into rings of taps, each with its share of
+// the returned light (unit integral; the amount is set by the caller).
+double StelPhotoBloom::halationReturned(float density)
+{
+	constexpr double n = 1.48;
+	double total = 0.;
+	const double dth = 1e-4;
+	for (double th = 0.5*dth; th < 0.5*M_PI - 0.01; th += dth)
+	{
+		const double s = n*std::sin(th);
+		double R = 1.;
+		if (s < 1.)
+		{
+			const double ci = std::cos(th), ct = std::sqrt(1. - s*s);
+			const double rs = (n*ci - ct)/(n*ci + ct), rp = (n*ct - ci)/(n*ct + ci);
+			R = 0.5*(rs*rs + rp*rp);
+		}
+		total += R*std::pow(10., -2.*static_cast<double>(density)/std::cos(th))*2.*std::sin(th)*std::cos(th)*dth;
+	}
+	return total;
+}
+
+void StelPhotoBloom::computeHalationWeights(float density)
+{
+	constexpr double n = 1.48; // cellulose triacetate
+	const double thetaC = std::asin(1./n);
+	const double tanC = std::tan(thetaC);
+	auto fresnel = [n](double th) -> double
+	{
+		const double s = n*std::sin(th);
+		if (s >= 1.)
+			return 1.;
+		const double ci = std::cos(th), ct = std::sqrt(1. - s*s);
+		const double rs = (n*ci - ct)/(n*ci + ct), rp = (n*ct - ci)/(n*ct + ci);
+		return 0.5*(rs*rs + rp*rp);
+	};
+	// ring edges in units of the critical radius r_c
+	static const double edges[] = {0., 0.4, 0.7, 1.0, 1.08, 1.18, 1.32, 1.5, 1.75, 2.1, 2.6, 3.4, 5.};
+	constexpr int rings = 12;
+	double flux[rings] = {}, moment[rings] = {}, total = 0.;
+	const double dth = 1e-4;
+	for (double th = 0.5*dth; th < 0.5*M_PI - 0.01; th += dth)
+	{
+		const double r = std::tan(th)/tanC;
+		if (r >= edges[rings])
+			break;
+		const double f = fresnel(th)*std::pow(10., -2.*static_cast<double>(density)/std::cos(th))*2.*std::sin(th)*std::cos(th)*dth;
+		int k = 0;
+		while (k < rings-1 && r >= edges[k+1])
+			++k;
+		flux[k] += f;
+		moment[k] += f*r;
+		total += f;
+	}
+	halationRings = rings;
+	for (int k = 0; k < rings; ++k)
+	{
+		halationWeights[k] = total > 0. ? static_cast<float>(flux[k]/total) : 0.f;
+		halationOffsets[k] = flux[k] > 0. ? static_cast<float>(moment[k]/flux[k]) : static_cast<float>(0.5*(edges[k]+edges[k+1]));
+	}
+	halationWeightsDensity = density;
+}
+
 bool StelPhotoBloom::process(GLuint sceneTexture, int w, int h, float haloAlpha, float haloBeta,
-                             int spikeLines, float spikeAngle, float spikeLength, QOpenGLVertexArrayObject* vao)
+                             int spikeLines, float spikeAngle, float spikeLength, QOpenGLVertexArrayObject* vao,
+                             float halationRadius, float halationDensity)
 {
 	spikesDone = false;
+	halationDone = false;
 	if (!shadersTried)
 	{
 		shadersTried = true;
@@ -425,6 +533,31 @@ bool StelPhotoBloom::process(GLuint sceneTexture, int w, int h, float haloAlpha,
 		drawQuad(level.blur.get(), level.w, level.h);
 	}
 
+	// 3b. Halation of a film, from the level where the critical radius is about 6 texels (after the blur of step 3, before step 4)
+	if (halationRadius > 0.5f)
+	{
+		if (halationDensity != halationWeightsDensity)
+			computeHalationWeights(halationDensity);
+		const int L = std::clamp(static_cast<int>(std::lround(std::log2(halationRadius/6.f))), 0, n-1);
+		const Level& lv = levels[static_cast<size_t>(L)];
+		if (!halationFBO || L != halationLevel || halationFBO->width() != lv.w || halationFBO->height() != lv.h)
+		{
+			halationFBO = makeFBO(gl, lv.w, lv.h);
+			halationLevel = L;
+		}
+		halationProgram->bind();
+		gl.glActiveTexture(GL_TEXTURE0);
+		gl.glBindTexture(GL_TEXTURE_2D, lv.blur->texture());
+		halationProgram->setUniformValue("src", 0);
+		halationProgram->setUniformValue("texelUV", 1.f/static_cast<float>(lv.w), 1.f/static_cast<float>(lv.h));
+		halationProgram->setUniformValue("radius", halationRadius/static_cast<float>(1 << L));
+		halationProgram->setUniformValue("rings", halationRings);
+		halationProgram->setUniformValueArray("offsets", halationOffsets, 12, 1);
+		halationProgram->setUniformValueArray("weights", halationWeights, 12, 1);
+		drawQuad(halationFBO.get(), lv.w, lv.h);
+		halationDone = true;
+	}
+
 	// 4. Weighted sum, from the coarsest level up. The sum of levels >= k goes to level k's
 	//    "down" buffer (no longer needed); the final sum at full resolution to level 0's "temp".
 	combineProgram->bind();
@@ -466,6 +599,20 @@ bool StelPhotoBloom::process(GLuint sceneTexture, int w, int h, float haloAlpha,
 GLuint StelPhotoBloom::spikeTexture() const
 {
 	return (spikesDone && spikeFBO) ? spikeFBO->texture() : 0;
+}
+
+GLuint StelPhotoBloom::halationTexture() const
+{
+	return (halationDone && halationFBO) ? halationFBO->texture() : 0;
+}
+
+QVector2D StelPhotoBloom::halationScale() const
+{
+	if (!halationDone || halationLevel < 0 || halationLevel >= static_cast<int>(levels.size()))
+		return QVector2D(1.f, 1.f);
+	const Level& lv = levels[static_cast<size_t>(halationLevel)];
+	const float f = static_cast<float>(1 << halationLevel);
+	return QVector2D(static_cast<float>(sceneW)/(f*static_cast<float>(lv.w)), static_cast<float>(sceneH)/(f*static_cast<float>(lv.h)));
 }
 
 GLuint StelPhotoBloom::haloTexture() const
