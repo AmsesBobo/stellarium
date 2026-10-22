@@ -253,13 +253,18 @@ in vec2 ndcXY;
 out vec4 color;
 
 vec3 xyYToRGB(float x, float y, float Y);
+vec3 photoFilmSkyRGB(highp vec4 XYZW);
+uniform bool photoFilmSky;
 vec3 photoAirglowLight(float sinElev);
 vec3 linearColorToFramebuffer(vec3 c);
 
 void main()
 {
-	vec3 XYZ=texture(luminanceXYZW, texCoord).xyz;
-	vec3 srgb=xyYToRGB(XYZ.x/(XYZ.x+XYZ.y+XYZ.z), XYZ.y/(XYZ.x+XYZ.y+XYZ.z), XYZ.y);
+	vec4 XYZW=texture(luminanceXYZW, texCoord);
+	vec3 XYZ=XYZW.xyz;
+	// A color film records the spectrum of the sky with its own layers: from X, Y, Z and the scotopic W
+	vec3 srgb = (photoMode && photoFilmSky) ? photoFilmSkyRGB(XYZW)
+	                                        : xyYToRGB(XYZ.x/(XYZ.x+XYZ.y+XYZ.z), XYZ.y/(XYZ.x+XYZ.y+XYZ.z), XYZ.y);
 	if (photoMode)
 	{
 		// The airglow (the models hold the scattered light of the Sun, the Moon and the light pollution)
@@ -819,6 +824,7 @@ void AtmosphereShowMySky::draw(StelCore* core)
 		const Vec3f k = skyDrawer->getPhotoAirglowExtinction();
 		GL(luminanceToScreenProgram_->setUniformValue("photoAirglow", airglow[0], airglow[1], airglow[2]));
 		GL(luminanceToScreenProgram_->setUniformValue("photoAirglowExtinction", k[0], k[1], k[2]));
+		skyDrawer->setPhotoFilmSkyUniforms(*luminanceToScreenProgram_);
 		const auto prj = core->getProjection(StelCore::FrameAltAz, StelCore::RefractionOff);
 		prj->setUnProjectUniforms(*luminanceToScreenProgram_);
 		GL(luminanceToScreenProgram_->setUniformValue("projectionMatrixInverse", prj->getProjectionMatrix().toQMatrix().inverted()));

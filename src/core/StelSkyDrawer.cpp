@@ -2723,16 +2723,41 @@ const StelSkyDrawer::PhotoFilmSpec& StelSkyDrawer::getPhotoFilmSpec(int film)
 	// Curves: slide film has a gamma of about 1.7 and is viewed as it is, so the picture follows E^1.7; a negative
 	// (gamma about 0.65) printed on paper (about 1.8) gives a system gamma of about 1.15 and much more latitude.
 	// Black and white films are panchromatic: more red and blue than the eye, T-Max a little less blue.
+	// Spectral sensitivity of the color films: the curves of the data sheets (Fujifilm Provia 100F, also for 400F;
+	// Kodak Ektachrome 100 for E200; Kodak Ultramax 400 for Royal Gold 400), as digitized by the spektrafilm project
+	// (A. Volpato, github.com/andreavolpato/spektrafilm, profiles CC BY-SA 4.0). The red layer reaches far into
+	// the red (peak 645-655 nm, still 0.77-1.0 of it at H-alpha), the green one is narrower than the eye's: in the
+	// twilight, when ozone takes away the yellow and orange (Chappuis band), the film keeps its red where the eye
+	// loses it, and blue and red make the violet of film pictures. The layers are fitted, by least squares, to
+	// the scene in two ways, over blackbodies (1800-20000 K), daylight (D50-D75) and twilight spectra (daylight,
+	// ozone up to 60 air masses, Rayleigh scattering): from linear sRGB (rgbToFilm, for the smooth spectra of the
+	// stars, planets, Milky Way and landscape: 1-2% off for blackbodies) and from the X, Y, Z and scotopic W
+	// of ShowMySky (skyXYZW: the violet twilight within about 5%; from sRGB the film would lose half of the red;
+	// the lightweight atmosphere has no W, it is estimated from X, Y and Z, see xyYToRGB.glsl: about 7%).
+	// The airglow (O I 557.7 and 630.0/636.4 nm, Na 589 nm, OH bands, with a continuum fitted to its color) is
+	// computed from its spectrum directly.
 	static const PhotoFilmSpec films[PHOTO_FILM_COUNT] = {
 		{"Digital sensor", "", 0., PhotoFilmSlide, 0, {0,0,0,0}, {0,0,0,0}, 1., {0,0,0,0}, 0., 1., 1.f, 1.f, 0.18f, {0,0,0}},
 		{"Fujichrome Provia 100F", "Provia 100F", 100., PhotoFilmSlide,
-		 2, {128., 240., 0, 0}, {128., 190.5, 0, 0}, 0.63, {0., 0.025, 0, 0}, 8., 1.7, 1.7f, 1.0f, 0.15f, {0,0,0}},
+		 2, {128., 240., 0, 0}, {128., 190.5, 0, 0}, 0.63, {0., 0.025, 0, 0}, 8., 1.7, 1.7f, 1.0f, 0.15f, {0,0,0},
+		 {0.8823f, -0.0092f, 0.0425f, 0.1133f, 0.8423f, 0.0529f, 0.0625f, -0.0729f, 1.2184f},
+		 {7.7363f, -8.6066f, -2.8156f, 2.1554f, -1.9413f, 3.4614f, 0.5767f, -0.5048f, -0.7867f, 1.2239f, 1.4820f, -0.4456f},
+		 {1.3715f, 0.9966f, 0.6528f}},
 		{"Fujichrome Provia 400F", "Provia 400F", 400., PhotoFilmSlide,
-		 4, {32., 60., 120., 240.}, {32., 37.8, 60., 120.}, 0.66, {0., 0.05, 0.075, 0.075}, 13., 1.7, 1.7f, 1.0f, 0.15f, {0,0,0}},
+		 4, {32., 60., 120., 240.}, {32., 37.8, 60., 120.}, 0.66, {0., 0.05, 0.075, 0.075}, 13., 1.7, 1.7f, 1.0f, 0.15f, {0,0,0},
+		 {0.8823f, -0.0092f, 0.0425f, 0.1133f, 0.8423f, 0.0529f, 0.0625f, -0.0729f, 1.2184f},
+		 {7.7363f, -8.6066f, -2.8156f, 2.1554f, -1.9413f, 3.4614f, 0.5767f, -0.5048f, -0.7867f, 1.2239f, 1.4820f, -0.4456f},
+		 {1.3715f, 0.9966f, 0.6528f}},
 		{"Kodak Ektachrome E200", "E200", 200., PhotoFilmSlide,
-		 1, {10., 0, 0, 0}, {10., 0, 0, 0}, 0.9, {0,0,0,0}, 12., 1.7, 1.7f, 1.0f, 0.15f, {0,0,0}},
+		 1, {10., 0, 0, 0}, {10., 0, 0, 0}, 0.9, {0,0,0,0}, 12., 1.7, 1.7f, 1.0f, 0.15f, {0,0,0},
+		 {0.8792f, -0.0011f, 0.0371f, 0.0948f, 0.8654f, 0.0501f, 0.1603f, -0.4778f, 1.5726f},
+		 {7.5488f, -8.3193f, -2.7195f, 2.0691f, -1.6322f, 2.9534f, 0.4129f, -0.3452f, -1.9772f, 3.2321f, 2.0329f, -1.0508f},
+		 {1.3868f, 1.0087f, 0.7239f}},
 		{"Kodak Royal Gold 400", "Royal Gold 400", 400., PhotoFilmNegative,
-		 1, {10., 0, 0, 0}, {10., 0, 0, 0}, 0.8, {0,0,0,0}, 5., 0.65, 1.15f, 11.5f, 0.18f, {0,0,0}},
+		 1, {10., 0, 0, 0}, {10., 0, 0, 0}, 0.8, {0,0,0,0}, 5., 0.65, 1.15f, 11.5f, 0.18f, {0,0,0},
+		 {0.9412f, -0.0826f, 0.0515f, 0.0703f, 0.8433f, 0.1094f, 0.1719f, -0.4943f, 1.5769f},
+		 {8.9881f, -10.5313f, -3.4227f, 2.7209f, -1.3177f, 2.4159f, 0.2430f, -0.1723f, -2.2375f, 3.6457f, 2.1490f, -1.1702f},
+		 {1.2693f, 1.0570f, 0.7534f}},
 		{"Kodak T-Max 400", "T-Max 400", 400., PhotoFilmMonochrome,
 		 4, {0.4, 1.26, 15., 300.}, {0.4, 1., 10., 100.}, 0.77, {0,0,0,0}, 10., 0.65, 1.15f, 5.8f, 0.18f, {0.30f, 0.52f, 0.18f}},
 		{"Kodak Tri-X 400", "Tri-X 400", 400., PhotoFilmMonochrome,
@@ -2802,13 +2827,41 @@ const float* StelSkyDrawer::getPhotoWhiteBalanceMatrix() const
 		static const float identity[9] = {1,0,0, 0,1,0, 0,0,1};
 		return identity;
 	}
+	const Vec3f tint = getPhotoFilmTint(getPhotoEffectiveExposureTime());
+	if (getPhotoFilmSpectral(f))
+	{
+		// The layers of the film from the light of the scene (balanced for daylight), each with its own reciprocity
+		// failure; the dyes of the layers are taken as the primaries of the display
+		for (int r = 0; r < 3; ++r)
+			for (int c = 0; c < 3; ++c)
+				photoWBMatrixFilm[r*3 + c] = f.rgbToFilm[r*3 + c] * tint[r];
+		return photoWBMatrixFilm;
+	}
 	// The daylight balance of the film (photoWBMatrix, see updatePhotoWhiteBalanceMatrix()), after the layers'
 	// own reciprocity failure: the matrix acts on the light as the film recorded it
-	const Vec3f tint = getPhotoFilmTint(getPhotoEffectiveExposureTime());
 	for (int r = 0; r < 3; ++r)
 		for (int c = 0; c < 3; ++c)
 			photoWBMatrixFilm[r*3 + c] = photoWBMatrix[r*3 + c] * tint[c];
 	return photoWBMatrixFilm;
+}
+
+void StelSkyDrawer::setPhotoFilmSkyUniforms(QOpenGLShaderProgram& program) const
+{
+	const float* m = getFlagPhotographicModeActive() ? getPhotoFilmSkyMatrix() : nullptr;
+	program.setUniformValue("photoFilmSky", m != nullptr);
+	if (!m)
+		return;
+	program.setUniformValue("photoFilmSkyR", m[0], m[1], m[2], m[3]);
+	program.setUniformValue("photoFilmSkyG", m[4], m[5], m[6], m[7]);
+	program.setUniformValue("photoFilmSkyB", m[8], m[9], m[10], m[11]);
+}
+
+const float* StelSkyDrawer::getPhotoFilmSkyMatrix() const
+{
+	if (!getFlagPhotoFilmActive())
+		return nullptr;
+	const PhotoFilmSpec& f = getPhotoFilmSpec(photoFilm);
+	return getPhotoFilmSpectral(f) ? f.skyXYZW : nullptr;
 }
 
 void StelSkyDrawer::setPhotoFilm(int film)
@@ -4186,7 +4239,13 @@ Vec3f StelSkyDrawer::getPhotoAirglow() const
 	// against 0.65 and 0.36 for the Sun; Benn & Ellison 1998, Patat 2003): the green line of oxygen (558 nm),
 	// sodium (589 nm), the red oxygen lines (630 nm) and the OH bands. As linear sRGB against white sunlight
 	// (luminance 1): a warm, brownish grey in daylight white balance.
-	const Vec3f color(1.227f, 0.959f, 0.748f);
+	Vec3f color(1.227f, 0.959f, 0.748f);
+	// A color film sees the lines with its own layers (see getPhotoFilmSpec())
+	if (getFlagPhotoFilmActive() && getPhotoFilmSpectral(getPhotoFilmSpec(photoFilm)))
+	{
+		const float* c = getPhotoFilmSpec(photoFilm).airglow;
+		color.set(c[0], c[1], c[2]);
+	}
 	return color*static_cast<float>(luminance*static_cast<double>(getPhotoSceneScale()));
 }
 

@@ -394,7 +394,19 @@ public:
 		float toneClip;
 		float toneMid;
 		float mono[3];       //!< black and white films: their sensitivity to linear red, green and blue (sum 1)
+		//! Color films: the exposures of the red, green and blue layers from the linear sRGB of the scene (row by row;
+		//! daylight D55 gives 1, 1, 1), from the spectral sensitivities of the data sheet (see getPhotoFilmSpec())
+		float rgbToFilm[9];
+		//! Color films: the sky from its spectrum, as ShowMySky gives it (luminance X, Y, Z and the scotopic W, cd/m^2):
+		//! the linear sRGB of the scene that the layers (rgbToFilm) record as the film does (row by row, 3 x 4)
+		float skyXYZW[12];
+		//! Color films: the airglow, computed from its line spectrum (linear sRGB of the scene per unit luminance)
+		float airglow[3];
 	};
+	//! Whether a film has spectral data (a color film): its own sensitivity to the sky, the stars and the airglow
+	static bool getPhotoFilmSpectral(const PhotoFilmSpec& f) {return f.rgbToFilm[0] != 0.f;}
+	//! The sky in the spectral model of the color film in use (rows of getPhotoFilmSpec().skyXYZW), or nullptr
+	const float* getPhotoFilmSkyMatrix() const;
 	static const PhotoFilmSpec& getPhotoFilmSpec(int film);
 	//! Whether a film is in use now (photographic mode on)
 	bool getFlagPhotoFilmActive() const {return photoFilm != PhotoFilmNone && getFlagPhotographicModeActive();}
@@ -892,6 +904,8 @@ public slots:
 	//! GLSL code: vec3 photoExtinctionTint(float sinAltitude), the tint of getPhotoExtinctionTint() for shaders.
 	static QByteArray getPhotoExtinctionShader();
 	//! Set the uniforms of getPhotoExtinctionShader(), with the table bound to the given texture unit.
+	//! Set the uniforms of the color film's sky (photoFilmSky, photoFilmSkyR/G/B of xyYToRGB.glsl)
+	void setPhotoFilmSkyUniforms(class QOpenGLShaderProgram& program) const;
 	void setPhotoExtinctionUniforms(class QOpenGLShaderProgram& program, int textureUnit);
 	//! GLSL code for the trails and the blur of extended sky textures (Milky Way, zodiacal light): uniform int
 	//! photoSkyTrailSamples (1 = neither), highp vec4 photoSkySample(int i) (the window offset of the point the lens

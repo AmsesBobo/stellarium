@@ -37,6 +37,33 @@ uniform highp float photoScale;
 // and its extinction per airmass in red, green and blue (magnitudes)
 uniform highp vec3 photoAirglow;
 uniform highp vec3 photoAirglowExtinction;
+// Photographic mode with a color film: the sky from its spectrum (see StelSkyDrawer::getPhotoFilmSpec()): the linear
+// sRGB of the scene from the luminance X, Y, Z and the scotopic W (rows), which the film's layers record as the film
+// would record the spectrum of the sky
+uniform bool photoFilmSky;
+uniform highp vec4 photoFilmSkyR;
+uniform highp vec4 photoFilmSkyG;
+uniform highp vec4 photoFilmSkyB;
+
+// The color film's record of the sky with luminances X, Y, Z, W (cd/m^2), as the linear color of the framebuffer
+vec3 photoFilmSkyRGB(highp vec4 XYZW)
+{
+	highp vec4 cam = XYZW * photoScale;
+	highp vec3 rgb = vec3(dot(photoFilmSkyR, cam), dot(photoFilmSkyG, cam), dot(photoFilmSkyB, cam));
+	return linearColorToFramebuffer(max(rgb, vec3(0)) * brightnessScale);
+}
+
+// The scotopic luminance W of the sky from X, Y, Z, where W is not known (the lightweight atmosphere, made from
+// ShowMySky): a quadratic in X/Y and Z/Y fitted to the X, Y, Z, W of ShowMySky over the whole sky (latitude 45,
+// the Sun from +10 to -16 degrees), 2% rms. The film's colors still differ from ShowMySky's by about 7% (in red):
+// X, Y and Z do not hold all that the film sees.
+highp float photoSkyScotopicRatio(highp vec3 XYZ)
+{
+	if (!(XYZ.y > 0.))
+		return 3.;
+	highp float a = clamp(XYZ.x / XYZ.y, 0.85, 1.55), b = clamp(XYZ.z / XYZ.y, 0.05, 3.3);
+	return clamp(0.71408 + 2.46953*a + 1.25660*b - 1.86276*a*a - 0.16285*a*b + 0.01493*b*b, 0.6, 10.);
+}
 
 // Photographic mode: the airglow towards a direction at the sine of the altitude sinElev (below the horizon: as
 // above, like the sky). It shines from a layer about 90 km high: looking lower, the line of sight runs longer
@@ -73,6 +100,11 @@ vec3 xyYToRGB(highp float x, highp float y, highp float Y)
 	if (photoMode)
 	{
 		// A camera has no scotopic (night) vision and no adaptation: just linear light.
+		if (photoFilmSky)
+		{
+			highp vec3 XYZ = (y > 0.) ? vec3(x * Y / y, Y, (1. - x - y) * Y / y) : vec3(0);
+			return photoFilmSkyRGB(vec4(XYZ, Y * photoSkyScotopicRatio(XYZ)));
+		}
 		highp float Ycam = Y * photoScale;
 		highp vec3 XYZcam = (y > 0.) ? vec3(x * Ycam / y, Ycam, (1. - x - y) * Ycam / y) : vec3(0);
 		// The scene buffer holds linear sRGB, so the sRGB (D65) matrix is always the right one here.
