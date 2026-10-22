@@ -207,7 +207,7 @@
           <item row="9" column="1">
            <widget class="QComboBox" name="toneCurveComboBox">
             <property name="toolTip">
-             <string>How the camera turns the recorded light into the picture. Linear: proportional, with a soft roll-off of the highlights. Standard: like the JPEG of a camera, with more contrast and the highlights clipping about 3 stops above middle grey. Film: like negative film, softer, with room for 6 stops above middle grey.</string>
+             <string>How the camera turns the recorded light into the picture. Linear: proportional, with a soft roll-off of the highlights. Standard: like the JPEG of a camera (measured on a Canon EOS R6), with more contrast: darker shadows, and the highlights clipping about 3.6 stops above middle grey. Film: like negative film, softer, with room for 6 stops above middle grey.</string>
             </property>
            </widget>
           </item>
