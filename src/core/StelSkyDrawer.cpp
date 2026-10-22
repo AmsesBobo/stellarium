@@ -160,6 +160,8 @@ StelSkyDrawer::StelSkyDrawer(StelCore* acore) :
 	flagPhotoStarTrails = conf->value("viewing/flag_photographic_star_trails", true).toBool();
 	photoDetectionSnr = qBound(0.f, conf->value("viewing/photographic_detection_snr", 3.0).toFloat(), 20.f);
 	flagPhotoProgramExposure = conf->value("viewing/flag_photographic_program_exposure", false).toBool();
+	photoProgramMaxISO = qBound(PHOTO_PROGRAM_BASE_ISO, conf->value("viewing/photographic_program_max_iso", PHOTO_PROGRAM_MAX_ISO).toDouble(), PHOTO_PROGRAM_ISO_CEILING);
+	photoProgramMaxTime = qBound(PHOTO_PROGRAM_MIN_MAX_TIME, conf->value("viewing/photographic_program_max_time", PHOTO_AUTO_MAX_TIME).toDouble(), PHOTO_AUTO_MAX_TIME);
 	photoMount = qBound(static_cast<int>(PhotoMountTripod), conf->value("viewing/photographic_mount", static_cast<int>(PhotoMountTripod)).toInt(), static_cast<int>(PhotoMountView));
 	photoSensorFormat = qBound(0, conf->value("viewing/photographic_sensor_format", static_cast<int>(PhotoSensorFullFrame)).toInt(), PHOTO_SENSOR_FORMAT_COUNT - 1);
 	photoFilm = qBound(0, conf->value("viewing/photographic_film", 0).toInt(), PHOTO_FILM_COUNT - 1);
@@ -3905,6 +3907,8 @@ void StelSkyDrawer::savePhotoSettings(QSettings* conf) const
 	conf->setValue("viewing/photographic_metering_mode", getPhotoMeteringMode());
 	conf->setValue("viewing/flag_photographic_info_line", getFlagPhotoInfoLine());
 	conf->setValue("viewing/flag_photographic_program_exposure", getFlagPhotoProgramExposure());
+	conf->setValue("viewing/photographic_program_max_iso", getPhotoProgramMaxISO());
+	conf->setValue("viewing/photographic_program_max_time", getPhotoProgramMaxTime());
 }
 
 // ---- White balance ----
@@ -4527,6 +4531,8 @@ void StelSkyDrawer::resetPhotographicSettings()
 	setFlagPhotoBloom(true);
 	setFlagPhotoAutoExposure(false);
 	setFlagPhotoProgramExposure(false);
+	setPhotoProgramMaxISO(PHOTO_PROGRAM_MAX_ISO);
+	setPhotoProgramMaxTime(PHOTO_AUTO_MAX_TIME);
 	setPhotoMeteringMode(0);
 	setPhotoToneCurve(PhotoToneStandard);
 	setFlagPhotoExtinctionColor(true);
@@ -4685,6 +4691,26 @@ void StelSkyDrawer::setFlagPhotoProgramExposure(bool b)
 	announcePhotoExposureTime();
 }
 
+void StelSkyDrawer::setPhotoProgramMaxISO(double iso)
+{
+	iso = qBound(PHOTO_PROGRAM_BASE_ISO, iso, PHOTO_PROGRAM_ISO_CEILING);
+	if (qFuzzyCompare(iso, photoProgramMaxISO))
+		return;
+	photoProgramMaxISO = iso;
+	StelApp::immediateSave("viewing/photographic_program_max_iso", iso);
+	emit photoProgramMaxISOChanged(iso);
+}
+
+void StelSkyDrawer::setPhotoProgramMaxTime(double seconds)
+{
+	seconds = qBound(PHOTO_PROGRAM_MIN_MAX_TIME, seconds, PHOTO_AUTO_MAX_TIME);
+	if (qFuzzyCompare(seconds, photoProgramMaxTime))
+		return;
+	photoProgramMaxTime = seconds;
+	StelApp::immediateSave("viewing/photographic_program_max_time", seconds);
+	emit photoProgramMaxTimeChanged(seconds);
+}
+
 void StelSkyDrawer::startPhotoProgram()
 {
 	if (photoProgramRunning)
@@ -4712,20 +4738,22 @@ void StelSkyDrawer::stopPhotoProgram()
 
 void StelSkyDrawer::applyPhotoProgram(double exposure)
 {
+	// The user's limits, like a camera's auto-ISO menu: the longest exposure time and the highest ISO. Past
+	// both, the picture is underexposed (and the info line says so).
+	const double tMin = PHOTO_AUTO_MIN_TIME, tHand = PHOTO_PROGRAM_HAND_TIME;
+	const double tMax = qBound(qMax(tHand, PHOTO_PROGRAM_MIN_MAX_TIME), photoProgramMaxTime, PHOTO_AUTO_MAX_TIME);
 	// The longest time on the program line before the ISO rises: on a fixed tripod the "500 rule" (the stars
-	// stay points), with a star tracker (it follows them) the longest time of the camera
+	// stay points), with a star tracker (it follows them) the longest time allowed
 	const double focalMm = 1000.*getPhotoFocalLength(*core->getProjection(StelCore::FrameJ2000));
 	const double crop = PHOTO_SENSOR_DIAGONAL / getPhotoSensorDiagonal();
 	const bool tracker = flagPhotoStarTrails && getPhotoEffectiveMount() == PhotoMountTracker;
-	const double tLimit = tracker ? PHOTO_AUTO_MAX_TIME
-	                              : qBound(PHOTO_PROGRAM_HAND_TIME, PHOTO_PROGRAM_RULE/qMax(1., focalMm*crop), PHOTO_AUTO_MAX_TIME);
+	const double tLimit = tracker ? tMax : qBound(tHand, PHOTO_PROGRAM_RULE/qMax(1., focalMm*crop), tMax);
 	// With a film the speed is fixed: the program changes only the time and the aperture
 	const bool film = photoFilm != PhotoFilmNone;
 	const double S0 = film ? getPhotoFilmSpec(photoFilm).iso : PHOTO_PROGRAM_BASE_ISO;
-	const double Smax = film ? S0 : PHOTO_PROGRAM_MAX_ISO;
+	const double Smax = film ? S0 : qMax(S0, photoProgramMaxISO);
 	const double Nday = PHOTO_PROGRAM_DAY_APERTURE, Nsmall = PHOTO_PROGRAM_MIN_APERTURE;
 	const double Nwide = PHOTO_LENS_MAX_APERTURE;
-	const double tMin = PHOTO_AUTO_MIN_TIME, tHand = PHOTO_PROGRAM_HAND_TIME, tMax = PHOTO_AUTO_MAX_TIME;
 	// exposure = t S / N^2: walk along the line from bright to dark
 	double t, N, S;
 	if (exposure <= tMin*S0/(Nday*Nday))
