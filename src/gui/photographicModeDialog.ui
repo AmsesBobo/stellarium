@@ -723,7 +723,7 @@
           <item row="2" column="1">
            <widget class="QDoubleSpinBox" name="haloDoubleSpinBox">
             <property name="toolTip">
-             <string>Share of a star's light that the lens scatters into a wide, faint glow</string>
+             <string>Share of a star's light that the lens scatters into a wide, faint glow. A film camera keeps its own value (default 0.3%): in front of a digital sensor lies a stack of filters, whose reflections add to the glow of the lens.</string>
             </property>
             <property name="alignment">
              <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>

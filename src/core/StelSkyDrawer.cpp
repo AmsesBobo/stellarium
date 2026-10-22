@@ -135,7 +135,9 @@ StelSkyDrawer::StelSkyDrawer(StelCore* acore) :
 	photoISO = qBound(25., conf->value("viewing/photographic_iso", 1600.0).toDouble(), 409600.);
 	photoMinFwhmPixels = qBound(0.8f, conf->value("viewing/photographic_psf_min_fwhm", 2.0).toFloat(), 10.f);
 	photoSeeingArcsec = qBound(0.f, conf->value("viewing/photographic_seeing", 3.0).toFloat(), 60.f);
-	photoHaloFraction = qBound(0.f, conf->value("viewing/photographic_halo_strength", 0.05).toFloat(), 0.3f);
+	photoDigitalHaloFraction = qBound(0.f, conf->value("viewing/photographic_halo_strength", 0.05).toFloat(), 0.3f);
+	photoFilmHaloFraction = qBound(0.f, conf->value("viewing/photographic_film_halo_strength", static_cast<double>(PHOTO_FILM_HALO_DEFAULT)).toFloat(), 0.3f);
+	photoHaloFraction = photoDigitalHaloFraction;
 	// Diaphragm blades; older settings stored the number of spikes, which is the same for even numbers
 	photoApertureBlades = conf->value("viewing/photographic_aperture_blades", conf->value("viewing/photographic_spike_count", 6)).toInt();
 	photoApertureBlades = (photoApertureBlades<=0) ? 0 : qBound(4, photoApertureBlades, 9);
@@ -169,7 +171,10 @@ StelSkyDrawer::StelSkyDrawer(StelCore* acore) :
 	photoFilm = qBound(0, conf->value("viewing/photographic_film", 0).toInt(), PHOTO_FILM_COUNT - 1);
 	photoDigitalISO = photoISO;
 	if (photoFilm != PhotoFilmNone)
+	{
 		photoISO = getPhotoFilmSpec(photoFilm).iso;
+		photoHaloFraction = photoFilmHaloFraction;
+	}
 	updatePhotoToneCurve();
 	flagPhotoZoomWholeMillimeters = conf->value("viewing/flag_photographic_zoom_whole_millimeters", false).toBool();
 	flagPhotoPortrait = conf->value("viewing/flag_photographic_portrait", false).toBool();
@@ -2921,7 +2926,14 @@ void StelSkyDrawer::setPhotoFilm(int film)
 	// The film has its own speed: keep the ISO of the digital sensor for later
 	if (photoFilm == PhotoFilmNone)
 		photoDigitalISO = photoProgramRunning ? photoUserISO : photoISO;
+	// The lens glow of the film camera or of the digital camera (see setPhotoHaloStrength())
+	const bool haloChanges = (photoFilm == PhotoFilmNone) != (f == PhotoFilmNone);
 	photoFilm = f;
+	if (haloChanges)
+	{
+		photoHaloFraction = (f != PhotoFilmNone) ? photoFilmHaloFraction : photoDigitalHaloFraction;
+		emit photoHaloStrengthChanged(static_cast<double>(photoHaloFraction));
+	}
 	const double iso = (f != PhotoFilmNone) ? getPhotoFilmSpec(f).iso : photoDigitalISO;
 	if (photoProgramRunning)
 		photoUserISO = iso;
@@ -4059,7 +4071,8 @@ void StelSkyDrawer::savePhotoSettings(QSettings* conf) const
 	conf->setValue("viewing/photographic_tone_curve", getPhotoToneCurve());
 	conf->setValue("viewing/photographic_psf_min_fwhm", getPhotoPsfMinFwhm());
 	conf->setValue("viewing/photographic_seeing", getPhotoSeeing());
-	conf->setValue("viewing/photographic_halo_strength", getPhotoHaloStrength());
+	conf->setValue("viewing/photographic_halo_strength", static_cast<double>(photoDigitalHaloFraction));
+	conf->setValue("viewing/photographic_film_halo_strength", static_cast<double>(photoFilmHaloFraction));
 	conf->setValue("viewing/photographic_aperture_blades", getPhotoApertureBlades());
 	conf->setValue("viewing/photographic_spike_strength", getPhotoSpikeStrength());
 	conf->setValue("viewing/flag_photographic_bloom", getFlagPhotoBloom());
@@ -4609,11 +4622,23 @@ void StelSkyDrawer::setPhotoSeeing(double arcsec)
 
 void StelSkyDrawer::setPhotoHaloStrength(double fraction)
 {
+	// A digital camera and a film camera each keep their own value: in front of a sensor lies a stack of filters
+	// (infrared cut, antialiasing, cover glass), whose reflections with the sensor add to the glow of the lens;
+	// a film lies bare in the focal plane, and has the glow of the lens alone (and its own halation)
 	const float v = qBound(0.f, static_cast<float>(fraction), 0.3f);
 	if (qFuzzyCompare(1.f+v, 1.f+photoHaloFraction))
 		return;
 	photoHaloFraction = v;
-	StelApp::immediateSave("viewing/photographic_halo_strength", static_cast<double>(v));
+	if (photoFilm != PhotoFilmNone)
+	{
+		photoFilmHaloFraction = v;
+		StelApp::immediateSave("viewing/photographic_film_halo_strength", static_cast<double>(v));
+	}
+	else
+	{
+		photoDigitalHaloFraction = v;
+		StelApp::immediateSave("viewing/photographic_halo_strength", static_cast<double>(v));
+	}
 	emit photoHaloStrengthChanged(static_cast<double>(v));
 }
 
@@ -4691,7 +4716,10 @@ void StelSkyDrawer::resetPhotographicSettings()
 	setPhotoExposureEV(0.);
 	setPhotoPsfMinFwhm(2.);
 	setPhotoSeeing(3.);
-	setPhotoHaloStrength(0.05);
+	photoFilmHaloFraction = PHOTO_FILM_HALO_DEFAULT;
+	photoDigitalHaloFraction = 0.05f;
+	StelApp::immediateSave("viewing/photographic_film_halo_strength", static_cast<double>(PHOTO_FILM_HALO_DEFAULT));
+	setPhotoHaloStrength(photoFilm != PhotoFilmNone ? PHOTO_FILM_HALO_DEFAULT : 0.05);
 	setPhotoApertureBlades(6);
 	setPhotoSpikeStrength(0.02);
 	setFlagPhotoBloom(true);
