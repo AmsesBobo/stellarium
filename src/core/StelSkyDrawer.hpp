@@ -167,6 +167,7 @@ class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 	Q_PROPERTY(int photoFilm READ getPhotoFilm WRITE setPhotoFilm NOTIFY photoFilmChanged)
 	//! Push processing of the film, in stops (0: normal): more speed, contrast and grain
 	Q_PROPERTY(int photoFilmPush READ getPhotoFilmPush WRITE setPhotoFilmPush NOTIFY photoFilmPushChanged)
+	Q_PROPERTY(bool flagPhotoFilmSpectralSky READ getFlagPhotoFilmSpectralSky WRITE setFlagPhotoFilmSpectralSky NOTIFY flagPhotoFilmSpectralSkyChanged)
 	//! Zooming with the mouse wheel steps the focal length in whole millimeters, as marked on a zoom lens
 	Q_PROPERTY(bool flagPhotoZoomWholeMillimeters READ getFlagPhotoZoomWholeMillimeters WRITE setFlagPhotoZoomWholeMillimeters NOTIFY flagPhotoZoomWholeMillimetersChanged)
 	//! The camera is turned for a portrait (upright) picture: the long side of the sensor is vertical
@@ -892,6 +893,10 @@ public slots:
 	//! Push processing of the film in stops (0 to PHOTO_FILM_MAX_PUSH)
 	void setPhotoFilmPush(int stops);
 	int getPhotoFilmPush() const {return photoFilmPush;}
+	//! Color film: the sky from its spectrum (ShowMySky's X, Y, Z and scotopic W; the lightweight atmosphere
+	//! estimates W), else from its color like the rest of the scene (config: astro/flag_photographic_film_spectral_sky)
+	void setFlagPhotoFilmSpectralSky(bool b);
+	bool getFlagPhotoFilmSpectralSky() const {return flagPhotoFilmSpectralSky;}
 	//! Zoom the view to the field of a lens of the given focal length (millimeters) on the sensor in use
 	void setPhotoFocalLength(double millimeters);
 	//! Zooming with the mouse wheel in whole millimeters of focal length (see flagPhotoZoomWholeMillimeters)
@@ -1160,6 +1165,7 @@ signals:
 	void photoSensorFormatChanged(int format);
 	void photoFilmChanged(int film);
 	void photoFilmPushChanged(int stops);
+	void flagPhotoFilmSpectralSkyChanged(bool b);
 	void flagPhotoZoomWholeMillimetersChanged(bool b);
 	void flagPhotoPortraitChanged(bool b);
 	void flagPhotoFrameMaskChanged(bool b);

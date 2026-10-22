@@ -2763,7 +2763,7 @@ const StelSkyDrawer::PhotoFilmSpec& StelSkyDrawer::getPhotoFilmSpec(int film)
 	// stars, planets, Milky Way and landscape: 1-2% off for blackbodies) and from the X, Y, Z and scotopic W
 	// of ShowMySky (skyXYZW: the violet twilight within about 5%; from sRGB the film would lose half of the red;
 	// the lightweight atmosphere has no W, it is estimated from X, Y and Z, see xyYToRGB.glsl: about 7%).
-	// The sky from X, Y, Z, W is off by default (astro/flag_photographic_film_spectral_sky): its large coefficients
+	// The sky from X, Y, Z, W is off by default ("Spectral sky" in the dialog, astro/flag_photographic_film_spectral_sky): its large coefficients
 	// cancel each other, so that a few percent in W make 25% in red, and the violet it gives to the twilight is not
 	// in Till Credner's twilight slides (Ektachrome, Sensia: a deep blue sky over an orange horizon), which the
 	// colors of rgbToFilm match.
@@ -4178,6 +4178,7 @@ void StelSkyDrawer::savePhotoSettings(QSettings* conf) const
 	conf->setValue("viewing/photographic_white_balance_kelvin", getPhotoWhiteBalanceKelvin());
 	conf->setValue("viewing/flag_photographic_extinction_color", getFlagPhotoExtinctionColor());
 	conf->setValue("viewing/flag_photographic_airglow", getFlagPhotoAirglow());
+	conf->setValue("astro/flag_photographic_film_spectral_sky", getFlagPhotoFilmSpectralSky());
 	conf->setValue("viewing/photographic_airglow_strength", getPhotoAirglowStrength());
 	conf->setValue("viewing/photographic_tone_curve", getPhotoToneCurve());
 	conf->setValue("viewing/photographic_psf_min_fwhm", getPhotoPsfMinFwhm());
@@ -4427,6 +4428,15 @@ void StelSkyDrawer::setFlagPhotoAirglow(bool b)
 	flagPhotoAirglow = b;
 	StelApp::immediateSave("viewing/flag_photographic_airglow", b);
 	emit flagPhotoAirglowChanged(b);
+}
+
+void StelSkyDrawer::setFlagPhotoFilmSpectralSky(bool b)
+{
+	if (b == flagPhotoFilmSpectralSky)
+		return;
+	flagPhotoFilmSpectralSky = b;
+	StelApp::immediateSave("astro/flag_photographic_film_spectral_sky", b);
+	emit flagPhotoFilmSpectralSkyChanged(b);
 }
 
 void StelSkyDrawer::setPhotoAirglowStrength(double strength)
@@ -4856,6 +4866,7 @@ void StelSkyDrawer::resetPhotographicSettings()
 	setPhotoMount(PhotoMountTripod);
 	setPhotoNoise(PhotoNoiseImage);
 	setPhotoFilmPush(0);
+	setFlagPhotoFilmSpectralSky(false);
 	setPhotoFilm(PhotoFilmNone);
 	setPhotoSensorFormat(PhotoSensorFullFrame);
 	setFlagPhotoZoomWholeMillimeters(false);

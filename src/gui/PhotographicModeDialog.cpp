@@ -296,6 +296,7 @@ void PhotographicModeDialog::createDialogContent()
 	connectBoolProperty(ui->infoLineCheckBox,         "StelSkyDrawer.flagPhotoInfoLine");
 	connectBoolProperty(ui->extinctionColorCheckBox,  "StelSkyDrawer.flagPhotoExtinctionColor");
 	connectBoolProperty(ui->airglowCheckBox,          "StelSkyDrawer.flagPhotoAirglow");
+	connectBoolProperty(ui->filmSpectralSkyCheckBox,  "StelSkyDrawer.flagPhotoFilmSpectralSky");
 	// Airglow: percent in the dialog, factor in the property
 	connect(ui->airglowStrengthSpinBox, QOverload<int>::of(&QSpinBox::valueChanged), this, [drawer](int percent)
 	{
@@ -585,6 +586,7 @@ void PhotographicModeDialog::updateCameraWidgets()
 		const QSignalBlocker pushBlocker(ui->filmPushComboBox);
 		ui->filmPushComboBox->setCurrentIndex(qMax(0, ui->filmPushComboBox->findData(drawer->getPhotoFilmPush())));
 		ui->filmPushComboBox->setEnabled(film);
+		ui->filmSpectralSkyCheckBox->setEnabled(film && StelSkyDrawer::getPhotoFilmSpectral(StelSkyDrawer::getPhotoFilmSpec(drawer->getPhotoFilm())));
 		// The same list switches the sensor noise or the grain of the film
 		ui->noiseLabel->setText(film ? q_("Film grain:") : q_("Sensor noise:"));
 		ui->noiseComboBox->setToolTip(film ? q_("The grain of the film: the silver grains or dye clouds lie at random, more of them where the film is denser (the RMS granularity of the data sheet, growing as the square root of the density). A slide is densest in the dark parts, so the grain shows most in a dark night sky; a faster film has coarser grain. \"Whole picture\": as the whole frame looks on the screen. \"100% view\": a scan at 4000 dpi.")
