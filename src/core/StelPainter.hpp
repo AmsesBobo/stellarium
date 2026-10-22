@@ -312,6 +312,7 @@ public:
 	void setSaturation(float v) { saturation = v; }
 
 	//! Sets texture color adjustment for subsequent simple textured draws.
+	//! colorChannel: 0 all, 1-3 the luminance into red, green or blue only, 4 the luminance of the texture times the color
 	void setTextureDisplayAdjustment(float gamma, float saturation, float brightness,
 	                                 float contrast, int colorChannel, bool invertedColors,
 	                                 bool premultiplyAlpha, float alpha = 1.f);

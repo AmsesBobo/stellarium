@@ -142,6 +142,10 @@ protected:
 	//! Photographic mode: luminance (cd/m^2) of a texel of value 1 (linear), from the catalog magnitude of
 	//! the object in the image and the mean of the texture; 0 = not yet known, negative = not possible
 	float photoLuminanceScale = 0.f;
+	//! Photographic mode: the type of the catalog object the image was measured by (Nebula::NebulaType), or -1
+	int photoObjectType = -1;
+	//! Photographic mode: the colors of an emission nebula on the color film in use (negative: none)
+	Vec3f photoEmissionColor = Vec3f(-1.f);
 	//! Compute photoLuminanceScale (the texture must be loaded and bound)
 	void computePhotoLuminanceScale(StelCore* core);
 

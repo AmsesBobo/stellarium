@@ -2759,28 +2759,39 @@ const StelSkyDrawer::PhotoFilmSpec& StelSkyDrawer::getPhotoFilmSpec(int film)
 	// the lightweight atmosphere has no W, it is estimated from X, Y and Z, see xyYToRGB.glsl: about 7%).
 	// The airglow (O I 557.7 and 630.0/636.4 nm, Na 589 nm, OH bands, with a continuum fitted to its color) is
 	// computed from its spectrum directly.
+	// Emission nebulae (H II regions) too: their light is in lines, most of it in H-alpha at 656 nm, which the V band
+	// of their catalog magnitude hardly sees (about 9%) but the red layer of a film does. A typical H II region
+	// (relative to H-beta: H-alpha 2.86, [N II] 658.3/654.8 0.8/0.27, [O III] 500.7/495.9 2.0/0.67 as in the bright
+	// ones, M 42, M 8, M 20, the Rosette, H-gamma and H-delta, [S II] 0.4, He I, a weak continuum; reddened by
+	// E(B-V) = 0.5) exposes the red layer about 4.6-4.9 times as much as white light of the same V, green and blue
+	// 0.7-0.85 times: on film they are bright and red (North America, Orion, Lagoon). The scene colors that give
+	// these layers through rgbToFilm.
 	static const PhotoFilmSpec films[PHOTO_FILM_COUNT] = {
 		{"Digital sensor", "", 0., PhotoFilmSlide, 0, {0,0,0,0}, {0,0,0,0}, 1., {0,0,0,0}, 0., 1., 1.f, 1.f, 0.18f, {0,0,0}},
 		{"Fujichrome Provia 100F", "Provia 100F", 100., PhotoFilmSlide,
 		 2, {128., 240., 0, 0}, {128., 190.5, 0, 0}, 0.63, {0., 0.025, 0, 0}, 8., 1.7, 1.7f, 1.0f, 0.15f, {0,0,0},
 		 {0.8823f, -0.0092f, 0.0425f, 0.1133f, 0.8423f, 0.0529f, 0.0625f, -0.0729f, 1.2184f},
 		 {7.7363f, -8.6066f, -2.8156f, 2.1554f, -1.9413f, 3.4614f, 0.5767f, -0.5048f, -0.7867f, 1.2239f, 1.4820f, -0.4456f},
-		 {1.3715f, 0.9966f, 0.6528f}},
+		 {1.3715f, 0.9966f, 0.6528f},
+		 {5.183f, 0.129f, 0.291f}},
 		{"Fujichrome Provia 400F", "Provia 400F", 400., PhotoFilmSlide,
 		 4, {32., 60., 120., 240.}, {32., 37.8, 60., 120.}, 0.66, {0., 0.05, 0.075, 0.075}, 13., 1.7, 1.7f, 1.0f, 0.15f, {0,0,0},
 		 {0.8823f, -0.0092f, 0.0425f, 0.1133f, 0.8423f, 0.0529f, 0.0625f, -0.0729f, 1.2184f},
 		 {7.7363f, -8.6066f, -2.8156f, 2.1554f, -1.9413f, 3.4614f, 0.5767f, -0.5048f, -0.7867f, 1.2239f, 1.4820f, -0.4456f},
-		 {1.3715f, 0.9966f, 0.6528f}},
+		 {1.3715f, 0.9966f, 0.6528f},
+		 {5.183f, 0.129f, 0.291f}},
 		{"Kodak Ektachrome E200", "E200", 200., PhotoFilmSlide,
 		 1, {10., 0, 0, 0}, {10., 0, 0, 0}, 0.9, {0,0,0,0}, 12., 1.7, 1.7f, 1.0f, 0.15f, {0,0,0},
 		 {0.8792f, -0.0011f, 0.0371f, 0.0948f, 0.8654f, 0.0501f, 0.1603f, -0.4778f, 1.5726f},
 		 {7.5488f, -8.3193f, -2.7195f, 2.0691f, -1.6322f, 2.9534f, 0.4129f, -0.3452f, -1.9772f, 3.2321f, 2.0329f, -1.0508f},
-		 {1.3868f, 1.0087f, 0.7239f}},
+		 {1.3868f, 1.0087f, 0.7239f},
+		 {5.185f, 0.272f, 0.f}},
 		{"Kodak Royal Gold 400", "Royal Gold 400", 400., PhotoFilmNegative,
 		 1, {10., 0, 0, 0}, {10., 0, 0, 0}, 0.8, {0,0,0,0}, 5., 0.65, 1.15f, 11.5f, 0.18f, {0,0,0},
 		 {0.9412f, -0.0826f, 0.0515f, 0.0703f, 0.8433f, 0.1094f, 0.1719f, -0.4943f, 1.5769f},
 		 {8.9881f, -10.5313f, -3.4227f, 2.7209f, -1.3177f, 2.4159f, 0.2430f, -0.1723f, -2.2375f, 3.6457f, 2.1490f, -1.1702f},
-		 {1.2693f, 1.0570f, 0.7534f}},
+		 {1.2693f, 1.0570f, 0.7534f},
+		 {5.226f, 0.567f, 0.053f}},
 		{"Kodak T-Max 400", "T-Max 400", 400., PhotoFilmMonochrome,
 		 4, {0.4, 1.26, 15., 300.}, {0.4, 1., 10., 100.}, 0.77, {0,0,0,0}, 10., 0.65, 1.15f, 5.8f, 0.18f, {0.30f, 0.52f, 0.18f}},
 		{"Kodak Tri-X 400", "Tri-X 400", 400., PhotoFilmMonochrome,
