@@ -87,6 +87,7 @@ void PhotographicModeDialog::retranslate()
 	if (dialog)
 	{
 		ui->retranslateUi(dialog);
+		sensorNoiseToolTip = ui->noiseComboBox->toolTip();
 		fillComboBoxes();
 		updateCameraWidgets();
 		updateStarWidgets();
@@ -264,6 +265,7 @@ void PhotographicModeDialog::selectNearest(QComboBox* comboBox, const QVector<do
 void PhotographicModeDialog::createDialogContent()
 {
 	ui->setupUi(dialog);
+	sensorNoiseToolTip = ui->noiseComboBox->toolTip();
 
 	connect(&StelApp::getInstance(), &StelApp::languageChanged, this, &PhotographicModeDialog::retranslate);
 	connect(ui->titleBar, &TitleBar::closeClicked, this, &StelDialog::close);
@@ -569,11 +571,14 @@ void PhotographicModeDialog::updateCameraWidgets()
 		const bool film = drawer->getPhotoFilm() != StelSkyDrawer::PhotoFilmNone;
 		const QSignalBlocker blocker(ui->filmComboBox);
 		ui->filmComboBox->setCurrentIndex(qMax(0, ui->filmComboBox->findData(drawer->getPhotoFilm())));
+		// The same list switches the sensor noise or the grain of the film
+		ui->noiseLabel->setText(film ? q_("Film grain:") : q_("Sensor noise:"));
+		ui->noiseComboBox->setToolTip(film ? q_("The grain of the film: the silver grains or dye clouds lie at random, more of them where the film is denser (the RMS granularity of the data sheet, growing as the square root of the density). A slide is densest in the dark parts, so the grain shows most in a dark night sky; a faster film has coarser grain. \"Whole picture\": as the whole frame looks on the screen. \"100% view\": a scan at 4000 dpi.")
+		                                   : sensorNoiseToolTip);
 		if (film)
 		{
 			ui->isoComboBox->setEnabled(false);
 			ui->sensorComboBox->setEnabled(false);
-			ui->noiseComboBox->setEnabled(false);
 			ui->toneCurveComboBox->setEnabled(false);
 			ui->whiteBalanceComboBox->setEnabled(false);
 			ui->whiteBalanceKelvinSpinBox->setEnabled(false);
@@ -582,7 +587,6 @@ void PhotographicModeDialog::updateCameraWidgets()
 		else
 		{
 			ui->sensorComboBox->setEnabled(true);
-			ui->noiseComboBox->setEnabled(true);
 			ui->toneCurveComboBox->setEnabled(true);
 			ui->whiteBalanceComboBox->setEnabled(true);
 		}
