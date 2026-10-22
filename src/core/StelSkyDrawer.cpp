@@ -131,7 +131,8 @@ StelSkyDrawer::StelSkyDrawer(StelCore* acore) :
 	flagPhotographicMode = conf->value("viewing/flag_photographic_mode", false).toBool();
 	photoExposureEV = qBound(-12., conf->value("viewing/photographic_exposure_ev", 0.0).toDouble(), 12.);
 	photoExposureTime = qBound(1./8000., conf->value("viewing/photographic_exposure_time", 20.0).toDouble(), 3600.);
-	photoAperture = qBound(0.7, conf->value("viewing/photographic_aperture", 2.8).toDouble(), 64.);
+	photoLensMaxAperture = qBound(PHOTO_LENS_MAX_APERTURE_MIN, conf->value("viewing/photographic_lens_max_aperture", static_cast<double>(PHOTO_LENS_MAX_APERTURE)).toDouble(), PHOTO_LENS_MAX_APERTURE_MAX);
+	photoAperture = qBound(photoLensMaxAperture, conf->value("viewing/photographic_aperture", 2.8).toDouble(), 64.);
 	photoISO = qBound(25., conf->value("viewing/photographic_iso", 1600.0).toDouble(), 409600.);
 	photoMinFwhmPixels = qBound(0.8f, conf->value("viewing/photographic_psf_min_fwhm", 2.0).toFloat(), 10.f);
 	photoSeeingArcsec = qBound(0.f, conf->value("viewing/photographic_seeing", 3.0).toFloat(), 60.f);
@@ -165,6 +166,7 @@ StelSkyDrawer::StelSkyDrawer(StelCore* acore) :
 	flagPhotoStarTrails = conf->value("viewing/flag_photographic_star_trails", true).toBool();
 	photoDetectionSnr = qBound(0.f, conf->value("viewing/photographic_detection_snr", 3.0).toFloat(), 20.f);
 	flagPhotoProgramExposure = conf->value("viewing/flag_photographic_program_exposure", false).toBool();
+	flagPhotoProgramApertureLock = conf->value("viewing/flag_photographic_program_aperture_lock", false).toBool();
 	photoProgramMaxISO = qBound(PHOTO_PROGRAM_BASE_ISO, conf->value("viewing/photographic_program_max_iso", PHOTO_PROGRAM_MAX_ISO).toDouble(), PHOTO_PROGRAM_ISO_CEILING);
 	photoProgramMaxTime = qBound(PHOTO_PROGRAM_MIN_MAX_TIME, conf->value("viewing/photographic_program_max_time", PHOTO_AUTO_MAX_TIME).toDouble(), PHOTO_AUTO_MAX_TIME);
 	photoMount = qBound(static_cast<int>(PhotoMountTripod), conf->value("viewing/photographic_mount", static_cast<int>(PhotoMountTripod)).toInt(), static_cast<int>(PhotoMountView));
@@ -2471,14 +2473,36 @@ void StelSkyDrawer::setPhotoExposureTime(double seconds)
 	announcePhotoExposureTime();
 }
 
+void StelSkyDrawer::setPhotoLensMaxAperture(double fNumber)
+{
+	fNumber = qBound(PHOTO_LENS_MAX_APERTURE_MIN, fNumber, PHOTO_LENS_MAX_APERTURE_MAX);
+	if (qFuzzyCompare(fNumber, photoLensMaxAperture))
+		return;
+	photoLensMaxAperture = fNumber;
+	StelApp::immediateSave("viewing/photographic_lens_max_aperture", fNumber);
+	emit photoLensMaxApertureChanged(fNumber);
+	// The lens cannot open wider than it is: the aperture of the user (and of a running program) follows
+	if (photoProgramRunning && photoUserAperture < fNumber)
+		setPhotoAperture(fNumber);
+	else if (!photoProgramRunning && photoAperture < fNumber)
+		setPhotoAperture(fNumber);
+	photoAutoExposureFresh = true;
+}
+
 void StelSkyDrawer::setPhotoAperture(double fNumber)
 {
-	fNumber = qBound(0.7, fNumber, 64.);
+	fNumber = qBound(photoLensMaxAperture, fNumber, 64.);
 	// The program mode chooses the aperture: a setting now is the user's, used again when it stops
 	if (photoProgramRunning)
 	{
 		photoUserAperture = fNumber;
 		StelApp::immediateSave("viewing/photographic_aperture", fNumber);
+		// A locked aperture is used by the program at once
+		if (flagPhotoProgramApertureLock && !qFuzzyCompare(fNumber, photoAperture))
+		{
+			photoAperture = fNumber;
+			emit photoApertureChanged(fNumber);
+		}
 		return;
 	}
 	if (qFuzzyCompare(fNumber, photoAperture))
@@ -2622,14 +2646,15 @@ StelSkyDrawer::PhotoLens StelSkyDrawer::getPhotoLens(const StelProjector& prj) c
 	// Rectilinear lens: tan(field angle) = distance from the center / focal length (pixels)
 	lens.focal = qMax(1.f, prj.getPixelPerRadAtCenter());
 	const float N = static_cast<float>(photoAperture);
-	lens.pupil = qMin(1.f, PHOTO_LENS_MAX_APERTURE/N);
+	const float wideOpen = static_cast<float>(photoLensMaxAperture);
+	lens.pupil = qMin(1.f, wideOpen/N);
 	lens.vignetting = flagPhotoVignetting && getFlagPhotographicModeActive();
 	if (flagPhotoAberrations && getFlagPhotographicModeActive())
 	{
 		// Third-order aberrations: the coma grows with the field and the square of the aperture,
 		// the astigmatism with the square of the field and the aperture (the field factors are in the shader)
 		const float diagonal = 2.f*lens.corner;
-		const float open = PHOTO_LENS_MAX_APERTURE/N;
+		const float open = wideOpen/N;
 		lens.coma = photoAberrationStrength * PHOTO_COMA_LENGTH * diagonal * open*open;
 		lens.astigmatism = photoAberrationStrength * PHOTO_ASTIGMATISM_LENGTH * diagonal * open;
 		// Spherical aberration: like the coma it grows with the square of the aperture (relative to the defocus)
@@ -4165,6 +4190,7 @@ void StelSkyDrawer::savePhotoSettings(QSettings* conf) const
 	conf->setValue("viewing/photographic_exposure_ev", getPhotoExposureEV());
 	conf->setValue("viewing/photographic_exposure_time", getPhotoExposureTime());
 	conf->setValue("viewing/photographic_aperture", photoProgramRunning ? photoUserAperture : photoAperture);
+	conf->setValue("viewing/photographic_lens_max_aperture", photoLensMaxAperture);
 	conf->setValue("viewing/photographic_iso", photoFilm != PhotoFilmNone ? photoDigitalISO : (photoProgramRunning ? photoUserISO : photoISO));
 	conf->setValue("viewing/photographic_film", photoFilm);
 	conf->setValue("viewing/photographic_film_push", photoFilmPush);
@@ -4201,6 +4227,7 @@ void StelSkyDrawer::savePhotoSettings(QSettings* conf) const
 	conf->setValue("viewing/photographic_metering_mode", getPhotoMeteringMode());
 	conf->setValue("viewing/flag_photographic_info_line", getFlagPhotoInfoLine());
 	conf->setValue("viewing/flag_photographic_program_exposure", getFlagPhotoProgramExposure());
+	conf->setValue("viewing/flag_photographic_program_aperture_lock", getFlagPhotoProgramApertureLock());
 	conf->setValue("viewing/photographic_program_max_iso", getPhotoProgramMaxISO());
 	conf->setValue("viewing/photographic_program_max_time", getPhotoProgramMaxTime());
 }
@@ -4786,7 +4813,7 @@ float StelSkyDrawer::getPhotoApertureStraightness() const
 {
 	// Wide open the opening is the round stop of the lens (the blades are retracted); stopping down,
 	// the blades form a polygon whose edges get straighter. Fully straight two stops down.
-	const float stops = static_cast<float>(std::log2(photoAperture/static_cast<double>(PHOTO_LENS_MAX_APERTURE)));
+	const float stops = static_cast<float>(std::log2(photoAperture/photoLensMaxAperture));
 	const float t = qBound(0.f, stops/2.f, 1.f);
 	return t*t*(3.f - 2.f*t);
 }
@@ -4841,6 +4868,7 @@ float StelSkyDrawer::getPhotoCoreFraction() const
 void StelSkyDrawer::resetPhotographicSettings()
 {
 	setPhotoExposureTime(20.);
+	setPhotoLensMaxAperture(static_cast<double>(PHOTO_LENS_MAX_APERTURE));
 	setPhotoAperture(2.8);
 	setPhotoISO(1600.);
 	setPhotoExposureEV(0.);
@@ -4855,6 +4883,7 @@ void StelSkyDrawer::resetPhotographicSettings()
 	setFlagPhotoBloom(true);
 	setFlagPhotoAutoExposure(false);
 	setFlagPhotoProgramExposure(false);
+	setFlagPhotoProgramApertureLock(false);
 	setPhotoProgramMaxISO(PHOTO_PROGRAM_MAX_ISO);
 	setPhotoProgramMaxTime(PHOTO_AUTO_MAX_TIME);
 	setPhotoMeteringMode(0);
@@ -5018,6 +5047,22 @@ void StelSkyDrawer::setFlagPhotoProgramExposure(bool b)
 	announcePhotoExposureTime();
 }
 
+void StelSkyDrawer::setFlagPhotoProgramApertureLock(bool b)
+{
+	if (b == flagPhotoProgramApertureLock)
+		return;
+	flagPhotoProgramApertureLock = b;
+	photoAutoExposureFresh = true;
+	// The program takes the user's aperture from the next frame on
+	if (b && photoProgramRunning && !qFuzzyCompare(photoAperture, photoUserAperture))
+	{
+		photoAperture = photoUserAperture;
+		emit photoApertureChanged(photoAperture);
+	}
+	StelApp::immediateSave("viewing/flag_photographic_program_aperture_lock", b);
+	emit flagPhotoProgramApertureLockChanged(b);
+}
+
 void StelSkyDrawer::setPhotoProgramMaxISO(double iso)
 {
 	iso = qBound(PHOTO_PROGRAM_BASE_ISO, iso, PHOTO_PROGRAM_ISO_CEILING);
@@ -5079,40 +5124,63 @@ void StelSkyDrawer::applyPhotoProgram(double exposure)
 	const bool film = photoFilm != PhotoFilmNone;
 	const double S0 = film ? getPhotoActiveFilmSpec().iso : PHOTO_PROGRAM_BASE_ISO;
 	const double Smax = film ? S0 : qMax(S0, photoProgramMaxISO);
-	const double Nday = PHOTO_PROGRAM_DAY_APERTURE, Nsmall = PHOTO_PROGRAM_MIN_APERTURE;
-	const double Nwide = PHOTO_LENS_MAX_APERTURE;
+	// The widest aperture is that of the lens; a slow lens opens no wider than its daylight aperture either
+	const double Nwide = photoLensMaxAperture;
+	const double Nday = qMax(PHOTO_PROGRAM_DAY_APERTURE, Nwide), Nsmall = qMax(PHOTO_PROGRAM_MIN_APERTURE, Nday);
 	// exposure = t S / N^2: walk along the line from bright to dark
 	double t, N, S;
-	if (exposure <= tMin*S0/(Nday*Nday))
+	bool timeAtLimit;
+	if (flagPhotoProgramApertureLock)
 	{
-		// very bright: the shortest time, stopping down
-		t = tMin; S = S0;
-		N = qMin(Nsmall, std::sqrt(tMin*S0/qMax(1e-30, exposure)));
-	}
-	else if (exposure <= tHand*S0/(Nday*Nday))
-	{
-		N = Nday; S = S0; t = exposure*N*N/S;
-	}
-	else if (exposure <= tHand*S0/(Nwide*Nwide))
-	{
-		t = tHand; S = S0; N = std::sqrt(tHand*S0/exposure);
-	}
-	else if (exposure <= tLimit*S0/(Nwide*Nwide))
-	{
-		N = Nwide; S = S0; t = exposure*N*N/S;
-	}
-	else if (exposure <= tLimit*Smax/(Nwide*Nwide))
-	{
-		N = Nwide; t = tLimit; S = exposure*N*N/t;
+		// The aperture is the user's: the time up to its limit, then the ISO (too bright: the shortest time)
+		N = qMax(photoUserAperture, Nwide);
+		if (exposure <= tLimit*S0/(N*N))
+		{
+			S = S0; t = exposure*N*N/S;
+		}
+		else if (exposure <= tLimit*Smax/(N*N))
+		{
+			t = tLimit; S = exposure*N*N/t;
+		}
+		else
+		{
+			S = Smax; t = exposure*N*N/S;
+		}
+		timeAtLimit = exposure > tLimit*S0/(N*N) && exposure <= tLimit*Smax/(N*N);
 	}
 	else
 	{
-		N = Nwide; S = Smax; t = exposure*N*N/S;
+		if (exposure <= tMin*S0/(Nday*Nday))
+		{
+			// very bright: the shortest time, stopping down
+			t = tMin; S = S0;
+			N = qMin(Nsmall, std::sqrt(tMin*S0/qMax(1e-30, exposure)));
+		}
+		else if (exposure <= tHand*S0/(Nday*Nday))
+		{
+			N = Nday; S = S0; t = exposure*N*N/S;
+		}
+		else if (exposure <= tHand*S0/(Nwide*Nwide))
+		{
+			t = tHand; S = S0; N = std::sqrt(tHand*S0/exposure);
+		}
+		else if (exposure <= tLimit*S0/(Nwide*Nwide))
+		{
+			N = Nwide; S = S0; t = exposure*N*N/S;
+		}
+		else if (exposure <= tLimit*Smax/(Nwide*Nwide))
+		{
+			N = Nwide; t = tLimit; S = exposure*N*N/t;
+		}
+		else
+		{
+			N = Nwide; S = Smax; t = exposure*N*N/S;
+		}
+		// A camera sets the aperture and the ISO in third stops; the time makes up the rest. Where the time is at
+		// its limit (the ISO rises), the ISO goes to the next step up, so that the time stays within the limit.
+		N = std::exp2(std::round(6.*std::log2(N))/6.);
+		timeAtLimit = exposure > tLimit*S0/(Nwide*Nwide) && exposure <= tLimit*Smax/(Nwide*Nwide);
 	}
-	// A camera sets the aperture and the ISO in third stops; the time makes up the rest. Where the time is at
-	// its limit (the ISO rises), the ISO goes to the next step up, so that the time stays within the limit.
-	N = std::exp2(std::round(6.*std::log2(N))/6.);
-	const bool timeAtLimit = exposure > tLimit*S0/(Nwide*Nwide) && exposure <= tLimit*Smax/(Nwide*Nwide);
 	const double isoSteps = 3.*std::log2(S/S0);
 	S = qMin(Smax, S0*std::exp2((timeAtLimit ? std::ceil(isoSteps - 1e-6) : std::round(isoSteps))/3.));
 	t = exposure*N*N/S;

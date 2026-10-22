@@ -113,11 +113,13 @@ void PhotographicModeDialog::fillComboBoxes()
 		for (auto it = exposureTimes.crbegin(); it != exposureTimes.crend(); ++it)
 			ui->exposureTimeComboBox->addItem(exposureTimeText(*it), *it);
 	}
+	fillApertureList();
 	{
-		const QSignalBlocker blocker(ui->apertureComboBox);
-		ui->apertureComboBox->clear();
+		const QSignalBlocker blocker(ui->lensMaxApertureComboBox);
+		ui->lensMaxApertureComboBox->clear();
 		for (const double n : apertures)
-			ui->apertureComboBox->addItem(QString("f/%1").arg(QLocale().toString(n, 'g', 3)), n);
+			if (n >= StelSkyDrawer::PHOTO_LENS_MAX_APERTURE_MIN - 1e-6 && n <= StelSkyDrawer::PHOTO_LENS_MAX_APERTURE_MAX + 1e-6)
+				ui->lensMaxApertureComboBox->addItem(QString("f/%1").arg(QLocale().toString(n, 'g', 3)), n);
 	}
 	{
 		const QSignalBlocker blocker(ui->isoComboBox);
@@ -245,6 +247,19 @@ void PhotographicModeDialog::fillComboBoxes()
 	}
 }
 
+void PhotographicModeDialog::fillApertureList()
+{
+	const double widest = StelApp::getInstance().getCore()->getSkyDrawer()->getPhotoLensMaxAperture();
+	const QSignalBlocker blocker(ui->apertureComboBox);
+	ui->apertureComboBox->clear();
+	for (const double n : apertures)
+		if (n >= widest - 1e-6)
+			ui->apertureComboBox->addItem(QString("f/%1").arg(QLocale().toString(n, 'g', 3)), n);
+	// a widest aperture between the steps of the list (from the configuration file) heads it
+	if (ui->apertureComboBox->count() == 0 || ui->apertureComboBox->itemData(0).toDouble() > widest + 1e-6)
+		ui->apertureComboBox->insertItem(0, QString("f/%1").arg(QLocale().toString(widest, 'g', 3)), widest);
+}
+
 void PhotographicModeDialog::selectNearest(QComboBox* comboBox, const QVector<double>& values, double value)
 {
 	// The order of the items in the list may differ from the order of the values
@@ -297,6 +312,8 @@ void PhotographicModeDialog::createDialogContent()
 	connectBoolProperty(ui->extinctionColorCheckBox,  "StelSkyDrawer.flagPhotoExtinctionColor");
 	connectBoolProperty(ui->airglowCheckBox,          "StelSkyDrawer.flagPhotoAirglow");
 	connectBoolProperty(ui->filmSpectralSkyCheckBox,  "StelSkyDrawer.flagPhotoFilmSpectralSky");
+	connectBoolProperty(ui->programApertureLockCheckBox, "StelSkyDrawer.flagPhotoProgramApertureLock");
+	connect(drawer, &StelSkyDrawer::flagPhotoProgramApertureLockChanged, this, &PhotographicModeDialog::updateCameraWidgets);
 	// Airglow: percent in the dialog, factor in the property
 	connect(ui->airglowStrengthSpinBox, QOverload<int>::of(&QSpinBox::valueChanged), this, [drawer](int percent)
 	{
@@ -317,6 +334,16 @@ void PhotographicModeDialog::createDialogContent()
 	{
 		if (index >= 0)
 			drawer->setPhotoExposureTime(ui->exposureTimeComboBox->itemData(index).toDouble());
+	});
+	connect(ui->lensMaxApertureComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this, drawer](int index)
+	{
+		if (index >= 0)
+			drawer->setPhotoLensMaxAperture(ui->lensMaxApertureComboBox->itemData(index).toDouble());
+	});
+	connect(drawer, &StelSkyDrawer::photoLensMaxApertureChanged, this, [this]()
+	{
+		fillApertureList();
+		updateCameraWidgets();
 	});
 	connect(ui->apertureComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this, drawer](int index)
 	{
@@ -488,11 +515,16 @@ void PhotographicModeDialog::updateCameraWidgets()
 	const double iso = drawer->getPhotoISO();
 	selectNearest(ui->exposureTimeComboBox, exposureTimes, t);
 	selectNearest(ui->apertureComboBox, apertures, n);
+	{
+		const QSignalBlocker blocker(ui->lensMaxApertureComboBox);
+		selectNearest(ui->lensMaxApertureComboBox, apertures, drawer->getPhotoLensMaxAperture());
+	}
 	selectNearest(ui->isoComboBox, isoValues, iso);
 	ui->exposureTimeComboBox->setEnabled(!autoExposure);
 	// In the program mode the camera chooses the aperture and the ISO as well: the lists show them
 	const bool program = autoExposure && drawer->getFlagPhotoProgramExposure();
-	ui->apertureComboBox->setEnabled(!program);
+	ui->apertureComboBox->setEnabled(!program || drawer->getFlagPhotoProgramApertureLock());
+	ui->programApertureLockCheckBox->setEnabled(program);
 	ui->isoComboBox->setEnabled(!program);
 	{
 		const QSignalBlocker blocker(ui->exposureModeComboBox);

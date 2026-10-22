@@ -65,6 +65,8 @@ private:
 
 	//! Fill the combo boxes (also after a change of language)
 	void fillComboBoxes();
+	//! The f-numbers the lens allows (none wider than its widest aperture)
+	void fillApertureList();
 	//! Select the entry closest to value (on a logarithmic scale) without emitting signals
 	static void selectNearest(QComboBox* comboBox, const QVector<double>& values, double value);
 	//! Human-readable exposure time, e.g. "1/250 s", "0.5 s", "30 s", "2 min"
