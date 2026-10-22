@@ -32,6 +32,7 @@
 #include "NebulaMgr.hpp"
 #include "Nebula.hpp"
 #include <QDebug>
+#include <QHash>
 
 #include <cstdio>
 
@@ -280,8 +281,31 @@ void StelSkyImageTile::getTilesToDraw(QMultiMap<double, StelSkyImageTile*>& resu
 // of the whole image is the catalog magnitude of the brightest object in it. Then they appear with the exposure
 // and stand in the right proportion to the stars and the Milky Way, while the shape within keeps the
 // processing of the picture.
+// Photographic mode: the calibration of each image, kept for the session. Measuring it reads the texture back
+// from the graphics card (photoTextureStatistics()), which stalls the drawing; a tile is deleted when it leaves
+// the view and made again when it comes back, the image stays the same.
+namespace
+{
+	struct PhotoCalibration
+	{
+		float luminanceScale;
+		int objectType;
+	};
+	QHash<QString, PhotoCalibration> photoCalibrations;
+}
+
 void StelSkyImageTile::computePhotoLuminanceScale(StelCore* core)
 {
+	if (!absoluteImageURI.isEmpty())
+	{
+		const auto known = photoCalibrations.constFind(absoluteImageURI);
+		if (known != photoCalibrations.cend())
+		{
+			photoLuminanceScale = known->luminanceScale;
+			photoObjectType = known->objectType;
+			return;
+		}
+	}
 	photoLuminanceScale = -1.f;
 	if (skyConvexPolygons.isEmpty() || !tex)
 		return;
@@ -332,6 +356,8 @@ void StelSkyImageTile::computePhotoLuminanceScale(StelCore* core)
 	// Whatever the image: its brightest texel (value 1) not brighter than 15 mag/arcsec^2. An image that is
 	// nearly black (a faint nebula processed dark) would otherwise turn its compression noise into light.
 	photoLuminanceScale = static_cast<float>(qMin(scale, surfaceLuminance(15.)));
+	if (!absoluteImageURI.isEmpty())
+		photoCalibrations.insert(absoluteImageURI, {photoLuminanceScale, photoObjectType});
 }
 
 // Draw the image on the screen.
