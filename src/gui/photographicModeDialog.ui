@@ -70,7 +70,7 @@
           <item row="1" column="1">
            <widget class="QComboBox" name="exposureModeComboBox">
             <property name="toolTip">
-             <string>Manual (M): you set the time, the aperture and the ISO. Aperture priority (Av, A): the camera meters the picture and sets the exposure time (1/8000 s to 30 s) for your aperture and ISO. Program (P) with automatic ISO: the camera sets all three, from ISO 100 and f/8 in daylight, through a wider aperture at dusk and longer times (on a fixed tripod as long as the stars stay points, the "500 rule"), up to ISO 6400 at night. The exposure compensation acts in both automatic modes.</string>
+             <string>Manual (M): you set the time, the aperture and the ISO. Aperture priority (Av, A): the camera meters the picture and sets the exposure time (1/8000 s to 30 s) for your aperture and ISO. Program (P) with automatic ISO: the camera sets all three, from ISO 100 and f/8 in daylight, through a wider aperture at dusk and longer times (on a fixed tripod as long as the stars stay points, the "500 rule"), up to ISO 6400 at night (both limits can be changed under Program limits). The exposure compensation acts in both automatic modes.</string>
             </property>
            </widget>
           </item>
@@ -89,55 +89,80 @@
            </widget>
           </item>
           <item row="3" column="0">
+           <widget class="QLabel" name="programLimitsLabel">
+            <property name="text">
+             <string>Program limits:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="3" column="1">
+           <layout class="QHBoxLayout" name="programLimitsLayout">
+            <item>
+             <widget class="QComboBox" name="programMaxIsoComboBox">
+              <property name="toolTip">
+               <string>Program mode: the highest ISO the automatic ISO may use, like the "maximum sensitivity" in a camera's auto-ISO menu. Beyond the longest time and this ISO the picture is underexposed. A film keeps its own speed.</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QComboBox" name="programMaxTimeComboBox">
+              <property name="toolTip">
+               <string>Program mode: the longest exposure time the camera may use. On a fixed tripod the "500 rule" may give a shorter time, so that the stars stay points.</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+          <item row="4" column="0">
            <widget class="QLabel" name="exposureTimeLabel">
             <property name="text">
              <string>Exposure time:</string>
             </property>
            </widget>
           </item>
-          <item row="3" column="1">
+          <item row="4" column="1">
            <widget class="QComboBox" name="exposureTimeComboBox">
             <property name="toolTip">
              <string>Shutter speed of the virtual camera</string>
             </property>
            </widget>
           </item>
-          <item row="4" column="0">
+          <item row="5" column="0">
            <widget class="QLabel" name="apertureLabel">
             <property name="text">
              <string>Aperture:</string>
             </property>
            </widget>
           </item>
-          <item row="4" column="1">
+          <item row="5" column="1">
            <widget class="QComboBox" name="apertureComboBox">
             <property name="toolTip">
              <string>f-number of the lens. The field of view of the screen acts as the focal length.</string>
             </property>
            </widget>
           </item>
-          <item row="5" column="0">
+          <item row="6" column="0">
            <widget class="QLabel" name="isoLabel">
             <property name="text">
              <string>ISO:</string>
             </property>
            </widget>
           </item>
-          <item row="5" column="1">
+          <item row="6" column="1">
            <widget class="QComboBox" name="isoComboBox">
             <property name="toolTip">
              <string>Sensitivity of the sensor</string>
             </property>
            </widget>
           </item>
-          <item row="6" column="0">
+          <item row="7" column="0">
            <widget class="QLabel" name="evLabel">
             <property name="text">
              <string>Exposure compensation:</string>
             </property>
            </widget>
           </item>
-          <item row="6" column="1">
+          <item row="7" column="1">
            <widget class="QDoubleSpinBox" name="evDoubleSpinBox">
             <property name="toolTip">
              <string>Brighten (+) or darken (-) the picture in photographic stops. Keyboard: Alt+X / Alt+Shift+X</string>
@@ -162,7 +187,7 @@
             </property>
            </widget>
           </item>
-          <item row="7" column="0" colspan="2">
+          <item row="8" column="0" colspan="2">
            <widget class="QLabel" name="exposureValueLabel">
             <property name="toolTip">
              <string>Exposure value at ISO 100, including the compensation. Bright daylight is about 15, a moonless night sky about -6.</string>
@@ -172,42 +197,42 @@
             </property>
            </widget>
           </item>
-          <item row="8" column="0">
+          <item row="9" column="0">
            <widget class="QLabel" name="toneCurveLabel">
             <property name="text">
              <string>Tone curve:</string>
             </property>
            </widget>
           </item>
-          <item row="8" column="1">
+          <item row="9" column="1">
            <widget class="QComboBox" name="toneCurveComboBox">
             <property name="toolTip">
              <string>How the camera turns the recorded light into the picture. Linear: proportional, with a soft roll-off of the highlights. Standard: like the JPEG of a camera, with more contrast and the highlights clipping about 3 stops above middle grey. Film: like negative film, softer, with room for 6 stops above middle grey.</string>
             </property>
            </widget>
           </item>
-          <item row="9" column="0">
+          <item row="10" column="0">
            <widget class="QLabel" name="whiteBalanceLabel">
             <property name="text">
              <string>White balance:</string>
             </property>
            </widget>
           </item>
-          <item row="9" column="1">
+          <item row="10" column="1">
            <widget class="QComboBox" name="whiteBalanceComboBox">
             <property name="toolTip">
              <string>The color of light that the camera turns into neutral white, as on a camera. Daylight keeps sunsets orange and the sky blue; automatic follows the mean color of the picture; neutral shows the colors as rendered.</string>
             </property>
            </widget>
           </item>
-          <item row="10" column="0">
+          <item row="11" column="0">
            <widget class="QLabel" name="whiteBalanceKelvinLabel">
             <property name="text">
              <string>Color temperature:</string>
             </property>
            </widget>
           </item>
-          <item row="10" column="1">
+          <item row="11" column="1">
            <widget class="QSpinBox" name="whiteBalanceKelvinSpinBox">
             <property name="toolTip">
              <string>Color temperature of the custom white balance. Lower values make the picture bluer, higher values warmer.</string>
@@ -229,7 +254,7 @@
             </property>
            </widget>
           </item>
-          <item row="11" column="0" colspan="2">
+          <item row="12" column="0" colspan="2">
            <layout class="QHBoxLayout" name="atmosphereCheckBoxLayout">
             <item>
              <widget class="QCheckBox" name="extinctionColorCheckBox">
@@ -281,7 +306,7 @@
             </item>
            </layout>
           </item>
-          <item row="12" column="0" colspan="2">
+          <item row="13" column="0" colspan="2">
            <widget class="QCheckBox" name="infoLineCheckBox">
             <property name="toolTip">
              <string>Show the exposure time, aperture, ISO and exposure value in use at the top of the screen</string>
@@ -291,70 +316,70 @@
             </property>
            </widget>
           </item>
-          <item row="13" column="0">
+          <item row="14" column="0">
            <widget class="QLabel" name="mountLabel">
             <property name="text">
              <string>Camera mount:</string>
             </property>
            </widget>
           </item>
-          <item row="13" column="1">
+          <item row="14" column="1">
            <widget class="QComboBox" name="mountComboBox">
             <property name="toolTip">
              <string>What happens while the Earth turns during the exposure (centered on the current time). "No motion": the picture of an instant. "Fixed tripod": the stars, planets and nebulae draw arcs around the celestial pole; the longer the exposure and the focal length, the longer the trails, and faint stars fade as their light is spread out. "Star tracker": the camera turns with the sky, so the stars stay sharp and the landscape blurs instead. "As the view's mount": a fixed tripod while the view is on the alt-azimuthal mount, a star tracker on the equatorial one (switch the mount of the view with Ctrl+M).</string>
             </property>
            </widget>
           </item>
-          <item row="14" column="0">
+          <item row="15" column="0">
            <widget class="QLabel" name="noiseLabel">
             <property name="text">
              <string>Sensor noise:</string>
             </property>
            </widget>
           </item>
-          <item row="14" column="1">
+          <item row="15" column="1">
            <widget class="QComboBox" name="noiseComboBox">
             <property name="toolTip">
              <string>The grain of a real sensor: the photons arrive at random (photon noise), plus the noise of the electronics and of the dark current, and a few hot pixels in long exposures. A high ISO is noisy because the sensor has caught fewer photons for the same brightness in the picture. Red and blue are noisier than green (Bayer mosaic). The dark current grows with the temperature (the air temperature of the atmosphere settings, plus a few degrees). "Whole picture": as the picture looks on the screen, where a screen pixel holds many sensor pixels. "100% view": one sensor pixel per screen pixel, as when you zoom in on a photo.</string>
             </property>
            </widget>
           </item>
-          <item row="15" column="0">
+          <item row="16" column="0">
            <widget class="QLabel" name="sensorLabel">
             <property name="text">
              <string>Sensor:</string>
             </property>
            </widget>
           </item>
-          <item row="15" column="1">
+          <item row="16" column="1">
            <widget class="QComboBox" name="sensorComboBox">
             <property name="toolTip">
              <string>The size of the sensor. For the same field of view a smaller sensor needs a shorter lens, which gives more depth of field; at the same f-number and exposure time it collects less light for the picture, which gives more noise (APS-C about 1.2 stops, Micro Four Thirds 2, 1-inch 3 more than full frame; medium format 0.7 less). Changing the sensor keeps the lens: the field of view changes by the crop factor.</string>
             </property>
            </widget>
           </item>
-          <item row="16" column="0">
+          <item row="17" column="0">
            <widget class="QLabel" name="filmLabel">
             <property name="text">
              <string>Film:</string>
             </property>
            </widget>
           </item>
-          <item row="16" column="1">
+          <item row="17" column="1">
            <widget class="QComboBox" name="filmComboBox">
             <property name="toolTip">
              <string>Film in the camera instead of the digital sensor (35 mm). The film sets the speed (ISO), the color balance (daylight, 5500 K) and its own characteristic curve: slide film is steep and has little room for highlights, a negative printed on paper is soft. Long exposures lose speed (reciprocity failure, from the data sheets): a 10 minute exposure on Tri-X counts as about 1.5 minutes; the exposure meter does not know it. Some slide films also shift in color in long exposures (Provia 400F: towards magenta). The faintest stars are those that stand out of the grain of the film.</string>
             </property>
            </widget>
           </item>
-          <item row="17" column="0">
+          <item row="18" column="0">
            <widget class="QLabel" name="focalLengthLabel">
             <property name="text">
              <string>Focal length:</string>
             </property>
            </widget>
           </item>
-          <item row="17" column="1">
+          <item row="18" column="1">
            <widget class="QSpinBox" name="focalLengthSpinBox">
             <property name="toolTip">
              <string>The focal length of the lens: sets the field of view for the sensor. Zooming with the mouse changes it, like a zoom lens.</string>
@@ -379,7 +404,7 @@
             </property>
            </widget>
           </item>
-          <item row="18" column="0" colspan="2">
+          <item row="19" column="0" colspan="2">
            <widget class="QCheckBox" name="zoomWholeMillimetersCheckBox">
             <property name="toolTip">
              <string>Zooming with the mouse wheel steps the focal length in whole millimeters, as on the scale of a zoom lens. Each step of the wheel changes it by at least one millimeter.</string>
@@ -389,14 +414,14 @@
             </property>
            </widget>
           </item>
-          <item row="19" column="0">
+          <item row="20" column="0">
            <widget class="QLabel" name="frameLabel">
             <property name="text">
              <string>Frame:</string>
             </property>
            </widget>
           </item>
-          <item row="19" column="1">
+          <item row="20" column="1">
            <layout class="QHBoxLayout" name="frameLayout">
             <item>
              <widget class="QComboBox" name="frameOrientationComboBox">
@@ -417,14 +442,14 @@
             </item>
            </layout>
           </item>
-          <item row="20" column="0">
+          <item row="21" column="0">
            <widget class="QLabel" name="detectionSnrLabel">
             <property name="text">
              <string>Faintest stars:</string>
             </property>
            </widget>
           </item>
-          <item row="20" column="1">
+          <item row="21" column="1">
            <widget class="QDoubleSpinBox" name="detectionSnrSpinBox">
             <property name="toolTip">
              <string>The detection limit: a star is drawn only when its light stands out of the noise of the sky and the sensor by this factor (signal to noise ratio). 3: the faintest stars are barely seen in the grain. 5: the usual limit of detection in astronomy, about half a magnitude brighter and faster to draw. Higher values leave out stars that would be seen in the picture. Off: all stars are drawn, as without noise (slow in wide fields).</string>

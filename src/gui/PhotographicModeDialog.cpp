@@ -125,6 +125,19 @@ void PhotographicModeDialog::fillComboBoxes()
 			ui->isoComboBox->addItem(QString::number(qRound(*it)), *it);
 	}
 	{
+		// Program mode limits: the highest ISO and the longest time, from bright (top) to dark like the other lists
+		const QSignalBlocker blocker(ui->programMaxIsoComboBox);
+		ui->programMaxIsoComboBox->clear();
+		for (auto it = isoValues.crbegin(); it != isoValues.crend(); ++it)
+			if (*it >= StelSkyDrawer::PHOTO_PROGRAM_BASE_ISO && *it <= StelSkyDrawer::PHOTO_PROGRAM_ISO_CEILING)
+				ui->programMaxIsoComboBox->addItem(QString("ISO %1").arg(qRound(*it)), *it);
+		const QSignalBlocker blocker2(ui->programMaxTimeComboBox);
+		ui->programMaxTimeComboBox->clear();
+		for (auto it = exposureTimes.crbegin(); it != exposureTimes.crend(); ++it)
+			if (*it >= StelSkyDrawer::PHOTO_PROGRAM_MIN_MAX_TIME*0.999 && *it <= StelSkyDrawer::PHOTO_AUTO_MAX_TIME*1.001)
+				ui->programMaxTimeComboBox->addItem(exposureTimeText(*it), *it);
+	}
+	{
 		const QSignalBlocker blocker(ui->spikesComboBox);
 		ui->spikesComboBox->clear();
 		// Diaphragm blades, with the number of spikes they make (twice the blades for an odd number)
@@ -311,6 +324,18 @@ void PhotographicModeDialog::createDialogContent()
 	connect(drawer, &StelSkyDrawer::photoApertureChanged,     this, &PhotographicModeDialog::updateCameraWidgets);
 	connect(drawer, &StelSkyDrawer::photoISOChanged,          this, &PhotographicModeDialog::updateCameraWidgets);
 	connect(drawer, &StelSkyDrawer::photoExposureEVChanged,   this, &PhotographicModeDialog::updateCameraWidgets);
+	connect(ui->programMaxIsoComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this, drawer](int index)
+	{
+		if (index >= 0)
+			drawer->setPhotoProgramMaxISO(ui->programMaxIsoComboBox->itemData(index).toDouble());
+	});
+	connect(ui->programMaxTimeComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this, drawer](int index)
+	{
+		if (index >= 0)
+			drawer->setPhotoProgramMaxTime(ui->programMaxTimeComboBox->itemData(index).toDouble());
+	});
+	connect(drawer, &StelSkyDrawer::photoProgramMaxISOChanged,  this, &PhotographicModeDialog::updateCameraWidgets);
+	connect(drawer, &StelSkyDrawer::photoProgramMaxTimeChanged, this, &PhotographicModeDialog::updateCameraWidgets);
 	connect(ui->meteringComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this, drawer](int index)
 	{
 		if (index >= 0)
@@ -461,6 +486,15 @@ void PhotographicModeDialog::updateCameraWidgets()
 	}
 	ui->meteringComboBox->setEnabled(autoExposure);
 	ui->meteringLabel->setEnabled(autoExposure);
+	{
+		// The limits of the program mode: the highest ISO (not with a film, its speed is fixed) and the longest time
+		const bool film = drawer->getPhotoFilm() != StelSkyDrawer::PhotoFilmNone;
+		selectNearest(ui->programMaxIsoComboBox, isoValues, drawer->getPhotoProgramMaxISO());
+		selectNearest(ui->programMaxTimeComboBox, exposureTimes, drawer->getPhotoProgramMaxTime());
+		ui->programLimitsLabel->setEnabled(program);
+		ui->programMaxIsoComboBox->setEnabled(program && !film);
+		ui->programMaxTimeComboBox->setEnabled(program);
+	}
 	{
 		const QSignalBlocker blocker(ui->meteringComboBox);
 		ui->meteringComboBox->setCurrentIndex(qMax(0, ui->meteringComboBox->findData(drawer->getPhotoMeteringMode())));

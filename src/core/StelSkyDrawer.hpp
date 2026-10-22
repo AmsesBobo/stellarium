@@ -111,6 +111,10 @@ class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 	//! With the automatic exposure: program mode (P) with automatic ISO instead of aperture priority. The camera
 	//! chooses the exposure time, the aperture and the ISO along a program line (see applyPhotoMeterReading()).
 	Q_PROPERTY(bool flagPhotoProgramExposure READ getFlagPhotoProgramExposure WRITE setFlagPhotoProgramExposure NOTIFY flagPhotoProgramExposureChanged)
+	//! Program mode: the highest ISO the automatic ISO may use (like the "maximum sensitivity" of a camera's auto-ISO menu)
+	Q_PROPERTY(double photoProgramMaxISO READ getPhotoProgramMaxISO WRITE setPhotoProgramMaxISO NOTIFY photoProgramMaxISOChanged)
+	//! Program mode: the longest exposure time the program may use, in seconds (on a fixed tripod the "500 rule" can make it shorter)
+	Q_PROPERTY(double photoProgramMaxTime READ getPhotoProgramMaxTime WRITE setPhotoProgramMaxTime NOTIFY photoProgramMaxTimeChanged)
 	//! Metering mode of the automatic exposure: 0 = center-weighted average, 1 = spot, 2 = highlight-weighted
 	Q_PROPERTY(int photoMeteringMode READ getPhotoMeteringMode WRITE setPhotoMeteringMode NOTIFY photoMeteringModeChanged)
 	//! Photographic mode: show a line with the camera settings in use at the top of the screen
@@ -201,7 +205,9 @@ public:
 	//! tripod (the "500 rule": 500 s / (focal length in mm x crop factor), at most 30 s; with a star tracker 30 s);
 	//! then the ISO rises up to its ceiling; then the time grows to the longest of the camera.
 	static constexpr double PHOTO_PROGRAM_BASE_ISO = 100.;
-	static constexpr double PHOTO_PROGRAM_MAX_ISO = 6400.;
+	static constexpr double PHOTO_PROGRAM_MAX_ISO = 6400.;      //!< default highest ISO of the program mode
+	static constexpr double PHOTO_PROGRAM_ISO_CEILING = 204800.; //!< highest ISO the user can allow
+	static constexpr double PHOTO_PROGRAM_MIN_MAX_TIME = 1./30.; //!< shortest "longest time" the user can set
 	static constexpr double PHOTO_PROGRAM_DAY_APERTURE = 8.;
 	static constexpr double PHOTO_PROGRAM_MIN_APERTURE = 22.;  //!< smallest opening (largest f-number)
 	static constexpr double PHOTO_PROGRAM_HAND_TIME = 1./125.;
@@ -762,6 +768,12 @@ public slots:
 	bool getFlagPhotoAutoExposure() const {return flagPhotoAutoExposure;}
 	void setFlagPhotoProgramExposure(bool b);
 	bool getFlagPhotoProgramExposure() const {return flagPhotoProgramExposure;}
+	//! Set the highest ISO of the program mode (100 to 204800; a film keeps its own speed)
+	void setPhotoProgramMaxISO(double iso);
+	double getPhotoProgramMaxISO() const {return photoProgramMaxISO;}
+	//! Set the longest exposure time of the program mode, in seconds (1/30 to 30)
+	void setPhotoProgramMaxTime(double seconds);
+	double getPhotoProgramMaxTime() const {return photoProgramMaxTime;}
 	//! The program mode is in use (automatic exposure in program mode, photographic mode on)
 	bool getFlagPhotoProgramExposureActive() const {return flagPhotoProgramExposure && getFlagPhotoAutoExposureActive();}
 	//! Whether the automatic exposure is switched on AND the photographic mode is active.
@@ -1051,6 +1063,8 @@ signals:
 	void flagPhotoBloomChanged(bool b);
 	void flagPhotoAutoExposureChanged(bool b);
 	void flagPhotoProgramExposureChanged(bool b);
+	void photoProgramMaxISOChanged(double iso);
+	void photoProgramMaxTimeChanged(double seconds);
 	void photoMeteringModeChanged(int mode);
 	void flagPhotoInfoLineChanged(bool b);
 	void photoToneCurveChanged(int curve);
@@ -1418,6 +1432,9 @@ private:
 	//! Automatic exposure (aperture priority)
 	bool flagPhotoAutoExposure = false;
 	bool flagPhotoProgramExposure = false;
+	//! Program mode: the highest ISO and the longest exposure time it may use
+	double photoProgramMaxISO = PHOTO_PROGRAM_MAX_ISO;
+	double photoProgramMaxTime = PHOTO_AUTO_MAX_TIME;
 	//! The aperture and the ISO set by the user: the program mode changes the ones in use, and gives these back
 	double photoUserAperture = 4.;
 	double photoUserISO = 400.;
