@@ -46,6 +46,7 @@
 
 #include <QDebug>
 #include <QSettings>
+#include <QImage>
 #include <QOpenGLShaderProgram>
 
 namespace
@@ -120,7 +121,7 @@ void MilkyWay::init()
 	// Without it, Axel Mellinger's panorama is used: its 99.9th percentile (linear 0.21) is set to
 	// about 20.5 mag/arcsec^2 (V).
 	const QString photoTextureName = conf->value("astro/milky_way_photo_texture", "milkyway_gaia.png").toString();
-	const QString photoTexturePath = StelFileMgr::findFile("textures/"+photoTextureName);
+	const QString photoTexturePath = photoTextureName.isEmpty() ? QString() : StelFileMgr::findFile("textures/"+photoTextureName);
 	if (photoTexturePath.isEmpty())
 	{
 		qWarning() << "Photographic Milky Way texture" << photoTextureName << "not found, using" << textureName;
@@ -160,7 +161,8 @@ void MilkyWay::init()
 		// So the surplus is a smooth glow: it is taken off (not scaled down), the smoothed difference Gaia - Mellinger
 		// (3 degrees, in the units of the expanded texture), with the median outside the inner Galaxy at zero, faded out
 		// between |b| = 25 and 40; where it exceeds the image (narrow dust lanes), 20% of the image stays. Stored as
-		// sign(d) sqrt(|d|/0.06386) mapped to 0..1. Note: derived from Mellinger's data (all rights reserved; the FITS is
+		// sign(d) sqrt(|d|/scale) mapped to 0..1 (the scale in the PNG text "surplus_scale"; made by
+		// util/milkyway_correction/make_milkyway_correction.py). Note: derived from Mellinger's data (all rights reserved; the FITS is
 		// offered for science use), not for redistribution without his consent.
 		// Only half of it is taken off: the same raw picture, calibrated with its own stars (about 700 of magnitude
 		// 5.5-7.6 near the altitude of Sagittarius), gives the Great Sagittarius Star Cloud above the sky at its altitude
@@ -175,8 +177,26 @@ void MilkyWay::init()
 		const bool correctionWanted = conf->value("astro/flag_milky_way_photo_correction", true).toBool() && !correctionName.isEmpty();
 		const QString correctionPath = correctionWanted ? StelFileMgr::findFile("textures/"+correctionName) : QString();
 		if (!correctionPath.isEmpty() && photoDestretch <= 0.f)
-			photoCorrectionTex = StelApp::getInstance().getTextureManager().createTexture(correctionPath,
-			                        StelTexture::Params().useLinearSRGB().setWrapMode(GL_REPEAT));
+		{
+			// The map records its scale and the expansion it was made for (util/milkyway_correction): with another
+			// expansion (astro/milky_way_photo_curve_top) it would correct the wrong thing
+			const QImage info(correctionPath);
+			bool scaleOk = false;
+			photoCorrectionScale = info.text("surplus_scale").toFloat(&scaleOk);
+			const QStringList curve = info.text("photo_curve").split(',');
+			const float expected[5] = {photoCurve[0], photoCurve[1], photoCurve[2], photoCurve[3], photoCurveTop};
+			bool curveOk = curve.size() == 5;
+			for (int i = 0; curveOk && i < 5; ++i)
+				curveOk = std::fabs(curve[i].trimmed().toFloat() - expected[i]) < 1e-4f;
+			if (!scaleOk || !(photoCorrectionScale > 0.f))
+				qWarning() << "Photographic Milky Way: no scale in" << correctionPath << "- correction off";
+			else if (!curveOk)
+				qWarning() << "Photographic Milky Way:" << correctionPath << "was made for another expansion of the texture"
+				           << info.text("photo_curve") << "- correction off";
+			else
+				photoCorrectionTex = StelApp::getInstance().getTextureManager().createTexture(correctionPath,
+				                        StelTexture::Params().useLinearSRGB().setWrapMode(GL_REPEAT));
+		}
 		const QStringList gain = conf->value("astro/milky_way_photo_color_gain", "1.197,0.967,0.750").toString().split(',');
 		if (gain.size() == 3)
 			photoColorGain.set(gain[0].trimmed().toFloat(), gain[1].trimmed().toFloat(), gain[2].trimmed().toFloat());
@@ -436,7 +456,7 @@ uniform float photoStarFactor[19]; // photographic mode: factor for the galactic
 uniform vec3 photoGalacticPole;    // photographic mode: north galactic pole (J2000)
 uniform bool photoCorrection;      // photographic mode: large-scale correction of the texture (see MilkyWay::init())
 uniform sampler2D photoCorrectionTex;
-uniform float photoCorrectionStrength;
+uniform float photoCorrectionStrength; // the part of the surplus taken off, times its scale
 float photoStarLight(vec3 dir)
 {
 	// The share of the texture's light that is not drawn as stars, by galactic latitude
@@ -543,7 +563,7 @@ void main(void)
 				// The smooth surplus of the image over the photometric panorama (see MilkyWay::init()),
 				// taken off its luminance (the finer structure stays)
 				float t = texture2D(photoCorrectionTex, texc).r*2. - 1.;
-				float surplus = sign(t)*t*t*0.06386*photoCorrectionStrength;
+				float surplus = sign(t)*t*t*photoCorrectionStrength;
 				float lum = dot(texColor.rgb, vec3(0.2126, 0.7152, 0.0722));
 				if (lum > 0.)
 					texColor.rgb *= max(lum - surplus, 0.2*lum)/lum;
@@ -632,7 +652,7 @@ void main(void)
 		const bool correction = photoCorrectionTex && photoCorrectionTex->bind(correctionSampler);
 		renderProgram->setUniformValue(shaderVars.photoCorrection, correction);
 		renderProgram->setUniformValue(shaderVars.photoCorrectionTex, correctionSampler);
-		renderProgram->setUniformValue(shaderVars.photoCorrectionStrength, photoCorrectionStrength);
+		renderProgram->setUniformValue(shaderVars.photoCorrectionStrength, photoCorrectionStrength*photoCorrectionScale);
 		QOpenGLContext::currentContext()->functions()->glActiveTexture(GL_TEXTURE0);
 		renderProgram->setUniformValue(shaderVars.projectionMatrixInverse, projector->getProjectionMatrix().toQMatrix().inverted());
 		const Vec3f& g = photoColorGain;

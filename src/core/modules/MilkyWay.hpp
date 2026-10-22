@@ -118,6 +118,8 @@ private:
 	StelTextureSP photoCorrectionTex;
 	//! Photographic mode: the part of that correction applied (config: astro/milky_way_photo_correction_strength)
 	float photoCorrectionStrength = 0.5f;
+	//! Photographic mode: the surplus of a full value of the correction map, in expanded texture units (from the map)
+	float photoCorrectionScale = 0.f;
 	Vec3f color; // global color
 	double intensity;
 	double intensityFovScale; // like for constellations: reduce brightness when zooming in.
