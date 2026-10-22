@@ -524,17 +524,6 @@ void main(void)
 				}
 				else
 					c.rgb = vec3(0.);
-				if (photoCorrection)
-				{
-					// The smooth surplus of the image over the photometric panorama (see MilkyWay::init()),
-					// taken off its luminance (the finer structure stays)
-					float t = texture2D(photoCorrectionTex, uv).r*2. - 1.;
-					float surplus = sign(t)*t*t*0.06386*photoCorrectionStrength;
-					float lum = dot(c.rgb, vec3(0.2126, 0.7152, 0.0722));
-					if (lum > 0.)
-						c.rgb *= max(lum - surplus, 0.2*lum)/lum;
-				}
-				c.rgb *= photoStarLight(dir);
 			}
 			else if (photoDestretch != 1.)
 			{
@@ -545,6 +534,22 @@ void main(void)
 			weights += smp.z;
 		}
 		texColor /= max(weights, 1e-6);
+		if (photoDestretch <= 0.)
+		{
+			// Both change slowly over the sky (the correction over 3 degrees, the stars over 5 degrees of galactic
+			// latitude): once for the pixel, not for each of up to 128 samples
+			if (photoCorrection)
+			{
+				// The smooth surplus of the image over the photometric panorama (see MilkyWay::init()),
+				// taken off its luminance (the finer structure stays)
+				float t = texture2D(photoCorrectionTex, texc).r*2. - 1.;
+				float surplus = sign(t)*t*t*0.06386*photoCorrectionStrength;
+				float lum = dot(texColor.rgb, vec3(0.2126, 0.7152, 0.0722));
+				if (lum > 0.)
+					texColor.rgb *= max(lum - surplus, 0.2*lum)/lum;
+			}
+			texColor.rgb *= photoStarLight(modelPos);
+		}
 	}
 	else
 		texColor = texture2D(mainTex, texc);
