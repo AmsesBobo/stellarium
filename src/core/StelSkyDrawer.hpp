@@ -287,6 +287,10 @@ public:
 		float exponent = 1.f;    //!< Schwarzschild exponent beyond the last pair
 	};
 	PhotoReciprocityParams getPhotoReciprocityParams() const;
+	//! The exposure a film records at the camera exposure x, after its reciprocity failure at that brightness, and
+	//! the inverse (found from x0)
+	float photoFilmRecordedExposure(float x) const;
+	float photoFilmExposureForRecorded(float xr, float x0) const;
 	//! The exposure of middle grey in the camera stage (before the tone curve)
 	static constexpr float PHOTO_MIDDLE_GREY_EXPOSURE = 0.18f;
 	//! The halation of a film (see StelPhotoBloom::computeHalationWeights()): a ring of light reflected at the back
@@ -1515,6 +1519,8 @@ private:
 	mutable PhotoFilmSpec photoPushedFilmSpec = {};
 	//! Film: the reciprocity failure per point after its brightness (else the same for the whole picture)
 	bool flagPhotoReciprocityPerPoint = true;
+	//! Film: the sky from its spectrum (X, Y, Z, W), else from its color (rgbToFilm)
+	bool flagPhotoFilmSpectralSky = false;
 	//! Program mode: the highest ISO and the longest exposure time it may use
 	double photoProgramMaxISO = PHOTO_PROGRAM_MAX_ISO;
 	double photoProgramMaxTime = PHOTO_AUTO_MAX_TIME;

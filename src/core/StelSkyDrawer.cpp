@@ -145,6 +145,7 @@ StelSkyDrawer::StelSkyDrawer(StelCore* acore) :
 	flagPhotoBloom = conf->value("viewing/flag_photographic_bloom", true).toBool();
 	photoAntihalationDensity = conf->value("astro/photographic_antihalation_density", -1.0).toFloat();
 	flagPhotoReciprocityPerPoint = conf->value("astro/flag_photographic_reciprocity_per_point", true).toBool();
+	flagPhotoFilmSpectralSky = conf->value("astro/flag_photographic_film_spectral_sky", false).toBool();
 	flagPhotoAutoExposure = conf->value("viewing/flag_photographic_auto_exposure", false).toBool();
 	photoMeteringMode = qBound(0, conf->value("viewing/photographic_metering_mode", 0).toInt(), 2);
 	flagPhotoInfoLine = conf->value("viewing/flag_photographic_info_line", true).toBool();
@@ -1123,12 +1124,13 @@ void StelSkyDrawer::update(double)
 		const float exposure = getPhotoExposureFactor();
 		const float skyLuminance = (lmgr && lmgr->getFlagAtmosphere()) ? 0.5f*lmgr->getAtmosphereAverageLuminance() : 0.f;
 		photoSkyBackground = skyLuminance * getPhotoSceneScale();
-		// Half a step of the display above the sky, through the tone curve and the sRGB encoding
+		// Half a step of the display above the sky, through the tone curve and the sRGB encoding. With a film, the
+		// reciprocity failure of each point comes before the curve (see getPhotoReciprocityParams())
 		const float skyOnScreen = photoSkyBackground * exposure;
-		const float skyDisplay = photoToneCurveValue(skyOnScreen);
+		const float skyDisplay = photoToneCurveValue(photoFilmRecordedExposure(skyOnScreen));
 		const float skyEncoded = skyDisplay <= 0.0031308f ? 12.92f*skyDisplay : 1.055f*std::pow(skyDisplay, 1.f/2.4f) - 0.055f;
 		const float nextDisplay = srgbToLinear(qMin(skyEncoded + 0.5f/255.f, 1.f));
-		const float nextOnScreen = photoToneCurveInverse(nextDisplay);
+		const float nextOnScreen = photoFilmExposureForRecorded(photoToneCurveInverse(nextDisplay), skyOnScreen);
 		// A saturated (white) sky hides everything
 		photoVisibleThreshold = (nextOnScreen > skyOnScreen) ? (nextOnScreen - skyOnScreen) / exposure : 1e30f;
 		// The noise of the sky in a pixel of the picture, whether the noise is shown or not: a real sensor
@@ -1149,21 +1151,25 @@ void StelSkyDrawer::update(double)
 			const double aperture = M_PI*24e-6*24e-6;
 			const double relative = std::log(10.)*f.granularity/1000./f.gamma * std::sqrt(aperture/(pixel*pixel));
 			const double level = qMax(static_cast<double>(photoSkyBackground), 0.18/16.);
-			// The density of the film at the sky: a slide is densest in the dark sky, a negative there thin
+			// The density of the film at the sky: a slide is densest in the dark sky, a negative there thin. With the
+			// reciprocity failure per point the film records xr = f(x): the curve is steeper by k = dln f/dln x (1.3 for
+			// Provia 400F in a faint sky), and the grain smaller by that factor, measured in exposure
 			double density;
 			const double x = level*static_cast<double>(exposure);
+			const double xr = static_cast<double>(photoFilmRecordedExposure(static_cast<float>(x)));
+			const double k = qMax(0.2, std::log(static_cast<double>(photoFilmRecordedExposure(static_cast<float>(1.05*x)))/qMax(1e-30, xr))/std::log(1.05));
 			if (f.type == PhotoFilmSlide)
 			{
-				const double y = qMax(static_cast<double>(photoToneCurveValue(static_cast<float>(x))),
+				const double y = qMax(static_cast<double>(photoToneCurveValue(static_cast<float>(xr))),
 				                      std::pow(10., static_cast<double>(PHOTO_SLIDE_BASE_DENSITY - PHOTO_SLIDE_MAX_DENSITY)));
 				density = static_cast<double>(PHOTO_SLIDE_BASE_DENSITY) - std::log10(y);
 			}
 			else
 			{
 				const double toe = static_cast<double>(f.toneMid)/16.;
-				density = static_cast<double>(PHOTO_NEGATIVE_FOG_DENSITY) + f.gamma*std::log10(qMax(1., x/toe));
+				density = static_cast<double>(PHOTO_NEGATIVE_FOG_DENSITY) + f.gamma*std::log10(qMax(1., xr/toe));
 			}
-			photoNoiseSigma = static_cast<float>(relative*level*std::sqrt(density));
+			photoNoiseSigma = static_cast<float>(relative*level*std::sqrt(density)/k);
 		}
 		else
 		{
@@ -2757,6 +2763,10 @@ const StelSkyDrawer::PhotoFilmSpec& StelSkyDrawer::getPhotoFilmSpec(int film)
 	// stars, planets, Milky Way and landscape: 1-2% off for blackbodies) and from the X, Y, Z and scotopic W
 	// of ShowMySky (skyXYZW: the violet twilight within about 5%; from sRGB the film would lose half of the red;
 	// the lightweight atmosphere has no W, it is estimated from X, Y and Z, see xyYToRGB.glsl: about 7%).
+	// The sky from X, Y, Z, W is off by default (astro/flag_photographic_film_spectral_sky): its large coefficients
+	// cancel each other, so that a few percent in W make 25% in red, and the violet it gives to the twilight is not
+	// in Till Credner's twilight slides (Ektachrome, Sensia: a deep blue sky over an orange horizon), which the
+	// colors of rgbToFilm match.
 	// The airglow (O I 557.7 and 630.0/636.4 nm, Na 589 nm, OH bands, with a continuum fitted to its color) is
 	// computed from its spectrum directly.
 	// Emission nebulae (H II regions) too: their light is in lines, most of it in H-alpha at 656 nm, which the V band
@@ -2808,6 +2818,50 @@ const StelSkyDrawer::PhotoFilmSpec& StelSkyDrawer::getPhotoFilmSpec(int film)
 // that of middle grey): its exposure counts with t_eff(t_n)/t_n. Middle grey goes as before; a faint sky loses much
 // more, a bright star core less: the long exposures of film have their dark skies and high contrast. The green
 // filter of the data sheet, per point the same way: the faint parts of a long exposure turn magenta.
+// The exposure a film records at the camera exposure x (middle grey 0.18): x times the share that counts after
+// the reciprocity failure at the brightness of the point (as the shader does it, without the color shift)
+float StelSkyDrawer::photoFilmRecordedExposure(float x) const
+{
+	const PhotoReciprocityParams p = getPhotoReciprocityParams();
+	if (!p.enabled || !(x > 0.f))
+		return x;
+	const double tn = qMin(1e20, static_cast<double>(p.time)*PHOTO_MIDDLE_GREY_EXPOSURE/static_cast<double>(x));
+	if (tn <= static_cast<double>(p.times[0]))
+		return x;
+	for (int i = 1; i < p.points; ++i)
+		if (tn <= static_cast<double>(p.times[i]))
+		{
+			const double u = std::log(tn/static_cast<double>(p.times[i-1]))/std::log(static_cast<double>(p.times[i]/p.times[i-1]));
+			const double te = static_cast<double>(p.effective[i-1])*std::pow(static_cast<double>(p.effective[i]/p.effective[i-1]), u);
+			return static_cast<float>(static_cast<double>(x)*te/tn);
+		}
+	const int last = p.points - 1;
+	const double te = static_cast<double>(p.effective[last])*std::pow(tn/static_cast<double>(p.times[last]), static_cast<double>(p.exponent));
+	return static_cast<float>(static_cast<double>(x)*te/tn);
+}
+
+// The camera exposure that a film records as xr (the inverse of photoFilmRecordedExposure(), which grows
+// monotonically), found from x0 upwards or downwards
+float StelSkyDrawer::photoFilmExposureForRecorded(float xr, float x0) const
+{
+	if (!getPhotoReciprocityParams().enabled || !(xr > 0.f))
+		return xr;
+	double lo = qMax(1e-30, static_cast<double>(x0)), hi = lo;
+	while (photoFilmRecordedExposure(static_cast<float>(lo)) > xr && lo > 1e-30)
+		lo *= 0.5;
+	while (photoFilmRecordedExposure(static_cast<float>(hi)) < xr && hi < 1e30)
+		hi *= 2.;
+	for (int i = 0; i < 40; ++i)
+	{
+		const double m = std::sqrt(lo*hi);
+		if (photoFilmRecordedExposure(static_cast<float>(m)) < xr)
+			lo = m;
+		else
+			hi = m;
+	}
+	return static_cast<float>(std::sqrt(lo*hi));
+}
+
 StelSkyDrawer::PhotoReciprocityParams StelSkyDrawer::getPhotoReciprocityParams() const
 {
 	PhotoReciprocityParams p;
@@ -2911,7 +2965,7 @@ const float* StelSkyDrawer::getPhotoWhiteBalanceMatrix() const
 
 void StelSkyDrawer::setPhotoFilmSkyUniforms(QOpenGLShaderProgram& program) const
 {
-	const float* m = getFlagPhotographicModeActive() ? getPhotoFilmSkyMatrix() : nullptr;
+	const float* m = (getFlagPhotographicModeActive() && flagPhotoFilmSpectralSky) ? getPhotoFilmSkyMatrix() : nullptr;
 	program.setUniformValue("photoFilmSky", m != nullptr);
 	if (!m)
 		return;
