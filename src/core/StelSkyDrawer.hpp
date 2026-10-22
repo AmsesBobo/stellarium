@@ -55,6 +55,12 @@ struct RCMag
 //! @class StelSkyDrawer
 //! Provide a set of methods used to draw sky objects taking into account
 //! eyes adaptation, zoom level, instrument model and artificially set magnitude limits
+//!
+//! The photographic mode (a camera instead of the eye) is implemented in its own files:
+//! StelSkyDrawerPhotoCamera.cpp (camera settings, tone curve, lens, sensor), StelSkyDrawerPhotoExposure.cpp
+//! (automatic and program exposure, metering, information line), StelSkyDrawerPhotoFilm.cpp (the films),
+//! StelSkyDrawerPhotoStars.cpp (stars and planets: point spread function, trails), StelSkyDrawerPhotoSky.cpp
+//! (white balance, extinction colors, airglow) and StelSkyDrawerPhotoImages.cpp (images of planets and landscape).
 class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 {
 	Q_OBJECT
