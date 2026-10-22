@@ -169,10 +169,11 @@ StelSkyDrawer::StelSkyDrawer(StelCore* acore) :
 	photoMount = qBound(static_cast<int>(PhotoMountTripod), conf->value("viewing/photographic_mount", static_cast<int>(PhotoMountTripod)).toInt(), static_cast<int>(PhotoMountView));
 	photoSensorFormat = qBound(0, conf->value("viewing/photographic_sensor_format", static_cast<int>(PhotoSensorFullFrame)).toInt(), PHOTO_SENSOR_FORMAT_COUNT - 1);
 	photoFilm = qBound(0, conf->value("viewing/photographic_film", 0).toInt(), PHOTO_FILM_COUNT - 1);
+	photoFilmPush = qBound(0, conf->value("viewing/photographic_film_push", 0).toInt(), PHOTO_FILM_MAX_PUSH);
 	photoDigitalISO = photoISO;
 	if (photoFilm != PhotoFilmNone)
 	{
-		photoISO = getPhotoFilmSpec(photoFilm).iso;
+		photoISO = getPhotoActiveFilmSpec().iso;
 		photoHaloFraction = photoFilmHaloFraction;
 	}
 	updatePhotoToneCurve();
@@ -1141,7 +1142,7 @@ void StelSkyDrawer::update(double)
 			// ln(10) sigma_D / gamma, smaller in a larger area (the square root of the areas). The level is the
 			// sky, but at least the toe of the curve (4 stops below middle grey): fainter light hardly blackens
 			// the film at all (its inertia), and a star must stand out of the grain there.
-			const PhotoFilmSpec& f = getPhotoFilmSpec(photoFilm);
+			const PhotoFilmSpec& f = getPhotoActiveFilmSpec();
 			const StelProjectorP prj = core->getProjection(StelCore::FrameJ2000);
 			const double diagonal = getPhotoFrameDiagonal(*prj);
 			const double pixel = diagonal > 0. ? getPhotoSensorDiagonal()/diagonal : 6e-6;  // on the film, meters
@@ -2536,7 +2537,7 @@ void StelSkyDrawer::updatePhotoToneCurve()
 	// a picture a little darker than middle grey at the metered exposure; negatives printed on paper soft
 	if (photoFilm != PhotoFilmNone)
 	{
-		const PhotoFilmSpec& f = getPhotoFilmSpec(photoFilm);
+		const PhotoFilmSpec& f = getPhotoActiveFilmSpec();
 		a = f.toneA;
 		clip = f.toneClip;
 		midOut = static_cast<double>(f.toneMid);
@@ -2801,7 +2802,7 @@ StelSkyDrawer::PhotoReciprocityParams StelSkyDrawer::getPhotoReciprocityParams()
 	PhotoReciprocityParams p;
 	if (!getFlagPhotoFilmActive() || !flagPhotoReciprocityPerPoint)
 		return p;
-	const PhotoFilmSpec& f = getPhotoFilmSpec(photoFilm);
+	const PhotoFilmSpec& f = getPhotoActiveFilmSpec();
 	if (f.points <= 0)
 		return p;
 	p.enabled = true;
@@ -2821,7 +2822,7 @@ double StelSkyDrawer::getPhotoFilmEffectiveTime(double t) const
 {
 	if (!getFlagPhotoFilmActive() || !(t > 0.))
 		return t;
-	const PhotoFilmSpec& f = getPhotoFilmSpec(photoFilm);
+	const PhotoFilmSpec& f = getPhotoActiveFilmSpec();
 	if (f.points <= 0 || t <= f.time[0])
 		return t;
 	for (int i = 1; i < f.points; ++i)
@@ -2840,7 +2841,7 @@ Vec3f StelSkyDrawer::getPhotoFilmTint(double t) const
 {
 	if (!getFlagPhotoFilmActive() || !(t > 0.))
 		return Vec3f(1.f);
-	const PhotoFilmSpec& f = getPhotoFilmSpec(photoFilm);
+	const PhotoFilmSpec& f = getPhotoActiveFilmSpec();
 	double green = 0.;
 	if (f.points > 0 && t > f.time[0])
 	{
@@ -2861,7 +2862,7 @@ Vec3f StelSkyDrawer::getPhotoFilmMonoWeights() const
 {
 	if (!getFlagPhotoFilmActive())
 		return Vec3f(0.f);
-	const PhotoFilmSpec& f = getPhotoFilmSpec(photoFilm);
+	const PhotoFilmSpec& f = getPhotoActiveFilmSpec();
 	if (f.type != PhotoFilmMonochrome)
 		return Vec3f(0.f);
 	return Vec3f(f.mono[0], f.mono[1], f.mono[2]);
@@ -2871,7 +2872,7 @@ const float* StelSkyDrawer::getPhotoWhiteBalanceMatrix() const
 {
 	if (!getFlagPhotoFilmActive())
 		return photoWBMatrix;
-	const PhotoFilmSpec& f = getPhotoFilmSpec(photoFilm);
+	const PhotoFilmSpec& f = getPhotoActiveFilmSpec();
 	if (f.type == PhotoFilmMonochrome)
 	{
 		// The black and white picture is made from the film's own sensitivity (see getPhotoFilmMonoWeights())
@@ -2912,7 +2913,7 @@ const float* StelSkyDrawer::getPhotoFilmSkyMatrix() const
 {
 	if (!getFlagPhotoFilmActive())
 		return nullptr;
-	const PhotoFilmSpec& f = getPhotoFilmSpec(photoFilm);
+	const PhotoFilmSpec& f = getPhotoActiveFilmSpec();
 	return getPhotoFilmSpectral(f) ? f.skyXYZW : nullptr;
 }
 
@@ -2934,7 +2935,7 @@ void StelSkyDrawer::setPhotoFilm(int film)
 		photoHaloFraction = (f != PhotoFilmNone) ? photoFilmHaloFraction : photoDigitalHaloFraction;
 		emit photoHaloStrengthChanged(static_cast<double>(photoHaloFraction));
 	}
-	const double iso = (f != PhotoFilmNone) ? getPhotoFilmSpec(f).iso : photoDigitalISO;
+	const double iso = (f != PhotoFilmNone) ? getPhotoActiveFilmSpec().iso : photoDigitalISO;
 	if (photoProgramRunning)
 		photoUserISO = iso;
 	if (!qFuzzyCompare(iso, photoISO))
@@ -2951,6 +2952,50 @@ void StelSkyDrawer::setPhotoFilm(int film)
 	updatePhotoToneCurve();
 	StelApp::immediateSave("viewing/photographic_film", f);
 	emit photoFilmChanged(f);
+}
+
+// Push processing: a longer first development (slide film) or development (negative) for a film exposed at a
+// higher speed. Each stop doubles the speed; the curve gets steeper (about 12% more contrast per stop: the shadows
+// fall deeper, the picture gains contrast) and the grain coarser (about 12% per stop in the data sheets of
+// Kodak E200 and Fuji Provia 400F, 15% for black and white films, Tri-X at 1600). The reciprocity failure is not
+// changed by it.
+const StelSkyDrawer::PhotoFilmSpec& StelSkyDrawer::getPhotoActiveFilmSpec() const
+{
+	photoPushedFilmSpec = getPhotoFilmSpec(photoFilm);
+	if (photoFilm == PhotoFilmNone || photoFilmPush == 0)
+		return photoPushedFilmSpec;
+	const double p = static_cast<double>(photoFilmPush);
+	const bool mono = photoPushedFilmSpec.type == PhotoFilmMonochrome;
+	photoPushedFilmSpec.iso *= std::exp2(p);
+	const double contrast = 1. + 0.12*p;
+	photoPushedFilmSpec.gamma *= contrast;
+	photoPushedFilmSpec.toneA = static_cast<float>(static_cast<double>(photoPushedFilmSpec.toneA)*contrast);
+	photoPushedFilmSpec.granularity *= std::pow(mono ? 1.15 : 1.12, p);
+	return photoPushedFilmSpec;
+}
+
+void StelSkyDrawer::setPhotoFilmPush(int stops)
+{
+	const int p = qBound(0, stops, PHOTO_FILM_MAX_PUSH);
+	if (p == photoFilmPush)
+		return;
+	photoFilmPush = p;
+	if (photoFilm != PhotoFilmNone)
+	{
+		const double iso = getPhotoActiveFilmSpec().iso;
+		if (photoProgramRunning)
+			photoUserISO = iso;
+		if (!qFuzzyCompare(iso, photoISO))
+		{
+			if (flagPhotoAutoExposure)
+				photoAutoExposureTime = qBound(PHOTO_AUTO_MIN_TIME, photoAutoExposureTime*photoISO/iso, PHOTO_AUTO_MAX_TIME);
+			photoISO = iso;
+			emit photoISOChanged(iso);
+		}
+		updatePhotoToneCurve();
+	}
+	StelApp::immediateSave("viewing/photographic_film_push", p);
+	emit photoFilmPushChanged(p);
 }
 
 Vec4f StelSkyDrawer::getPhotoFrame(const StelProjector& prj) const
@@ -3104,7 +3149,7 @@ StelSkyDrawer::PhotoGrainParams StelSkyDrawer::getPhotoGrainParams(const StelPro
 	PhotoGrainParams p;
 	if (photoNoise == PhotoNoiseOff || !getFlagPhotoFilmActive())
 		return p;
-	const PhotoFilmSpec& f = getPhotoFilmSpec(photoFilm);
+	const PhotoFilmSpec& f = getPhotoActiveFilmSpec();
 	double pixel = PHOTO_FILM_SCAN_PIXEL;
 	if (photoNoise != PhotoNoisePixel)
 	{
@@ -3136,7 +3181,7 @@ StelSkyDrawer::PhotoHalationParams StelSkyDrawer::getPhotoHalationParams(const S
 	PhotoHalationParams p;
 	if (!getFlagPhotoFilmActive() || !getFlagPhotoBloomActive())
 		return p;
-	const PhotoFilmSpec& f = getPhotoFilmSpec(photoFilm);
+	const PhotoFilmSpec& f = getPhotoActiveFilmSpec();
 	const double diagonal = getPhotoFrameDiagonal(prj);
 	if (!(diagonal > 0.))
 		return p;
@@ -4048,6 +4093,7 @@ void StelSkyDrawer::savePhotoSettings(QSettings* conf) const
 	conf->setValue("viewing/photographic_aperture", photoProgramRunning ? photoUserAperture : photoAperture);
 	conf->setValue("viewing/photographic_iso", photoFilm != PhotoFilmNone ? photoDigitalISO : (photoProgramRunning ? photoUserISO : photoISO));
 	conf->setValue("viewing/photographic_film", photoFilm);
+	conf->setValue("viewing/photographic_film_push", photoFilmPush);
 	conf->setValue("viewing/flag_photographic_zoom_whole_millimeters", getFlagPhotoZoomWholeMillimeters());
 	conf->setValue("viewing/flag_photographic_portrait", getFlagPhotoPortrait());
 	conf->setValue("viewing/photographic_eclipse_atmosphere", getPhotoEclipseAtmosphere());
@@ -4361,9 +4407,9 @@ Vec3f StelSkyDrawer::getPhotoAirglow() const
 	// (luminance 1): a warm, brownish grey in daylight white balance.
 	Vec3f color(1.227f, 0.959f, 0.748f);
 	// A color film sees the lines with its own layers (see getPhotoFilmSpec())
-	if (getFlagPhotoFilmActive() && getPhotoFilmSpectral(getPhotoFilmSpec(photoFilm)))
+	if (getFlagPhotoFilmActive() && getPhotoFilmSpectral(getPhotoActiveFilmSpec()))
 	{
-		const float* c = getPhotoFilmSpec(photoFilm).airglow;
+		const float* c = getPhotoActiveFilmSpec().airglow;
 		color.set(c[0], c[1], c[2]);
 	}
 	return color*static_cast<float>(luminance*static_cast<double>(getPhotoSceneScale()));
@@ -4744,6 +4790,7 @@ void StelSkyDrawer::resetPhotographicSettings()
 	setFlagPhotoStarTrails(true);
 	setPhotoMount(PhotoMountTripod);
 	setPhotoNoise(PhotoNoiseImage);
+	setPhotoFilmPush(0);
 	setPhotoFilm(PhotoFilmNone);
 	setPhotoSensorFormat(PhotoSensorFullFrame);
 	setFlagPhotoZoomWholeMillimeters(false);
@@ -4945,7 +4992,7 @@ void StelSkyDrawer::applyPhotoProgram(double exposure)
 	const double tLimit = tracker ? tMax : qBound(tHand, PHOTO_PROGRAM_RULE/qMax(1., focalMm*crop), tMax);
 	// With a film the speed is fixed: the program changes only the time and the aperture
 	const bool film = photoFilm != PhotoFilmNone;
-	const double S0 = film ? getPhotoFilmSpec(photoFilm).iso : PHOTO_PROGRAM_BASE_ISO;
+	const double S0 = film ? getPhotoActiveFilmSpec().iso : PHOTO_PROGRAM_BASE_ISO;
 	const double Smax = film ? S0 : qMax(S0, photoProgramMaxISO);
 	const double Nday = PHOTO_PROGRAM_DAY_APERTURE, Nsmall = PHOTO_PROGRAM_MIN_APERTURE;
 	const double Nwide = PHOTO_LENS_MAX_APERTURE;
@@ -5147,10 +5194,12 @@ void StelSkyDrawer::drawPhotoInfoLine(StelCore* core) const
 	// Focal length of the lens for this field on the sensor in use, and the focus when it is not at infinity
 	{
 		QString lens = QString("%1 mm").arg(qRound(1000.*getPhotoFocalLength(*core->getProjection(StelCore::FrameJ2000))));
-		const char* sensor = getFlagPhotoFilmActive() ? getPhotoFilmSpec(photoFilm).shortName
+		const char* sensor = getFlagPhotoFilmActive() ? getPhotoActiveFilmSpec().shortName
 		                                              : getPhotoSensorSpec(photoSensorFormat).shortName;
 		if (sensor[0] != 0)
 			lens += QStringLiteral(" ") + QString::fromUtf8(sensor);
+		if (getFlagPhotoFilmActive() && photoFilmPush > 0)
+			lens += QStringLiteral(" +%1").arg(photoFilmPush);
 		parts << lens;
 	}
 	if (photoFocusDistance != 0.)

@@ -366,11 +366,22 @@
            </widget>
           </item>
           <item row="17" column="1">
-           <widget class="QComboBox" name="filmComboBox">
-            <property name="toolTip">
-             <string>Film in the camera instead of the digital sensor (35 mm). The film sets the speed (ISO), the color balance (daylight, 5500 K) and its own characteristic curve: slide film is steep and has little room for highlights, a negative printed on paper is soft. Long exposures lose speed (reciprocity failure, from the data sheets): a 10 minute exposure on Tri-X counts as about 1.5 minutes; the exposure meter does not know it. Some slide films also shift in color in long exposures (Provia 400F: towards magenta). The faintest stars are those that stand out of the grain of the film.</string>
-            </property>
-           </widget>
+           <layout class="QHBoxLayout" name="filmLayout">
+            <item>
+             <widget class="QComboBox" name="filmComboBox">
+              <property name="toolTip">
+               <string>Film in the camera instead of the digital sensor (35 mm). The film sets the speed (ISO), the color balance (daylight, 5500 K) and its own characteristic curve: slide film is steep and has little room for highlights, a negative printed on paper is soft. Long exposures lose speed (reciprocity failure, from the data sheets): a 10 minute exposure on Tri-X counts as about 1.5 minutes; the exposure meter does not know it. Some slide films also shift in color in long exposures (Provia 400F: towards magenta). The faintest stars are those that stand out of the grain of the film.</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QComboBox" name="filmPushComboBox">
+              <property name="toolTip">
+               <string>Push processing: the film exposed at a higher speed and developed longer, as astrophotographers often did. Each stop doubles the speed (ISO), makes the picture more contrasty and the grain coarser.</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
           </item>
           <item row="18" column="0">
            <widget class="QLabel" name="focalLengthLabel">

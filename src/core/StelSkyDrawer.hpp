@@ -165,6 +165,8 @@ class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 	//! Photographic mode: film in the camera instead of the digital sensor (see PhotoFilm; 0 = the digital sensor).
 	//! The film sets the speed, the color balance, the characteristic curve and the grain; it is 35 mm (36 x 24 mm).
 	Q_PROPERTY(int photoFilm READ getPhotoFilm WRITE setPhotoFilm NOTIFY photoFilmChanged)
+	//! Push processing of the film, in stops (0: normal): more speed, contrast and grain
+	Q_PROPERTY(int photoFilmPush READ getPhotoFilmPush WRITE setPhotoFilmPush NOTIFY photoFilmPushChanged)
 	//! Zooming with the mouse wheel steps the focal length in whole millimeters, as marked on a zoom lens
 	Q_PROPERTY(bool flagPhotoZoomWholeMillimeters READ getFlagPhotoZoomWholeMillimeters WRITE setFlagPhotoZoomWholeMillimeters NOTIFY flagPhotoZoomWholeMillimetersChanged)
 	//! The camera is turned for a portrait (upright) picture: the long side of the sensor is vertical
@@ -455,6 +457,9 @@ public:
 	//! The sky in the spectral model of the color film in use (rows of getPhotoFilmSpec().skyXYZW), or nullptr
 	const float* getPhotoFilmSkyMatrix() const;
 	static const PhotoFilmSpec& getPhotoFilmSpec(int film);
+	//! The film in use with its push processing (speed, contrast and grain changed, see setPhotoFilmPush())
+	const PhotoFilmSpec& getPhotoActiveFilmSpec() const;
+	static constexpr int PHOTO_FILM_MAX_PUSH = 2;
 	//! Whether a film is in use now (photographic mode on)
 	bool getFlagPhotoFilmActive() const {return photoFilm != PhotoFilmNone && getFlagPhotographicModeActive();}
 	//! The exposure time that counts for the film (reciprocity failure), for the exposure time t (seconds)
@@ -877,6 +882,9 @@ public slots:
 	//! Put a film in the camera (see PhotoFilm), or the digital sensor back (0). The lens stays.
 	void setPhotoFilm(int film);
 	int getPhotoFilm() const {return photoFilm;}
+	//! Push processing of the film in stops (0 to PHOTO_FILM_MAX_PUSH)
+	void setPhotoFilmPush(int stops);
+	int getPhotoFilmPush() const {return photoFilmPush;}
 	//! Zoom the view to the field of a lens of the given focal length (millimeters) on the sensor in use
 	void setPhotoFocalLength(double millimeters);
 	//! Zooming with the mouse wheel in whole millimeters of focal length (see flagPhotoZoomWholeMillimeters)
@@ -1144,6 +1152,7 @@ signals:
 	void photoNoiseChanged(int mode);
 	void photoSensorFormatChanged(int format);
 	void photoFilmChanged(int film);
+	void photoFilmPushChanged(int stops);
 	void flagPhotoZoomWholeMillimetersChanged(bool b);
 	void flagPhotoPortraitChanged(bool b);
 	void flagPhotoFrameMaskChanged(bool b);
@@ -1498,6 +1507,9 @@ private:
 	bool flagPhotoProgramExposure = false;
 	//! Film halation: the density of the antihalation layer (negative: the film's own, see getPhotoHalationParams())
 	float photoAntihalationDensity = -1.f;
+	//! Push processing of the film (stops), and the film's data with it
+	int photoFilmPush = 0;
+	mutable PhotoFilmSpec photoPushedFilmSpec = {};
 	//! Film: the reciprocity failure per point after its brightness (else the same for the whole picture)
 	bool flagPhotoReciprocityPerPoint = true;
 	//! Program mode: the highest ISO and the longest exposure time it may use

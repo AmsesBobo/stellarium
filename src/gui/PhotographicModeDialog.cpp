@@ -177,6 +177,11 @@ void PhotographicModeDialog::fillComboBoxes()
 		const QSignalBlocker blocker(ui->filmComboBox);
 		ui->filmComboBox->clear();
 		ui->filmComboBox->addItem(q_("None (digital sensor)"), StelSkyDrawer::PhotoFilmNone);
+		const QSignalBlocker pushBlocker(ui->filmPushComboBox);
+		ui->filmPushComboBox->clear();
+		ui->filmPushComboBox->addItem(q_("Normal"), 0);
+		for (int p = 1; p <= StelSkyDrawer::PHOTO_FILM_MAX_PUSH; ++p)
+			ui->filmPushComboBox->addItem(q_("Push +%1").arg(p), p);
 		for (int film = 1; film < StelSkyDrawer::PHOTO_FILM_COUNT; ++film)
 		{
 			const StelSkyDrawer::PhotoFilmSpec& f = StelSkyDrawer::getPhotoFilmSpec(film);
@@ -389,6 +394,12 @@ void PhotographicModeDialog::createDialogContent()
 	});
 	connect(drawer, &StelSkyDrawer::photoEclipseAtmosphereChanged,     this, &PhotographicModeDialog::updateCameraWidgets);
 	// Sensor and lens
+	connect(ui->filmPushComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this, drawer](int index)
+	{
+		if (index >= 0)
+			drawer->setPhotoFilmPush(ui->filmPushComboBox->itemData(index).toInt());
+	});
+	connect(drawer, &StelSkyDrawer::photoFilmPushChanged, this, &PhotographicModeDialog::updateCameraWidgets);
 	connect(ui->filmComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this, drawer](int index)
 	{
 		if (index >= 0)
@@ -571,6 +582,9 @@ void PhotographicModeDialog::updateCameraWidgets()
 		const bool film = drawer->getPhotoFilm() != StelSkyDrawer::PhotoFilmNone;
 		const QSignalBlocker blocker(ui->filmComboBox);
 		ui->filmComboBox->setCurrentIndex(qMax(0, ui->filmComboBox->findData(drawer->getPhotoFilm())));
+		const QSignalBlocker pushBlocker(ui->filmPushComboBox);
+		ui->filmPushComboBox->setCurrentIndex(qMax(0, ui->filmPushComboBox->findData(drawer->getPhotoFilmPush())));
+		ui->filmPushComboBox->setEnabled(film);
 		// The same list switches the sensor noise or the grain of the film
 		ui->noiseLabel->setText(film ? q_("Film grain:") : q_("Sensor noise:"));
 		ui->noiseComboBox->setToolTip(film ? q_("The grain of the film: the silver grains or dye clouds lie at random, more of them where the film is denser (the RMS granularity of the data sheet, growing as the square root of the density). A slide is densest in the dark parts, so the grain shows most in a dark night sky; a faster film has coarser grain. \"Whole picture\": as the whole frame looks on the screen. \"100% view\": a scan at 4000 dpi.")
