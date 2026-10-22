@@ -134,6 +134,8 @@ private:
 		int photoDestretch;
 		int photoCurve;
 		int photoCurveTop;
+		int photoStarFactor;
+		int photoGalacticPole;
 	} shaderVars;
 
 	//! Photographic mode: luminance (cd/m^2) of a linear value of 1.0 in photoTex. It calibrates the
@@ -148,6 +150,15 @@ private:
 	//! Photographic mode: gains on the linear red, green and blue of photoTex (luminance kept), which bring its mean
 	//! color to the measured one of the integrated starlight (config: astro/milky_way_photo_color_gain)
 	Vec3f photoColorGain = Vec3f(1.f);
+	//! Photographic mode: leave out of the texture the light of the stars that Stellarium draws as points, so that
+	//! it is not counted twice (config: astro/flag_milky_way_photo_star_subtraction, see photoStarFactors())
+	bool flagPhotoStarSubtraction = true;
+	//! Photographic mode: the factors on the texture for the galactic latitudes 0, 5, ..., 90 degrees, for the
+	//! stars drawn down to the magnitude mag (all of the texture's light minus theirs), and that magnitude
+	void photoStarFactors(float mag, float factors[19]) const;
+	float photoDrawnStarsMagnitude(const class StelSkyDrawer* drawer) const;
+	float photoLastStarsMagnitude = -100.f;
+	mutable float photoDetectionMagnitude = 0.f; //!< the faintest stars the picture shows (for the log)
 
 	std::unique_ptr<QOpenGLVertexArrayObject> vao;
 	std::unique_ptr<QOpenGLBuffer> vbo;

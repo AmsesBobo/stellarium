@@ -252,6 +252,9 @@ public slots:
 	void setFlagStars(bool b);
 	//! Get display flag for Stars
 	bool getFlagStars(void) const {return starsFader==true;}
+	//! The faint end of the loaded star catalogs (magnitude): fainter stars are not drawn (-100: none loaded).
+	//! The photographic Milky Way leaves out the light of the stars that are drawn (see MilkyWay::draw()).
+	float getCatalogsFaintestMag(void) const {return catalogsFaintestMag;}
 
 	//! Set display flag for Star names (labels).
 	void setFlagLabels(bool b);
@@ -587,6 +590,8 @@ private:
 
 	int maxGeodesicGridLevel;
 	int lastMaxSearchLevel;
+	//! The faint end of the loaded star catalogs (their "magRange")
+	float catalogsFaintestMag = -100.f;
 	
 	// A ZoneArray per grid level
 	QVector<ZoneArray*> gridLevels;
