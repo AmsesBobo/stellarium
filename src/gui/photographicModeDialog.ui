@@ -135,11 +135,25 @@
            </widget>
           </item>
           <item row="5" column="1">
-           <widget class="QComboBox" name="apertureComboBox">
-            <property name="toolTip">
-             <string>f-number of the lens. The field of view of the screen acts as the focal length.</string>
-            </property>
-           </widget>
+           <layout class="QHBoxLayout" name="apertureLayout">
+            <item>
+             <widget class="QComboBox" name="apertureComboBox">
+              <property name="toolTip">
+               <string>f-number of the lens. The field of view of the screen acts as the focal length.</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QCheckBox" name="programApertureLockCheckBox">
+              <property name="text">
+               <string>Keep in P</string>
+              </property>
+              <property name="toolTip">
+               <string>Program mode: keep this aperture and let the camera choose only the exposure time and the ISO, as aperture priority with automatic ISO does on a camera.</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
           </item>
           <item row="6" column="0">
            <widget class="QLabel" name="isoLabel">
@@ -658,6 +672,20 @@
             </property>
             <property name="text">
              <string notr="true">∞</string>
+            </property>
+           </widget>
+          </item>
+          <item row="7" column="0">
+           <widget class="QLabel" name="lensMaxApertureLabel">
+            <property name="text">
+             <string>Widest aperture:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="7" column="1">
+           <widget class="QComboBox" name="lensMaxApertureComboBox">
+            <property name="toolTip">
+             <string>The widest aperture (smallest f-number) of the lens, as for a lens you own. Neither you nor the program mode can open wider. A slow lens wide open shows the same vignetting and aberrations as a fast lens wide open.</string>
             </property>
            </widget>
           </item>

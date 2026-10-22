@@ -88,6 +88,7 @@ class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 	Q_PROPERTY(double photoExposureTime READ getPhotoExposureTime WRITE setPhotoExposureTime NOTIFY photoExposureTimeChanged)
 	//! Aperture (f-number) of the virtual camera in the photographic mode, e.g. 2.8 for f/2.8.
 	Q_PROPERTY(double photoAperture READ getPhotoAperture WRITE setPhotoAperture NOTIFY photoApertureChanged)
+	Q_PROPERTY(double photoLensMaxAperture READ getPhotoLensMaxAperture WRITE setPhotoLensMaxAperture NOTIFY photoLensMaxApertureChanged)
 	//! ISO sensitivity of the virtual camera in the photographic mode.
 	Q_PROPERTY(double photoISO READ getPhotoISO WRITE setPhotoISO NOTIFY photoISOChanged)
 	//! Smallest width (FWHM) of a star image in pixels, set by sensor and optics.
@@ -111,6 +112,7 @@ class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 	//! With the automatic exposure: program mode (P) with automatic ISO instead of aperture priority. The camera
 	//! chooses the exposure time, the aperture and the ISO along a program line (see applyPhotoMeterReading()).
 	Q_PROPERTY(bool flagPhotoProgramExposure READ getFlagPhotoProgramExposure WRITE setFlagPhotoProgramExposure NOTIFY flagPhotoProgramExposureChanged)
+	Q_PROPERTY(bool flagPhotoProgramApertureLock READ getFlagPhotoProgramApertureLock WRITE setFlagPhotoProgramApertureLock NOTIFY flagPhotoProgramApertureLockChanged)
 	//! Program mode: the highest ISO the automatic ISO may use (like the "maximum sensitivity" of a camera's auto-ISO menu)
 	Q_PROPERTY(double photoProgramMaxISO READ getPhotoProgramMaxISO WRITE setPhotoProgramMaxISO NOTIFY photoProgramMaxISOChanged)
 	//! Program mode: the longest exposure time the program may use, in seconds (on a fixed tripod the "500 rule" can make it shorter)
@@ -377,8 +379,10 @@ public:
 	//! with immediate saving on, each setter writes its own). While the program mode runs, the aperture and the
 	//! ISO it chose are not saved: the user's are, which it gives back when it stops.
 	void savePhotoSettings(QSettings* conf) const;
-	//! Lens model: the lens is wide open at this f-number (optical vignetting is strongest there)
+	//! Lens model: the default widest aperture of the lens (see setPhotoLensMaxAperture()); it is wide open there
+	//! (optical vignetting is strongest there). Allowed range of that setting:
 	static constexpr float PHOTO_LENS_MAX_APERTURE = 1.4f;
+	static constexpr double PHOTO_LENS_MAX_APERTURE_MIN = 0.95, PHOTO_LENS_MAX_APERTURE_MAX = 8.;
 	//! Optical vignetting: offset of the pupil image against the lens barrel in the corner of the frame,
 	//! in units of the barrel radius. 0.81 gives half the light in the corner when wide open.
 	static constexpr float PHOTO_VIGNETTING_SHIFT = 0.81f;
@@ -816,6 +820,11 @@ public slots:
 	double getPhotoExposureTime() const {return photoExposureTime;}
 	//! Set the aperture (f-number) of the virtual camera (limited to f/0.7 ... f/64).
 	void setPhotoAperture(double fNumber);
+	//! The widest aperture of the lens (its smallest f-number): neither the user nor the program mode can open
+	//! wider. The lens model (vignetting, aberrations, the shape of the aperture) counts from it: a slow lens wide
+	//! open behaves as a fast one wide open (config: viewing/photographic_lens_max_aperture)
+	void setPhotoLensMaxAperture(double fNumber);
+	double getPhotoLensMaxAperture() const {return photoLensMaxAperture;}
 	//! Get the aperture (f-number) of the virtual camera.
 	double getPhotoAperture() const {return photoAperture;}
 	//! Set the ISO sensitivity of the virtual camera (limited to 25 ... 409600).
@@ -846,6 +855,10 @@ public slots:
 	void setFlagPhotoAutoExposure(bool b);
 	bool getFlagPhotoAutoExposure() const {return flagPhotoAutoExposure;}
 	void setFlagPhotoProgramExposure(bool b);
+	//! Program mode: keep the aperture the user set and let the camera choose only the time and the ISO (as
+	//! aperture priority with automatic ISO does on a camera) (config: viewing/flag_photographic_program_aperture_lock)
+	void setFlagPhotoProgramApertureLock(bool b);
+	bool getFlagPhotoProgramApertureLock() const {return flagPhotoProgramApertureLock;}
 	bool getFlagPhotoProgramExposure() const {return flagPhotoProgramExposure;}
 	//! Set the highest ISO of the program mode (100 to 204800; a film keeps its own speed)
 	void setPhotoProgramMaxISO(double iso);
@@ -1141,6 +1154,7 @@ signals:
 	void photoExposureTimeChanged(double seconds);
 	//! Emitted when the aperture of the virtual camera is changed
 	void photoApertureChanged(double fNumber);
+	void photoLensMaxApertureChanged(double fNumber);
 	//! Emitted when the ISO sensitivity of the virtual camera is changed
 	void photoISOChanged(double iso);
 	void photoPsfMinFwhmChanged(double pixels);
@@ -1151,6 +1165,7 @@ signals:
 	void flagPhotoBloomChanged(bool b);
 	void flagPhotoAutoExposureChanged(bool b);
 	void flagPhotoProgramExposureChanged(bool b);
+	void flagPhotoProgramApertureLockChanged(bool b);
 	void photoProgramMaxISOChanged(double iso);
 	void photoProgramMaxTimeChanged(double seconds);
 	void photoMeteringModeChanged(int mode);
@@ -1521,10 +1536,12 @@ private:
 	//! Camera settings of the photographic mode: exposure time [s], f-number, ISO
 	double photoExposureTime = 20.;
 	double photoAperture = 2.8;
+	double photoLensMaxAperture = PHOTO_LENS_MAX_APERTURE;
 	double photoISO = 1600.;
 	//! Automatic exposure (aperture priority)
 	bool flagPhotoAutoExposure = false;
 	bool flagPhotoProgramExposure = false;
+	bool flagPhotoProgramApertureLock = false;
 	//! Film halation: the density of the antihalation layer (negative: the film's own, see getPhotoHalationParams())
 	float photoAntihalationDensity = -1.f;
 	//! Push processing of the film (stops), and the film's data with it
