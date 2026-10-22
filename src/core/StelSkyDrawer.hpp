@@ -451,6 +451,9 @@ public:
 		float skyXYZW[12];
 		//! Color films: the airglow, computed from its line spectrum (linear sRGB of the scene per unit luminance)
 		float airglow[3];
+		//! Color films: an emission nebula (H II region), from its line spectrum: the linear sRGB of the scene for
+		//! a nebula as bright in V as white light of luminance 1 (see StelSkyImageTile)
+		float emission[3];
 	};
 	//! Whether a film has spectral data (a color film): its own sensitivity to the sky, the stars and the airglow
 	static bool getPhotoFilmSpectral(const PhotoFilmSpec& f) {return f.rgbToFilm[0] != 0.f;}

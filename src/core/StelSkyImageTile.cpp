@@ -317,6 +317,7 @@ void StelSkyImageTile::computePhotoLuminanceScale(StelCore* core)
 		}
 		if (object && mag < 50.f)
 		{
+			photoObjectType = static_cast<int>(object->getDSOType());
 			// Globular clusters: about half of their light is in stars too faint for the star catalogs
 			if (object->getDSOType() == Nebula::NebGc)
 				mag += 0.75f;
@@ -361,8 +362,25 @@ bool StelSkyImageTile::drawTile(StelCore* core, StelPainter& sPainter, const Vec
 		ad_lum = photoValue;
 		if (!tex->bind())
 			return false;
+		// A color film sees an emission nebula by its line spectrum (see StelSkyDrawer::getPhotoFilmSpec()): the light
+		// of the image (its luminance, measured by the V magnitude) in the colors the film gives it. The colors of the
+		// image itself come from another camera and are not used.
+		if (drawer->getFlagPhotoFilmActive())
+		{
+			const StelSkyDrawer::PhotoFilmSpec& f = drawer->getPhotoActiveFilmSpec();
+			const bool emission = photoObjectType == Nebula::NebEn || photoObjectType == Nebula::NebHII
+			                   || photoObjectType == Nebula::NebSNR || photoObjectType == Nebula::NebEMO
+			                   || photoObjectType == Nebula::NebCn;
+			if (emission && StelSkyDrawer::getPhotoFilmSpectral(f))
+				photoEmissionColor.set(f.emission[0], f.emission[1], f.emission[2]);
+			else
+				photoEmissionColor.set(-1.f, -1.f, -1.f);
+		}
+		else
+			photoEmissionColor.set(-1.f, -1.f, -1.f);
 		// Give back a part of the contrast of the processed image: value^p (the shader computes (value*color)^p)
-		sPainter.setTextureDisplayAdjustment(1.f/StelSkyDrawer::PHOTO_DSO_DESTRETCH, 1.f, 1.f, 1.f, 0, false, false);
+		sPainter.setTextureDisplayAdjustment(1.f/StelSkyDrawer::PHOTO_DSO_DESTRETCH, 1.f, 1.f, 1.f,
+		                                     photoEmissionColor[0] >= 0.f ? 4 : 0, false, false);
 	}
 	Vec4f color;
 	if (alphaBlend || texFader->state()==QTimeLine::Running)
@@ -450,6 +468,10 @@ bool StelSkyImageTile::drawTile(StelCore* core, StelPainter& sPainter, const Vec
 		}
 		if (photo)
 		{
+			// An emission nebula on a color film: the film's colors (the texture gives its luminance)
+			if (photoEmissionColor[0] >= 0.f)
+				for (int c=0; c<3; ++c)
+					extinctedColor[c] *= photoEmissionColor[c];
 			// The painter takes sRGB-encoded colors (colorToShader() decodes them): encode the linear values,
 			// taken to the power 1/p (see setTextureDisplayAdjustment() above). The shader computes
 			// (value*color)^p, so the light of the image scales with the linear color given here.

@@ -138,7 +138,7 @@ void StelPainter::setTextureDisplayAdjustment(float gamma, float saturation, flo
 	textureSaturation = qBound(0.f, saturation, 3.f);
 	textureBrightness = qBound(0.f, brightness, 5.f);
 	textureContrast = qBound(0.f, contrast, 5.f);
-	textureColorChannel = qBound(0, colorChannel, 3);
+	textureColorChannel = qBound(0, colorChannel, 4);
 	textureInvertedColors = invertedColors;
 	texturePremultiplyAlpha = premultiplyAlpha;
 	textureAlpha = qBound(0.f, alpha, 1.f);
@@ -2418,7 +2418,10 @@ void main()
 		"uniform int premultiplyAlpha;\n"
 		"void main(void)\n"
 		"{\n"
-		"    mediump vec4 color = texture2D(tex, texc)*texColor;\n"
+		"    mediump vec4 texel = texture2D(tex, texc);\n"
+		"    if (colorChannel == 4)\n"
+		"        texel.rgb = vec3(dot(texel.rgb, vec3(0.2126, 0.7152, 0.0722)));\n"
+		"    mediump vec4 color = texel*texColor;\n"
 		"    color.rgb = max(color.rgb * brightness, vec3(0.0));\n"
 		"    if (contrast != 1.0)\n"
 		"        color.rgb = clamp((color.rgb - vec3(0.5)) * contrast + vec3(0.5), vec3(0.0), vec3(1.0));\n"
@@ -2428,7 +2431,7 @@ void main()
 		"        color.rgb = pow(color.rgb, vec3(1.0 / max(gamma, 0.001)));\n"
 		"    if (invertedColors != 0)\n"
 		"        color.rgb = vec3(1.0) - clamp(color.rgb, vec3(0.0), vec3(1.0));\n"
-		"    if (colorChannel != 0)\n"
+		"    if (colorChannel != 0 && colorChannel != 4)\n"
 		"    {\n"
 		"        mediump float luma = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));\n"
 		"        if (colorChannel == 1)\n"
@@ -2503,7 +2506,10 @@ void main()
 		"uniform mediump float alpha;\n"
 		"void main(void)\n"
 		"{\n"
-		"    mediump vec4 color = texture2D(tex, texc)*outColor;\n"
+		"    mediump vec4 texel = texture2D(tex, texc);\n"
+		"    if (colorChannel == 4)\n"
+		"        texel.rgb = vec3(dot(texel.rgb, vec3(0.2126, 0.7152, 0.0722)));\n"
+		"    mediump vec4 color = texel*outColor;\n"
 	"    color.a *= alpha;\n"
 	"    color.rgb = max(color.rgb * brightness, vec3(0.0));\n"
 	"    if (contrast != 1.0)\n"
@@ -2514,7 +2520,7 @@ void main()
 		"        color.rgb = pow(color.rgb, vec3(1.0 / max(gamma, 0.001)));\n"
 		"    if (invertedColors != 0)\n"
 		"        color.rgb = vec3(1.0) - clamp(color.rgb, vec3(0.0), vec3(1.0));\n"
-		"    if (colorChannel != 0)\n"
+		"    if (colorChannel != 0 && colorChannel != 4)\n"
 		"    {\n"
 		"        mediump float luma = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));\n"
 		"        if (colorChannel == 1)\n"
