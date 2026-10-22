@@ -1003,6 +1003,43 @@ highp vec3 sensorNoise(highp vec3 sensor, highp vec2 fragCoord)
 	return e / photoNoiseWhite;
 }
 
+// Reciprocity failure of a film, per point after its brightness (see StelSkyDrawer::getPhotoReciprocityParams())
+uniform bool photoRecip;
+uniform highp float photoRecipTime;
+uniform int photoRecipPoints;
+uniform highp float photoRecipT[4];
+uniform highp float photoRecipE[4];
+uniform highp float photoRecipG[4];
+uniform highp float photoRecipExponent;
+const highp float photoMiddleGrey = )" + QByteArray::number(StelSkyDrawer::PHOTO_MIDDLE_GREY_EXPOSURE, 'f', 4) + R"(;
+// The share of the exposure that counts at the time tn a middle grey would need at this intensity, and the green
+// filter density of the data sheet at that time
+highp vec2 recipFactor(highp float tn)
+{
+	if (tn <= photoRecipT[0])
+		return vec2(1., 0.);
+	for (int i = 1; i < 4; ++i)
+	{
+		if (i >= photoRecipPoints) break;
+		if (tn <= photoRecipT[i])
+		{
+			highp float u = log(tn / photoRecipT[i-1]) / log(photoRecipT[i] / photoRecipT[i-1]);
+			highp float te = photoRecipE[i-1] * pow(photoRecipE[i] / photoRecipE[i-1], u);
+			return vec2(te / tn, mix(photoRecipG[i-1], photoRecipG[i], u));
+		}
+	}
+	highp float tl = photoRecipT[0], el = photoRecipE[0], gl = photoRecipG[0];
+	for (int i = 1; i < 4; ++i)
+		if (i < photoRecipPoints) { tl = photoRecipT[i]; el = photoRecipE[i]; gl = photoRecipG[i]; }
+	return vec2(el * pow(tn / tl, photoRecipExponent) / tn, gl);
+}
+highp vec3 filmReciprocity(highp vec3 x)
+{
+	highp vec3 tn = min(photoRecipTime * photoMiddleGrey / max(x, vec3(1e-20)), vec3(1e20));
+	highp vec2 r = recipFactor(tn.r), g = recipFactor(tn.g), b = recipFactor(tn.b);
+	return x * vec3(r.x, g.x * pow(10., -g.y), b.x);
+}
+
 // Film grain (see StelSkyDrawer::getPhotoGrainParams()): photoGrain 0 none, 1 slide, 2 negative and print
 uniform int photoGrain;
 uniform bool photoGrainMono;
@@ -1070,6 +1107,8 @@ highp vec3 cameraResponse(highp vec3 lin)
 	if (photoNoise)
 		sensor = sensorNoise(sensor, gl_FragCoord.xy);
 	highp vec3 x = min(max((photoWhiteBalance * sensor) * photoExposure, vec3(0)), vec3(1e30));
+	if (photoRecip)
+		x = filmReciprocity(x);
 	if (photoToneCurve != 0)
 	{
 		// Each channel separately, as in a camera: bright colored light turns white when it saturates
@@ -1121,6 +1160,14 @@ void setPhotoToneUniforms(QOpenGLShaderProgram& program, const StelSkyDrawer& dr
 	program.setUniformValue("photoNoiseSites", noise.sites);
 	program.setUniformValue("photoNoiseHotProb", noise.hotProbability);
 	program.setUniformValue("photoNoiseHot", noise.hot);
+	const StelSkyDrawer::PhotoReciprocityParams recip = drawer.getPhotoReciprocityParams();
+	program.setUniformValue("photoRecip", recip.enabled);
+	program.setUniformValue("photoRecipTime", recip.time);
+	program.setUniformValue("photoRecipPoints", recip.points);
+	program.setUniformValueArray("photoRecipT", recip.times, 4, 1);
+	program.setUniformValueArray("photoRecipE", recip.effective, 4, 1);
+	program.setUniformValueArray("photoRecipG", recip.green, 4, 1);
+	program.setUniformValue("photoRecipExponent", recip.exponent);
 	const StelSkyDrawer::PhotoGrainParams grain = drawer.getPhotoGrainParams(prj);
 	program.setUniformValue("photoNoiseSeed", noise.enabled ? noise.seed : grain.seed);
 	program.setUniformValue("photoGrain", grain.mode);
@@ -1181,6 +1228,11 @@ uniform highp float bloomIdentity; // part of the halo profile narrower than a p
 uniform bool spikeEnabled;
 uniform sampler2D spikeTex;
 uniform highp float spikeAmount;   // spike fraction, relative to the light left in the image
+// Film: the halation (see StelPhotoBloom), at a coarser level of the pyramid
+uniform bool halationEnabled;
+uniform sampler2D halationTex;
+uniform highp vec2 halationScale;  // scene texture coordinates -> those of the halation image
+uniform highp vec3 halationAmount; // share of the light per color, relative to the light left in the image
 
 void main()
 {
@@ -1190,6 +1242,8 @@ void main()
 		extra += bloomAmount * (texture2D(bloomTex, texcoord).rgb + bloomIdentity * rgba.rgb);
 	if (spikeEnabled)
 		extra += spikeAmount * texture2D(spikeTex, texcoord).rgb;
+	if (halationEnabled)
+		extra += halationAmount * texture2D(halationTex, texcoord * halationScale).rgb;
 	rgba.rgb += extra;
 	FRAG_COLOR = vec4(dither(photoFrameMasked(linearToSRGB(cameraResponse(rgba.rgb)), gl_FragCoord.xy)), rgba.a);
 }
@@ -1380,11 +1434,12 @@ void StelApp::highGraphicsModeDraw()
 		if (!photoBloom)
 			photoBloom.reset(new StelPhotoBloom);
 		const bool spikes = skyDrawer->getPhotoSpikeFractionEffective() > 0.f;
+		const StelSkyDrawer::PhotoHalationParams halation = skyDrawer->getPhotoHalationParams(*core->getProjection(StelCore::FrameJ2000));
 		bloomDone = photoBloom->process(sceneFBO->texture(), static_cast<int>(w), static_cast<int>(h),
 		                                skyDrawer->getPhotoHaloAlpha(), StelSkyDrawer::getPhotoHaloBeta(),
 		                                spikes ? skyDrawer->getPhotoSpikeLines() : 0,
 		                                StelSkyDrawer::getPhotoSpikeAngle(), skyDrawer->getPhotoSpikeLength(),
-		                                postProcessorVAO.get());
+		                                postProcessorVAO.get(), halation.radius, halation.density);
 	}
 
 	// Photographic mode: the exposure meter of the automatic exposure and white balance
@@ -1497,6 +1552,22 @@ void StelApp::highGraphicsModeDraw()
 			postProcessorProgram->setUniformValue(postProcessorUniformLocations.bloomIdentity, photoBloom->identityWeight());
 		}
 		postProcessorProgram->setUniformValue(postProcessorUniformLocations.bloomTex, bloomTexSampler);
+		// Film: the halation
+		const GLuint halationTex = bloomDone ? photoBloom->halationTexture() : 0;
+		const int halationTexSampler = 4;
+		postProcessorProgram->setUniformValue("halationEnabled", halationTex != 0);
+		postProcessorProgram->setUniformValue("halationTex", halationTexSampler);
+		if (halationTex)
+		{
+			GL(gl->glActiveTexture(GL_TEXTURE0 + halationTexSampler));
+			GL(gl->glBindTexture(GL_TEXTURE_2D, halationTex));
+			GL(gl->glActiveTexture(GL_TEXTURE0));
+			const StelSkyDrawer::PhotoHalationParams halation = skyDrawer->getPhotoHalationParams(*core->getProjection(StelCore::FrameJ2000));
+			const float coreFraction = skyDrawer->getPhotoCoreFraction();
+			const Vec3f a = coreFraction > 0.f ? halation.gain/coreFraction : Vec3f(0.f);
+			postProcessorProgram->setUniformValue("halationAmount", a[0], a[1], a[2]);
+			postProcessorProgram->setUniformValue("halationScale", photoBloom->halationScale());
+		}
 	}
 
 	postProcessorVAO->bind();

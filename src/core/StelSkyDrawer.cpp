@@ -141,6 +141,8 @@ StelSkyDrawer::StelSkyDrawer(StelCore* acore) :
 	photoApertureBlades = (photoApertureBlades<=0) ? 0 : qBound(4, photoApertureBlades, 9);
 	photoSpikeFraction = qBound(0.f, conf->value("viewing/photographic_spike_strength", 0.02).toFloat(), 0.1f);
 	flagPhotoBloom = conf->value("viewing/flag_photographic_bloom", true).toBool();
+	photoAntihalationDensity = conf->value("astro/photographic_antihalation_density", -1.0).toFloat();
+	flagPhotoReciprocityPerPoint = conf->value("astro/flag_photographic_reciprocity_per_point", true).toBool();
 	flagPhotoAutoExposure = conf->value("viewing/flag_photographic_auto_exposure", false).toBool();
 	photoMeteringMode = qBound(0, conf->value("viewing/photographic_metering_mode", 0).toInt(), 2);
 	flagPhotoInfoLine = conf->value("viewing/flag_photographic_info_line", true).toBool();
@@ -2781,6 +2783,35 @@ const StelSkyDrawer::PhotoFilmSpec& StelSkyDrawer::getPhotoFilmSpec(int film)
 	return films[qBound(0, film, PHOTO_FILM_COUNT - 1)];
 }
 
+// Reciprocity failure of a film, point by point. A film does not add up light at a low intensity as well as at a
+// normal one: the latent image of a few photons fades before the next ones arrive. So the failure depends on the
+// intensity, not on the time as such (Schwarzschild). The data sheets give it for a normal exposure: at the time t
+// a middle grey is recorded as at t_eff(t). A point that gets the intensity I during the time t is recorded as a
+// middle grey would be with the time t_n that it needs at that intensity, t_n = t x_mid/x (x its exposure, x_mid
+// that of middle grey): its exposure counts with t_eff(t_n)/t_n. Middle grey goes as before; a faint sky loses much
+// more, a bright star core less: the long exposures of film have their dark skies and high contrast. The green
+// filter of the data sheet, per point the same way: the faint parts of a long exposure turn magenta.
+StelSkyDrawer::PhotoReciprocityParams StelSkyDrawer::getPhotoReciprocityParams() const
+{
+	PhotoReciprocityParams p;
+	if (!getFlagPhotoFilmActive() || !flagPhotoReciprocityPerPoint)
+		return p;
+	const PhotoFilmSpec& f = getPhotoFilmSpec(photoFilm);
+	if (f.points <= 0)
+		return p;
+	p.enabled = true;
+	p.time = static_cast<float>(getPhotoEffectiveExposureTime());
+	p.points = f.points;
+	for (int i = 0; i < 4; ++i)
+	{
+		p.times[i] = static_cast<float>(f.time[i]);
+		p.effective[i] = static_cast<float>(f.effective[i]);
+		p.green[i] = static_cast<float>(f.green[i]);
+	}
+	p.exponent = static_cast<float>(f.exponent);
+	return p;
+}
+
 double StelSkyDrawer::getPhotoFilmEffectiveTime(double t) const
 {
 	if (!getFlagPhotoFilmActive() || !(t > 0.))
@@ -2842,7 +2873,8 @@ const float* StelSkyDrawer::getPhotoWhiteBalanceMatrix() const
 		static const float identity[9] = {1,0,0, 0,1,0, 0,0,1};
 		return identity;
 	}
-	const Vec3f tint = getPhotoFilmTint(getPhotoEffectiveExposureTime());
+	// The color shift of the reciprocity failure is done per point of the picture (getPhotoReciprocityParams())
+	const Vec3f tint = flagPhotoReciprocityPerPoint ? Vec3f(1.f) : getPhotoFilmTint(getPhotoEffectiveExposureTime());
 	if (getPhotoFilmSpectral(f))
 	{
 		// The layers of the film from the light of the scene (balanced for daylight), each with its own reciprocity
@@ -3075,6 +3107,34 @@ StelSkyDrawer::PhotoGrainParams StelSkyDrawer::getPhotoGrainParams(const StelPro
 	p.printGamma = static_cast<float>(static_cast<double>(f.toneA)/f.gamma);
 	p.toe = f.toneMid/16.f;
 	p.seed = static_cast<float>(photoNoiseFrame) + 0.5f;
+	return p;
+}
+
+// Halation. The light that passes the emulsion without being absorbed is scattered in it (the grains make it
+// turbid) and reaches the film base as diffuse light. Red light gets there most: the silver halide absorbs it least
+// and it passes the blue and green layers above; blue light is stopped by the yellow filter layer. The light that
+// comes back from the base exposes the layer next to it, the red-sensitive one, first: halos of film are red to
+// orange. The antihalation layer (dyes or colloidal silver behind the emulsion, removed in processing; a grey base
+// in black and white films) absorbs most of it. The share of the light that reaches the base (red 50%, green 3%)
+// and the antihalation density (0.45) are set after Till Credner's pictures on Ektachrome E200 (Jupiter, 50 mm,
+// 15 min): a white core and a red ring from about 0.1 to 0.35 mm (astro/photographic_antihalation_density
+// changes the density).
+StelSkyDrawer::PhotoHalationParams StelSkyDrawer::getPhotoHalationParams(const StelProjector& prj) const
+{
+	PhotoHalationParams p;
+	if (!getFlagPhotoFilmActive() || !getFlagPhotoBloomActive())
+		return p;
+	const PhotoFilmSpec& f = getPhotoFilmSpec(photoFilm);
+	const double diagonal = getPhotoFrameDiagonal(prj);
+	if (!(diagonal > 0.))
+		return p;
+	const double pixel = getPhotoSensorDiagonal()/diagonal;  // meters on the film
+	const double thetaC = std::asin(1./1.48);
+	p.radius = static_cast<float>(2.*PHOTO_FILM_BASE_THICKNESS*std::tan(thetaC)/pixel);
+	const bool mono = (f.type == PhotoFilmMonochrome);
+	p.density = photoAntihalationDensity >= 0.f ? photoAntihalationDensity : (mono ? 0.5f : 0.45f);
+	const Vec3f reach = mono ? Vec3f(0.3f, 0.3f, 0.3f) : Vec3f(0.5f, 0.03f, 0.f);
+	p.gain = reach * static_cast<float>(StelPhotoBloom::halationReturned(p.density));
 	return p;
 }
 
@@ -4669,9 +4729,10 @@ float StelSkyDrawer::getPhotoSceneScale() const
 	// Reflected-light meter calibration constant K (ISO 2720), and middle grey
 	constexpr double K = 12.5;
 	constexpr double middleGrey = 0.18;
-	// With a film, the time that counts after the reciprocity failure (Schwarzschild: the density follows I t^p,
-	// the same factor at every brightness for a given time). The meter of the camera does not know it.
-	const double t = getPhotoFilmEffectiveTime(getPhotoEffectiveExposureTime());
+	// The exposure time as given. With a film the reciprocity failure acts on each point of the picture after
+	// this, according to its own brightness (see getPhotoReciprocityParams()); the meter of the camera does not
+	// know it.
+	const double t = flagPhotoReciprocityPerPoint ? getPhotoEffectiveExposureTime() : getPhotoFilmEffectiveTime(getPhotoEffectiveExposureTime());
 	return static_cast<float>(middleGrey * t * photoISO / (K * photoAperture * photoAperture));
 }
 

@@ -273,6 +273,30 @@ public:
 		float seed = 0.f;        //!< changes every frame, as the sensor noise
 	};
 	PhotoGrainParams getPhotoGrainParams(const StelProjector& prj) const;
+	//! The reciprocity failure of a film, for each point of the picture after its brightness (see the .cpp)
+	struct PhotoReciprocityParams
+	{
+		bool enabled = false;
+		float time = 1.f;        //!< the exposure time given, seconds
+		int points = 0;          //!< the pairs of the data sheet (time, effective time) and its green filters
+		float times[4] = {};
+		float effective[4] = {};
+		float green[4] = {};
+		float exponent = 1.f;    //!< Schwarzschild exponent beyond the last pair
+	};
+	PhotoReciprocityParams getPhotoReciprocityParams() const;
+	//! The exposure of middle grey in the camera stage (before the tone curve)
+	static constexpr float PHOTO_MIDDLE_GREY_EXPOSURE = 0.18f;
+	//! The halation of a film (see StelPhotoBloom::computeHalationWeights()): a ring of light reflected at the back
+	//! of the film base around bright stars, reddish in a color film
+	struct PhotoHalationParams
+	{
+		float radius = 0.f;      //!< the critical radius 2 t tan(theta_c) in pixels (0: no halation)
+		float density = 0.f;     //!< optical density of the antihalation layer
+		Vec3f gain = Vec3f(0.f); //!< the share of the light in red, green and blue that comes back as halation
+	};
+	PhotoHalationParams getPhotoHalationParams(const StelProjector& prj) const;
+	static constexpr double PHOTO_FILM_BASE_THICKNESS = 125e-6; //!< 35 mm film base (cellulose triacetate), meters
 	//! Base plus fog of a slide film, and its maximum density (density of the darkest black of the picture)
 	static constexpr float PHOTO_SLIDE_BASE_DENSITY = 0.2f;
 	static constexpr float PHOTO_SLIDE_MAX_DENSITY = 3.5f;
@@ -1466,6 +1490,10 @@ private:
 	//! Automatic exposure (aperture priority)
 	bool flagPhotoAutoExposure = false;
 	bool flagPhotoProgramExposure = false;
+	//! Film halation: the density of the antihalation layer (negative: the film's own, see getPhotoHalationParams())
+	float photoAntihalationDensity = -1.f;
+	//! Film: the reciprocity failure per point after its brightness (else the same for the whole picture)
+	bool flagPhotoReciprocityPerPoint = true;
 	//! Program mode: the highest ISO and the longest exposure time it may use
 	double photoProgramMaxISO = PHOTO_PROGRAM_MAX_ISO;
 	double photoProgramMaxTime = PHOTO_AUTO_MAX_TIME;
