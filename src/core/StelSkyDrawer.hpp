@@ -28,6 +28,7 @@
 #include "StelAtmosphereTransmission.hpp"
 #include "StelProjectorType.hpp"
 
+#include <array>
 #include <memory>
 #include <QObject>
 #include <vector>
@@ -433,45 +434,51 @@ public:
 	};
 	static constexpr int PHOTO_FILM_COUNT = 7;
 	enum PhotoFilmType { PhotoFilmSlide = 0, PhotoFilmNegative = 1, PhotoFilmMonochrome = 2 };
-	//! The data of a film, from the manufacturers' data sheets where they give them
+	//! The data of a film, from the manufacturers' data sheets where they give them. The films themselves are listed
+	//! in StelSkyDrawerPhotoFilm.cpp; the default values are those of the digital sensor (no film).
 	struct PhotoFilmSpec
 	{
-		const char* name;
-		const char* shortName;
-		double iso;
-		int type;            //!< PhotoFilmType
+		const char* name = "Digital sensor";
+		const char* shortName = "";
+		double iso = 0.;
+		int type = PhotoFilmSlide;  //!< PhotoFilmType
 		//! Reciprocity failure: pairs (exposure time, effective time) in seconds, increasing. Up to the first time
 		//! the film follows the reciprocity law; between the points log-log interpolation; after the last point
 		//! the Schwarzschild exponent (the effective time grows as t^p).
-		int points;
-		double time[4];
-		double effective[4];
-		double exponent;
+		int points = 0;
+		std::array<double, 4> time = {};
+		std::array<double, 4> effective = {};
+		double exponent = 1.;
 		//! The color shift of long exposures: the green filter the data sheet asks for at the times of time[]
 		//! (CC density; the film loses green, the picture turns magenta)
-		double green[4];
-		double granularity;  //!< diffuse RMS granularity x 1000 (48 micrometer aperture, density 1 above the base)
-		double gamma;        //!< slope of the characteristic curve of the film (density per log exposure)
-		float toneA;         //!< tone curve of the picture: slope (system gamma), clipping point and middle grey
-		float toneClip;
-		float toneMid;
-		float mono[3];       //!< black and white films: their sensitivity to linear red, green and blue (sum 1)
+		std::array<double, 4> green = {};
+		double granularity = 0.;  //!< diffuse RMS granularity x 1000 (48 micrometer aperture, density 1 above the base)
+		double gamma = 1.;        //!< slope of the characteristic curve of the film (density per log exposure)
+		float toneA = 1.f;        //!< tone curve of the picture: slope (system gamma), clipping point and middle grey
+		float toneClip = 1.f;
+		float toneMid = 0.18f;
+		//! Black and white films: their sensitivity to linear red, green and blue (sum 1)
+		std::array<float, 3> mono = {};
+		//! Color films with spectral data: their own sensitivity to the sky, the stars, the airglow and the nebulae
+		//! (the four tables below)
+		bool spectral = false;
 		//! Color films: the exposures of the red, green and blue layers from the linear sRGB of the scene (row by row;
 		//! daylight D55 gives 1, 1, 1), from the spectral sensitivities of the data sheet (see getPhotoFilmSpec())
-		float rgbToFilm[9];
+		std::array<float, 9> rgbToFilm = {};
 		//! Color films: the sky from its spectrum, as ShowMySky gives it (luminance X, Y, Z and the scotopic W, cd/m^2):
 		//! the linear sRGB of the scene that the layers (rgbToFilm) record as the film does (row by row, 3 x 4)
-		float skyXYZW[12];
+		std::array<float, 12> skyXYZW = {};
 		//! Color films: the airglow, computed from its line spectrum (linear sRGB of the scene per unit luminance)
-		float airglow[3];
+		std::array<float, 3> airglow = {};
 		//! Color films: an emission nebula (H II region), from its line spectrum: the linear sRGB of the scene for
 		//! a nebula as bright in V as white light of luminance 1 (see StelSkyImageTile)
-		float emission[3];
+		std::array<float, 3> emission = {};
 	};
 	//! Whether a film has spectral data (a color film): its own sensitivity to the sky, the stars and the airglow
-	static bool getPhotoFilmSpectral(const PhotoFilmSpec& f) {return f.rgbToFilm[0] != 0.f;}
+	static bool getPhotoFilmSpectral(const PhotoFilmSpec& f) {return f.spectral;}
 	//! The sky in the spectral model of the color film in use (rows of getPhotoFilmSpec().skyXYZW), or nullptr
 	const float* getPhotoFilmSkyMatrix() const;
+	//! The data of a film (PhotoFilm; out of range: the nearest one), see StelSkyDrawerPhotoFilm.cpp
 	static const PhotoFilmSpec& getPhotoFilmSpec(int film);
 	//! The film in use with its push processing (speed, contrast and grain changed, see setPhotoFilmPush())
 	const PhotoFilmSpec& getPhotoActiveFilmSpec() const;

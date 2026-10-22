@@ -39,6 +39,7 @@ SET(stellarium_lib_SRCS
      core/StelProjectorClasses.hpp
      core/StelProjectorType.hpp
      core/StelSkyDrawer.cpp
+     core/StelSkyDrawerPhotoFilm.cpp
      core/StelPhotoBloom.hpp
      core/StelPhotoBloom.cpp
      core/StelPhotoMeter.hpp
