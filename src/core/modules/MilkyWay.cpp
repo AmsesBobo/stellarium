@@ -146,6 +146,37 @@ void MilkyWay::init()
 		// seen in sunlight white balance, 1.09 0.99 0.84. These gains move the mean there and keep the variations of
 		// the image (the reddened dust lanes, the bluer young regions); the luminance does not change.
 		flagPhotoStarSubtraction = conf->value("astro/flag_milky_way_photo_star_subtraction", true).toBool();
+		// The large-scale brightness of the Gaia Sky image is corrected towards Axel Mellinger's panorama (the 3600 x 1800
+		// FITS version, linear and calibrated: its scale from the stars, about 1400 isolated ones of magnitude 3.5-7.5 as
+		// a whole, since each of its pixels is a single sample of the full panorama; its large-scale background from the
+		// Pioneer 10/11 photometry). Over most of the sky the two agree within 0.1-0.2 mag (median 0.0), but in the inner
+		// Galaxy the Gaia image is too bright on large scales: the bulge above and below the plane in Sagittarius,
+		// Scorpius and Scutum by up to 1 mag (the Great Sagittarius Star Cloud 20.1 instead of 21.1 mag/arcsec^2, V).
+		// Pioneer 10 (Toller 1981, as tabulated by Leinert et al. 1998, tables 35 and 36, interpolated to V) has the same
+		// shape as Mellinger's panorama everywhere, the bulge included (rms 0.12 mag on its 10 x 4 degree grid), and puts
+		// the Gaia image 0.3-0.9 mag too bright there. A linear raw picture (Canon EOS R6, 15 mm, 20 s, Grand Canyon, the
+		// field solved from 180 stars) shows the finer structure there (clouds and dust lanes, below 3 degrees) as strong
+		// as in the Gaia image relative to the disk in Aquila (1.0-1.2), but 2 times stronger than in Mellinger's panorama.
+		// So the surplus is a smooth glow: it is taken off (not scaled down), the smoothed difference Gaia - Mellinger
+		// (3 degrees, in the units of the expanded texture), with the median outside the inner Galaxy at zero, faded out
+		// between |b| = 25 and 40; where it exceeds the image (narrow dust lanes), 20% of the image stays. Stored as
+		// sign(d) sqrt(|d|/0.06386) mapped to 0..1. Note: derived from Mellinger's data (all rights reserved; the FITS is
+		// offered for science use), not for redistribution without his consent.
+		// Only half of it is taken off: the same raw picture, calibrated with its own stars (about 700 of magnitude
+		// 5.5-7.6 near the altitude of Sagittarius), gives the Great Sagittarius Star Cloud above the sky at its altitude
+		// (26 places 12-20 degrees off the plane, same altitude, within 35 degrees of azimuth) 0.80 times what the
+		// uncorrected Gaia image gives, but 2.2 times Mellinger's panorama and 1.24 times the full correction: the truth
+		// lies between, at about 0.56 of it (+-0.4 from the zero point of the picture, +-0.15 mag). Why Pioneer 10 and
+		// Mellinger give the bulge fainter is open (the Sun lay towards Sagittarius as seen from Pioneer 10).
+		// (config: astro/flag_milky_way_photo_correction, astro/milky_way_photo_correction_texture,
+		// astro/milky_way_photo_correction_strength: 0 none, 1 the full difference)
+		photoCorrectionStrength = qBound(0.f, conf->value("astro/milky_way_photo_correction_strength", 0.5).toFloat(), 1.f);
+		const QString correctionName = conf->value("astro/milky_way_photo_correction_texture", "milkyway_gaia_correction.png").toString();
+		const bool correctionWanted = conf->value("astro/flag_milky_way_photo_correction", true).toBool() && !correctionName.isEmpty();
+		const QString correctionPath = correctionWanted ? StelFileMgr::findFile("textures/"+correctionName) : QString();
+		if (!correctionPath.isEmpty() && photoDestretch <= 0.f)
+			photoCorrectionTex = StelApp::getInstance().getTextureManager().createTexture(correctionPath,
+			                        StelTexture::Params().useLinearSRGB().setWrapMode(GL_REPEAT));
 		const QStringList gain = conf->value("astro/milky_way_photo_color_gain", "1.197,0.967,0.750").toString().split(',');
 		if (gain.size() == 3)
 			photoColorGain.set(gain[0].trimmed().toFloat(), gain[1].trimmed().toFloat(), gain[2].trimmed().toFloat());
@@ -403,6 +434,9 @@ uniform vec4 photoCurve;      // photographic mode: the expansion of the texture
 uniform float photoCurveTop;  // photographic mode: x1 of that expansion
 uniform float photoStarFactor[19]; // photographic mode: factor for the galactic latitudes 0, 5, ..., 90 (stars drawn as points)
 uniform vec3 photoGalacticPole;    // photographic mode: north galactic pole (J2000)
+uniform bool photoCorrection;      // photographic mode: large-scale correction of the texture (see MilkyWay::init())
+uniform sampler2D photoCorrectionTex;
+uniform float photoCorrectionStrength;
 float photoStarLight(vec3 dir)
 {
 	// The share of the texture's light that is not drawn as stars, by galactic latitude
@@ -475,7 +509,8 @@ void main(void)
 				p = applyAberrationToViewDir(normalize(unProject(winPos.x + smp.x, winPos.y + smp.y, okSample).xyz));
 			}
 			vec3 dir = photoSkyTurn(p, smp.w);
-			vec4 c = PHOTO_SKY_TEXTURE(mainTex, vec2(atan(dir.x, dir.y)/(2.*PI), acos(-dir.z)/PI));
+			vec2 uv = vec2(atan(dir.x, dir.y)/(2.*PI), acos(-dir.z)/PI);
+			vec4 c = PHOTO_SKY_TEXTURE(mainTex, uv);
 			if (photoDestretch <= 0.)
 			{
 				// L -> exp(f(ln L)): a parabola in log-log between x0 and x1, straight lines outside (keeps the color)
@@ -489,6 +524,16 @@ void main(void)
 				}
 				else
 					c.rgb = vec3(0.);
+				if (photoCorrection)
+				{
+					// The smooth surplus of the image over the photometric panorama (see MilkyWay::init()),
+					// taken off its luminance (the finer structure stays)
+					float t = texture2D(photoCorrectionTex, uv).r*2. - 1.;
+					float surplus = sign(t)*t*t*0.06386*photoCorrectionStrength;
+					float lum = dot(c.rgb, vec3(0.2126, 0.7152, 0.0722));
+					if (lum > 0.)
+						c.rgb *= max(lum - surplus, 0.2*lum)/lum;
+				}
 				c.rgb *= photoStarLight(dir);
 			}
 			else if (photoDestretch != 1.)
@@ -533,6 +578,9 @@ void main(void)
 		shaderVars.photoCurveTop    = renderProgram->uniformLocation("photoCurveTop");
 		shaderVars.photoStarFactor  = renderProgram->uniformLocation("photoStarFactor");
 		shaderVars.photoGalacticPole= renderProgram->uniformLocation("photoGalacticPole");
+		shaderVars.photoCorrection  = renderProgram->uniformLocation("photoCorrection");
+		shaderVars.photoCorrectionTex = renderProgram->uniformLocation("photoCorrectionTex");
+		shaderVars.photoCorrectionStrength = renderProgram->uniformLocation("photoCorrectionStrength");
 		renderProgram->release();
 	}
 	if(!renderProgram || !renderProgram->isLinked())
@@ -574,6 +622,13 @@ void main(void)
 		const int mainTexSampler = 0;
 		photoTex->bind(mainTexSampler);
 		renderProgram->setUniformValue(shaderVars.mainTex, mainTexSampler);
+		// Unit 1 is the extinction colors (setPhotoExtinctionUniforms below)
+		const int correctionSampler = 2;
+		const bool correction = photoCorrectionTex && photoCorrectionTex->bind(correctionSampler);
+		renderProgram->setUniformValue(shaderVars.photoCorrection, correction);
+		renderProgram->setUniformValue(shaderVars.photoCorrectionTex, correctionSampler);
+		renderProgram->setUniformValue(shaderVars.photoCorrectionStrength, photoCorrectionStrength);
+		QOpenGLContext::currentContext()->functions()->glActiveTexture(GL_TEXTURE0);
 		renderProgram->setUniformValue(shaderVars.projectionMatrixInverse, projector->getProjectionMatrix().toQMatrix().inverted());
 		const Vec3f& g = photoColorGain;
 		renderProgram->setUniformValue(shaderVars.brightness, QVector3D(lin.x()*k*g[0], lin.y()*k*g[1], lin.z()*k*g[2]));
