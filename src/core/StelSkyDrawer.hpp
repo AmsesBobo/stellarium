@@ -297,6 +297,9 @@ public:
 	};
 	PhotoHalationParams getPhotoHalationParams(const StelProjector& prj) const;
 	static constexpr double PHOTO_FILM_BASE_THICKNESS = 125e-6; //!< 35 mm film base (cellulose triacetate), meters
+	//! The glow of the lens alone, without the filter stack of a sensor: set after Till Credner's pictures of
+	//! Jupiter on film (50 mm, a white core of about 0.07 mm at 15 minutes)
+	static constexpr float PHOTO_FILM_HALO_DEFAULT = 0.003f;
 	//! Base plus fog of a slide film, and its maximum density (density of the darkest black of the picture)
 	static constexpr float PHOTO_SLIDE_BASE_DENSITY = 0.2f;
 	static constexpr float PHOTO_SLIDE_MAX_DENSITY = 3.5f;
@@ -1435,6 +1438,9 @@ private:
 	static constexpr float PHOTO_CORE_BETA = 3.f;
 	//! The lens halo: fraction of the light, width relative to the core, and Moffat beta
 	float photoHaloFraction = 0.05f;
+	//! The halo of the lens with a digital sensor and with a film (see setPhotoHaloStrength())
+	float photoDigitalHaloFraction = 0.05f;
+	float photoFilmHaloFraction = 0.003f;
 	bool flagPhotoBloom = true;
 	static constexpr float PHOTO_HALO_WIDTH_FACTOR = 4.f;
 	//! Diffraction spikes: blades of the diaphragm (0 = round), fraction of the light in the spikes (stopped down)
