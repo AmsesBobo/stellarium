@@ -1003,6 +1003,44 @@ highp vec3 sensorNoise(highp vec3 sensor, highp vec2 fragCoord)
 	return e / photoNoiseWhite;
 }
 
+// Film grain (see StelSkyDrawer::getPhotoGrainParams()): photoGrain 0 none, 1 slide, 2 negative and print
+uniform int photoGrain;
+uniform bool photoGrainMono;
+uniform highp float photoGrainSigma;    // RMS density at density 1 in a pixel
+uniform highp float photoGrainNegGamma; // negative: slope of its curve
+uniform highp float photoGrainPrint;    // negative: slope of the paper
+uniform highp float photoGrainToe;      // negative: exposure at the toe of its curve
+const highp float photoSlideBase = )" + QByteArray::number(StelSkyDrawer::PHOTO_SLIDE_BASE_DENSITY, 'f', 3) + R"(;
+const highp float photoSlideMax = )" + QByteArray::number(StelSkyDrawer::PHOTO_SLIDE_MAX_DENSITY, 'f', 3) + R"(;
+const highp float photoNegativeFog = )" + QByteArray::number(StelSkyDrawer::PHOTO_NEGATIVE_FOG_DENSITY, 'f', 3) + R"(;
+// The picture y (linear display values, after the tone curve) with the grain of the film; x is the exposure of
+// the film (before the tone curve)
+highp vec3 filmGrain(highp vec3 y, highp vec3 x, highp vec2 fragCoord)
+{
+	const highp float TWO_PI = 6.28318530718;
+	highp vec4 h = noiseHash(vec3(floor(fragCoord), photoNoiseSeed + 2011.7));
+	highp float r1 = sqrt(-2. * log(max(h.x, 1e-4)));
+	highp float r2 = sqrt(-2. * log(max(h.z, 1e-4)));
+	highp vec3 g = vec3(r1 * cos(TWO_PI * h.y), r1 * sin(TWO_PI * h.y), r2 * cos(TWO_PI * h.w));
+	if (photoGrainMono)
+		g = vec3(g.x);
+	highp vec3 density;
+	highp float gain = 1.;
+	if (photoGrain == 1)
+	{
+		// A slide: the density of the picture itself
+		density = photoSlideBase - log(max(y, vec3(pow(10., photoSlideBase - photoSlideMax)))) / log(10.);
+	}
+	else
+	{
+		// A negative: its density from the exposure; the paper multiplies the fluctuation
+		density = photoNegativeFog + photoGrainNegGamma * log(max(x / photoGrainToe, vec3(1.))) / log(10.);
+		gain = photoGrainPrint;
+	}
+	highp vec3 sigma = photoGrainSigma * sqrt(density) * gain;
+	return min(y * pow(vec3(10.), sigma * g), vec3(1.));
+}
+
 // The frame of the sensor (see StelSkyDrawer::getPhotoFrame()): outside it the view is dimmed, like a viewfinder
 // (the picture is what lies inside), with a thin line along its edge. On the encoded (display) values.
 uniform bool photoFrameMask;
@@ -1037,7 +1075,10 @@ highp vec3 cameraResponse(highp vec3 lin)
 		// Each channel separately, as in a camera: bright colored light turns white when it saturates
 		highp vec3 xc = min(x, vec3(photoToneClip));
 		highp vec3 y = pow(xc, vec3(photoTone.x)) / (pow(xc, vec3(photoTone.y)) * photoTone.z + photoTone.w);
-		return mix(min(y, vec3(1)), vec3(1), step(vec3(photoToneClip), x));
+		y = mix(min(y, vec3(1)), vec3(1), step(vec3(photoToneClip), x));
+		if (photoGrain != 0)
+			y = filmGrain(y, x, gl_FragCoord.xy);
+		return y;
 	}
 	const highp float knee = photoShoulderKnee;
 	highp vec3 over = max(x - vec3(knee), vec3(0));
@@ -1080,7 +1121,14 @@ void setPhotoToneUniforms(QOpenGLShaderProgram& program, const StelSkyDrawer& dr
 	program.setUniformValue("photoNoiseSites", noise.sites);
 	program.setUniformValue("photoNoiseHotProb", noise.hotProbability);
 	program.setUniformValue("photoNoiseHot", noise.hot);
-	program.setUniformValue("photoNoiseSeed", noise.seed);
+	const StelSkyDrawer::PhotoGrainParams grain = drawer.getPhotoGrainParams(prj);
+	program.setUniformValue("photoNoiseSeed", noise.enabled ? noise.seed : grain.seed);
+	program.setUniformValue("photoGrain", grain.mode);
+	program.setUniformValue("photoGrainMono", grain.mono);
+	program.setUniformValue("photoGrainSigma", grain.sigma);
+	program.setUniformValue("photoGrainNegGamma", grain.negativeGamma);
+	program.setUniformValue("photoGrainPrint", grain.printGamma);
+	program.setUniformValue("photoGrainToe", grain.toe);
 }
 }
 

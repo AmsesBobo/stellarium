@@ -1128,8 +1128,9 @@ void StelSkyDrawer::update(double)
 		// holds several photosites (the view is the whole sensor), which average their noise.
 		if (getFlagPhotoFilmActive())
 		{
-			// Film: the grain. The data sheets give the RMS density fluctuation sigma_D in a 48 micrometer aperture;
-			// through the curve of the film (dD = gamma dlog10 E) it is a relative fluctuation of the exposure
+			// Film: the grain. The data sheets give the RMS density fluctuation sigma_D in a 48 micrometer aperture
+			// at density 1; it grows as the square root of the density (see getPhotoGrainParams()). Through the
+			// curve of the film (dD = gamma dlog10 E) it is a relative fluctuation of the exposure
 			// ln(10) sigma_D / gamma, smaller in a larger area (the square root of the areas). The level is the
 			// sky, but at least the toe of the curve (4 stops below middle grey): fainter light hardly blackens
 			// the film at all (its inertia), and a star must stand out of the grain there.
@@ -1140,7 +1141,21 @@ void StelSkyDrawer::update(double)
 			const double aperture = M_PI*24e-6*24e-6;
 			const double relative = std::log(10.)*f.granularity/1000./f.gamma * std::sqrt(aperture/(pixel*pixel));
 			const double level = qMax(static_cast<double>(photoSkyBackground), 0.18/16.);
-			photoNoiseSigma = static_cast<float>(relative*level);
+			// The density of the film at the sky: a slide is densest in the dark sky, a negative there thin
+			double density;
+			const double x = level*static_cast<double>(exposure);
+			if (f.type == PhotoFilmSlide)
+			{
+				const double y = qMax(static_cast<double>(photoToneCurveValue(static_cast<float>(x))),
+				                      std::pow(10., static_cast<double>(PHOTO_SLIDE_BASE_DENSITY - PHOTO_SLIDE_MAX_DENSITY)));
+				density = static_cast<double>(PHOTO_SLIDE_BASE_DENSITY) - std::log10(y);
+			}
+			else
+			{
+				const double toe = static_cast<double>(f.toneMid)/16.;
+				density = static_cast<double>(PHOTO_NEGATIVE_FOG_DENSITY) + f.gamma*std::log10(qMax(1., x/toe));
+			}
+			photoNoiseSigma = static_cast<float>(relative*level*std::sqrt(density));
 		}
 		else
 		{
@@ -3027,6 +3042,38 @@ StelSkyDrawer::PhotoNoiseParams StelSkyDrawer::getPhotoNoiseParams(const StelPro
 		p.sites = static_cast<float>(qMax(1., (pixel*pixel)/(pitch*pitch)));
 	}
 	p.hotProbability = qMin(1.f, 1.f - std::pow(1.f - PHOTO_HOT_PIXEL_FRACTION, p.sites));
+	p.seed = static_cast<float>(photoNoiseFrame) + 0.5f;
+	return p;
+}
+
+// The grain of a film. It is not a noise of the light but of the developed film: the silver grains (black and white)
+// or the dye clouds (color) lie at random. The data sheets give the RMS fluctuation of the density sigma_D in a
+// 48 micrometer aperture at density 1 (the granularity, x 1000). It shrinks as the square root of the area
+// measured (Selwyn), and grows as the square root of the density (as many grains as blackening; Nutting and
+// Siedentopf). A slide is the picture itself: densest in the shadows, so the grain shows most in a dark night sky,
+// as a relative fluctuation of the light that passes, 10^(-sigma_D g). A negative is densest in the highlights;
+// the paper of the print (its slope, the system gamma over the gamma of the negative) multiplies its fluctuation.
+// The three layers of a color film each have their own grains. A screen pixel is a part of the film: the whole
+// frame is the view (about 14 micrometers), or a scan at 4000 dpi for a "100% view".
+StelSkyDrawer::PhotoGrainParams StelSkyDrawer::getPhotoGrainParams(const StelProjector& prj) const
+{
+	PhotoGrainParams p;
+	if (photoNoise == PhotoNoiseOff || !getFlagPhotoFilmActive())
+		return p;
+	const PhotoFilmSpec& f = getPhotoFilmSpec(photoFilm);
+	double pixel = PHOTO_FILM_SCAN_PIXEL;
+	if (photoNoise != PhotoNoisePixel)
+	{
+		const double diagonal = getPhotoFrameDiagonal(prj);
+		pixel = diagonal > 0. ? getPhotoSensorDiagonal()/diagonal : PHOTO_FILM_SCAN_PIXEL;
+	}
+	const double aperture = M_PI*24e-6*24e-6;
+	p.mode = (f.type == PhotoFilmSlide) ? 1 : 2;
+	p.mono = (f.type == PhotoFilmMonochrome);
+	p.sigma = static_cast<float>(f.granularity/1000. * std::sqrt(aperture/(pixel*pixel)));
+	p.negativeGamma = static_cast<float>(f.gamma);
+	p.printGamma = static_cast<float>(static_cast<double>(f.toneA)/f.gamma);
+	p.toe = f.toneMid/16.f;
 	p.seed = static_cast<float>(photoNoiseFrame) + 0.5f;
 	return p;
 }

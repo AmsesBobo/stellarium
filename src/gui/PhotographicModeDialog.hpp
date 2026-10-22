@@ -55,6 +55,8 @@ private slots:
 
 private:
 	Ui_PhotographicModeDialogForm *ui;
+	//! The tooltip of the noise list for a digital sensor (with a film the list sets the grain)
+	QString sensorNoiseToolTip;
 
 	//! Standard camera values offered in the combo boxes
 	static const QVector<double> exposureTimes;

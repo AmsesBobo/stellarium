@@ -261,6 +261,26 @@ public:
 		float seed = 0.f;        //!< changes every frame (the noise of a new exposure)
 	};
 	PhotoNoiseParams getPhotoNoiseParams(const StelProjector& prj) const;
+	//! The grain of a film (see getPhotoGrainParams()): it lies in the density of the developed film
+	struct PhotoGrainParams
+	{
+		int mode = 0;            //!< 0: none, 1: slide film (the density of the picture itself), 2: negative printed on paper
+		bool mono = false;       //!< black and white: the same grain in red, green and blue
+		float sigma = 0.f;       //!< RMS density at density 1 in a pixel (Selwyn: the 48 micrometer value x sqrt of the areas)
+		float negativeGamma = 1.f; //!< negative: the slope of its curve (density per log10 exposure)
+		float printGamma = 1.f;  //!< negative: the slope of the paper, which multiplies the density fluctuation of the negative
+		float toe = 0.01f;       //!< negative: the exposure at the toe of its curve (camera units of the tone curve)
+		float seed = 0.f;        //!< changes every frame, as the sensor noise
+	};
+	PhotoGrainParams getPhotoGrainParams(const StelProjector& prj) const;
+	//! Base plus fog of a slide film, and its maximum density (density of the darkest black of the picture)
+	static constexpr float PHOTO_SLIDE_BASE_DENSITY = 0.2f;
+	static constexpr float PHOTO_SLIDE_MAX_DENSITY = 3.5f;
+	//! Base plus fog of a negative (with the orange mask of a color negative it is higher, but that is filtered
+	//! away in the print and adds no grain of its own)
+	static constexpr float PHOTO_NEGATIVE_FOG_DENSITY = 0.25f;
+	//! A pixel of a "100% view" of a film: a scan at 4000 dpi, as by the film scanners of the time (6.35 micrometers)
+	static constexpr double PHOTO_FILM_SCAN_PIXEL = 25.4e-3/4000.;
 	//! The mean luminance <Y> (linear, unit = white) of a texture and the mean of its square <Y^2>, measured on
 	//! the GPU from its mipmaps. <Y^2>/<Y> is the typical luminance of the lit parts, whatever their share of the
 	//! image. Used to calibrate images of nebulae in the photographic mode. Returns false on failure.
