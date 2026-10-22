@@ -381,6 +381,16 @@
               </property>
              </widget>
             </item>
+            <item>
+             <widget class="QCheckBox" name="filmSpectralSkyCheckBox">
+              <property name="text">
+               <string>Spectral sky</string>
+              </property>
+              <property name="toolTip">
+               <string>Color film: the sky from its spectrum, as the film's three layers see it (ShowMySky's colors and its scotopic luminance; the lightweight atmosphere estimates the latter). It gives the twilight more red and violet. Off: the sky from its color, like the rest of the scene, which matches slides of the twilight better (deep blue over an orange horizon).</string>
+              </property>
+             </widget>
+            </item>
            </layout>
           </item>
           <item row="18" column="0">
