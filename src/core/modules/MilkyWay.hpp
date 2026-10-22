@@ -114,6 +114,10 @@ private:
 	StelTextureSP mainTex;
 	//! Texture used in the photographic mode (may be the same as mainTex)
 	StelTextureSP photoTex;
+	//! Photographic mode: the large-scale correction of photoTex (log10 of the factor + 0.6, linear), or null
+	StelTextureSP photoCorrectionTex;
+	//! Photographic mode: the part of that correction applied (config: astro/milky_way_photo_correction_strength)
+	float photoCorrectionStrength = 0.5f;
 	Vec3f color; // global color
 	double intensity;
 	double intensityFovScale; // like for constellations: reduce brightness when zooming in.
@@ -136,6 +140,9 @@ private:
 		int photoCurveTop;
 		int photoStarFactor;
 		int photoGalacticPole;
+		int photoCorrection;
+		int photoCorrectionTex;
+		int photoCorrectionStrength;
 	} shaderVars;
 
 	//! Photographic mode: luminance (cd/m^2) of a linear value of 1.0 in photoTex. It calibrates the
