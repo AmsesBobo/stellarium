@@ -760,6 +760,7 @@ void AtmosphereLightweight::applyToneReproducerParams(StelCore* core, const floa
 		GL(renderShaderProgram_->setUniformValue("photoScale", skyDrawer->getPhotoSceneScale()));
 		const Vec3f k = skyDrawer->getPhotoAirglowExtinction();
 		GL(renderShaderProgram_->setUniformValue("photoAirglowExtinction", k[0], k[1], k[2]));
+		skyDrawer->setPhotoFilmSkyUniforms(*renderShaderProgram_);
 	}
 }
 
