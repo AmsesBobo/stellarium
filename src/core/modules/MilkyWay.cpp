@@ -38,6 +38,7 @@
 #include "StelTranslator.hpp"
 #include "StelModuleMgr.hpp"
 #include "LandscapeMgr.hpp"
+#include "StarMgr.hpp"
 #include "StelMovementMgr.hpp"
 #include "Planet.hpp"
 // For debugging draw() only:
@@ -112,7 +113,9 @@ void MilkyWay::init()
 	// Cygnus 22.8, the anticenter 22.6. (x1 can be changed with astro/milky_way_photo_curve_top.)
 	// The scale keeps the calibration to the mean integrated starlight at the zenith at 40N (75 nW/m^2/sr in V,
 	// Masana et al. 2021, MNRAS 501, 5443) minus the ~20% contributed by Hipparcos-bright stars: the mean over
-	// declinations 30-50 is that of the earlier expansion (1.0 = 1400 S10(V) with a power of 1.5).
+	// declinations 30-50 is that of the earlier expansion (1.0 = 1400 S10(V) with a power of 1.5). This is the
+	// texture with the factor 1.0 of photoStarFactors(): the light of the stars that are drawn as points is taken
+	// out of it while drawing (astro/flag_milky_way_photo_star_subtraction), so that it does not count twice.
 	// astro/milky_way_photo_destretch > 0 uses a single power instead (with its own astro/milky_way_photo_luminance).
 	// Without it, Axel Mellinger's panorama is used: its 99.9th percentile (linear 0.21) is set to
 	// about 20.5 mag/arcsec^2 (V).
@@ -142,6 +145,7 @@ void MilkyWay::init()
 		// is redder than sunlight, B-V about 0.9 against 0.65 (Leinert et al. 1998, A&AS 127, 1): as a 5000 K star
 		// seen in sunlight white balance, 1.09 0.99 0.84. These gains move the mean there and keep the variations of
 		// the image (the reddened dust lanes, the bluer young regions); the luminance does not change.
+		flagPhotoStarSubtraction = conf->value("astro/flag_milky_way_photo_star_subtraction", true).toBool();
 		const QStringList gain = conf->value("astro/milky_way_photo_color_gain", "1.197,0.967,0.750").toString().split(',');
 		if (gain.size() == 3)
 			photoColorGain.set(gain[0].trimmed().toFloat(), gain[1].trimmed().toFloat(), gain[2].trimmed().toFloat());
@@ -203,6 +207,82 @@ void MilkyWay::releaseVAO()
 		auto& gl = *QOpenGLContext::currentContext()->functions();
 		gl.glDisableVertexAttribArray(SKY_VERTEX_ATTRIB_INDEX);
 	}
+}
+
+// Photographic mode: the stars that are drawn as points must not be in the texture as well (their light would count
+// twice). The texture holds all the light of the stars: as calibrated, about 1.46 times the light of the stars fainter
+// than 10.5 (the default catalogs) - a sum over Stellarium's catalogs (to 10.5, by galactic latitude; 26 S10 at the
+// galactic poles, where Pioneer 10 measured 26-30 S10 for the stars fainter than 6.5) and the star counts of its
+// extra catalogs (10.5-18, about 220 million stars), continued to the faint end of Gaia. Over the whole sky the
+// stars to 6 give 20% of the light, to 10.5 54%, to 12 66%, to 15.5 88% and to 18 96%.
+// For a limit fainter than 10.5 the factor is the share of the fainter light, (1 - G(mag))/1.46 with G from the star
+// counts (the same at all latitudes). For a brighter limit the light of the stars between it and 10.5 goes back into
+// the texture: their sum in each band of galactic latitude, relative to the texture there. 1.0 is the texture as
+// calibrated.
+void MilkyWay::photoStarFactors(float mag, float factors[19]) const
+{
+	static const float brightTable[10][19] = { // magnitude 6, 6.5, ..., 10.5; latitude 0, 5, ..., 90
+		{1.075f, 0.986f, 1.090f, 1.191f, 1.248f, 1.283f, 1.322f, 1.343f, 1.393f, 1.442f, 1.512f, 1.576f, 1.613f, 1.728f, 1.790f, 1.830f, 1.884f, 1.954f, 2.034f},
+		{1.046f, 0.963f, 1.060f, 1.147f, 1.198f, 1.232f, 1.267f, 1.277f, 1.338f, 1.372f, 1.440f, 1.482f, 1.523f, 1.601f, 1.677f, 1.695f, 1.733f, 1.793f, 1.899f},
+		{1.013f, 0.938f, 1.024f, 1.100f, 1.146f, 1.174f, 1.206f, 1.218f, 1.265f, 1.293f, 1.345f, 1.394f, 1.431f, 1.481f, 1.553f, 1.564f, 1.602f, 1.629f, 1.659f},
+		{0.977f, 0.911f, 0.986f, 1.053f, 1.090f, 1.116f, 1.137f, 1.148f, 1.190f, 1.211f, 1.249f, 1.287f, 1.317f, 1.365f, 1.435f, 1.429f, 1.468f, 1.484f, 1.541f},
+		{0.939f, 0.881f, 0.945f, 1.001f, 1.030f, 1.048f, 1.068f, 1.076f, 1.105f, 1.126f, 1.151f, 1.181f, 1.205f, 1.251f, 1.302f, 1.308f, 1.336f, 1.344f, 1.405f},
+		{0.894f, 0.847f, 0.900f, 0.943f, 0.967f, 0.977f, 0.994f, 1.001f, 1.023f, 1.036f, 1.058f, 1.076f, 1.100f, 1.133f, 1.175f, 1.185f, 1.194f, 1.201f, 1.273f},
+		{0.847f, 0.811f, 0.851f, 0.883f, 0.900f, 0.907f, 0.919f, 0.921f, 0.935f, 0.947f, 0.964f, 0.976f, 0.992f, 1.016f, 1.041f, 1.049f, 1.063f, 1.067f, 1.099f},
+		{0.796f, 0.771f, 0.799f, 0.821f, 0.829f, 0.833f, 0.842f, 0.843f, 0.850f, 0.857f, 0.867f, 0.875f, 0.887f, 0.900f, 0.917f, 0.922f, 0.926f, 0.935f, 0.962f},
+		{0.742f, 0.730f, 0.744f, 0.755f, 0.759f, 0.760f, 0.763f, 0.763f, 0.767f, 0.770f, 0.773f, 0.777f, 0.784f, 0.788f, 0.798f, 0.797f, 0.807f, 0.807f, 0.803f},
+		{0.687f, 0.687f, 0.687f, 0.687f, 0.687f, 0.687f, 0.687f, 0.687f, 0.687f, 0.687f, 0.687f, 0.687f, 0.687f, 0.687f, 0.687f, 0.687f, 0.687f, 0.687f, 0.687f} };
+	static const float faintTable[16] = { // magnitude 10.5, 11, ..., 18
+		0.687f, 0.625f, 0.565f, 0.507f, 0.450f, 0.395f, 0.343f, 0.296f, 0.252f, 0.212f, 0.176f, 0.145f, 0.117f, 0.093f, 0.073f, 0.056f };
+	if (!flagPhotoStarSubtraction)
+	{
+		std::fill(factors, factors+19, 1.f);
+		return;
+	}
+	if (mag >= 10.5f)
+	{
+		const float x = qMin(15.f, (mag - 10.5f)*2.f);
+		const int i = qMin(14, static_cast<int>(x));
+		const float f = faintTable[i] + (faintTable[i+1] - faintTable[i])*(x - static_cast<float>(i));
+		std::fill(factors, factors+19, f);
+		return;
+	}
+	const float x = qMax(0.f, (mag - 6.f)*2.f);
+	const int i = qMin(8, static_cast<int>(x));
+	const float t = x - static_cast<float>(i);
+	for (int j = 0; j < 19; ++j)
+		factors[j] = brightTable[i][j] + (brightTable[i+1][j] - brightTable[i][j])*t;
+}
+
+// The faintest stars drawn as points: the faint end of the catalogs, the limit set by the user, and those that rise above
+// the noise of the picture (StelSkyDrawer::computeRCMag()). Not fainter than 6: the light of the bright stars never goes
+// into the smooth texture.
+float MilkyWay::photoDrawnStarsMagnitude(const StelSkyDrawer* drawer) const
+{
+	constexpr float magMin = 6.f, magDeepest = 20.f;
+	static StarMgr* starMgr = GETSTELMODULE(StarMgr);
+	// The faintest stars the picture shows (whatever the catalogs hold)
+	RCMag rcmag;
+	float a = magMin, b = magDeepest;
+	if (drawer->computeRCMag(magDeepest, &rcmag))
+		a = magDeepest;
+	else if (!drawer->computeRCMag(magMin, &rcmag))
+		b = magMin;
+	for (int k = 0; k < 14 && b - a > 0.01f; ++k)
+	{
+		const float m = 0.5f*(a + b);
+		if (drawer->computeRCMag(m, &rcmag))
+			a = m;
+		else
+			b = m;
+	}
+	photoDetectionMagnitude = a;
+	if (!starMgr || !starMgr->getFlagStars())
+		return magMin;
+	float mag = qMin(a, starMgr->getCatalogsFaintestMag());
+	if (drawer->getFlagStarMagnitudeLimit())
+		mag = qMin(mag, static_cast<float>(drawer->getCustomStarMagnitudeLimit()));
+	return qMax(magMin, mag);
 }
 
 void MilkyWay::update(double deltaTime)
@@ -321,6 +401,23 @@ uniform bool photoMode;  // photographic mode: texture is linear luminance, brig
 uniform float photoDestretch; // photographic mode: power applied to the luminance of the texture (keeps the color), 0: photoCurve
 uniform vec4 photoCurve;      // photographic mode: the expansion of the texture (c0, c1, c2, x0), see MilkyWay::init()
 uniform float photoCurveTop;  // photographic mode: x1 of that expansion
+uniform float photoStarFactor[19]; // photographic mode: factor for the galactic latitudes 0, 5, ..., 90 (stars drawn as points)
+uniform vec3 photoGalacticPole;    // photographic mode: north galactic pole (J2000)
+float photoStarLight(vec3 dir)
+{
+	// The share of the texture's light that is not drawn as stars, by galactic latitude
+	float x = degrees(asin(min(1., abs(dot(dir, photoGalacticPole)))))/5.;
+	float factor = photoStarFactor[18];
+	for (int k = 0; k < 18; ++k)
+	{
+		if (x < float(k+1))
+		{
+			factor = mix(photoStarFactor[k], photoStarFactor[k+1], x - float(k));
+			break;
+		}
+	}
+	return factor;
+}
 void main(void)
 {
 	const float PI = 3.14159265;
@@ -392,6 +489,7 @@ void main(void)
 				}
 				else
 					c.rgb = vec3(0.);
+				c.rgb *= photoStarLight(dir);
 			}
 			else if (photoDestretch != 1.)
 			{
@@ -433,6 +531,8 @@ void main(void)
 		shaderVars.photoDestretch   = renderProgram->uniformLocation("photoDestretch");
 		shaderVars.photoCurve       = renderProgram->uniformLocation("photoCurve");
 		shaderVars.photoCurveTop    = renderProgram->uniformLocation("photoCurveTop");
+		shaderVars.photoStarFactor  = renderProgram->uniformLocation("photoStarFactor");
+		shaderVars.photoGalacticPole= renderProgram->uniformLocation("photoGalacticPole");
 		renderProgram->release();
 	}
 	if(!renderProgram || !renderProgram->isLinked())
@@ -454,6 +554,21 @@ void main(void)
 		renderProgram->setUniformValue(shaderVars.photoDestretch, photoDestretch);
 		renderProgram->setUniformValue(shaderVars.photoCurve, photoCurve[0], photoCurve[1], photoCurve[2], photoCurve[3]);
 		renderProgram->setUniformValue(shaderVars.photoCurveTop, photoCurveTop);
+		// The stars drawn as points take their light out of the texture
+		float starFactors[19];
+		const float drawnMag = photoDrawnStarsMagnitude(drawer);
+		photoStarFactors(drawnMag, starFactors);
+		if (std::fabs(drawnMag - photoLastStarsMagnitude) > 0.25f)
+		{
+			photoLastStarsMagnitude = drawnMag;
+			qDebug().noquote() << "Photographic Milky Way: stars drawn down to magnitude" << QString::number(drawnMag, 'f', 1)
+			                   << "(the picture shows them to" << QString::number(photoDetectionMagnitude, 'f', 1) << ")"
+			                   << "- texture factor in the galactic plane" << QString::number(starFactors[0], 'f', 3)
+			                   << ", at the poles" << QString::number(starFactors[18], 'f', 3);
+		}
+		renderProgram->setUniformValueArray(shaderVars.photoStarFactor, starFactors, 19, 1);
+		const Vec3d pole = StelCore::matGalacticToJ2000 * Vec3d(0., 0., 1.);
+		renderProgram->setUniformValue(shaderVars.photoGalacticPole, QVector3D(static_cast<float>(pole[0]), static_cast<float>(pole[1]), static_cast<float>(pole[2])));
 		renderProgram->setUniformValue(shaderVars.extinctionEnabled, drawer->getFlagHasAtmosphere() && extinction.getExtinctionCoefficient()>=0.01f);
 		renderProgram->setUniformValue(shaderVars.bortleIntensity, 1.f);
 		const int mainTexSampler = 0;

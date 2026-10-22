@@ -542,6 +542,9 @@ bool StarMgr::checkAndLoadCatalog(const QVariantMap& catDesc, const bool load)
 			Q_ASSERT(z->level==gridLevels.size());
 			++maxGeodesicGridLevel;
 			gridLevels.append(z);
+			const QVariantList magRange = catDesc.value("magRange").toList();
+			if (magRange.size() == 2)
+				catalogsFaintestMag = qMax(catalogsFaintestMag, magRange.at(1).toFloat());
 		}
 		return true;
 	}
