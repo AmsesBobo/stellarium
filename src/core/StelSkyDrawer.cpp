@@ -2527,15 +2527,19 @@ float StelSkyDrawer::invertPhotoShoulder(float y)
 void StelSkyDrawer::updatePhotoToneCurve()
 {
 	// Contrast a, shoulder d and the clipping point (in scene units, middle grey = 0.18) of each curve.
-	// Standard: the shape of a camera JPEG (more contrast than linear: darker shadows, brighter
-	// mid-highlights), with the sensor saturating about 3 stops above middle grey, as the
-	// saturation-based ISO speed (ISO 12232) puts it: 0.18 * 7.8 = 1.4.
+	// Standard: the curve of a camera JPEG, measured on a Canon EOS R6 (ISO 6400, standard picture style): its
+	// own JPEG against its raw data, pixel by pixel over a night sky picture (raw levels from 0.1% to 10% of
+	// saturation, sRGB 2-135). Middle grey (sRGB 118) lies 3.65 stops below saturation, as the standard output
+	// sensitivity (ISO 12232, used by the camera makers) puts the ISO speed, not 2.96 as the saturation-based
+	// speed would: 0.18 * 2^3.65 = 2.26. The contrast is 1.65 (rms 1.8 sRGB levels; the camera lifts the
+	// deepest shadows, below 1/2 of a percent of saturation, a little more). Compared with the earlier curve
+	// (contrast 1.30, saturation at 1.4) a night sky gets darker and the Milky Way stands out more.
 	// Film: like a negative film, slightly soft, with 6 stops of room above middle grey (0.18 * 64).
 	float a = 1.f, d = 1.f, clip = 1.f;
 	double midOut = 0.18;
 	switch (photoToneCurve)
 	{
-		case PhotoToneStandard: a = 1.30f; d = 1.f; clip = 1.4f;  break;
+		case PhotoToneStandard: a = 1.65f; d = 1.f; clip = 2.26f; break;
 		case PhotoToneFilm:     a = 1.15f; d = 1.f; clip = 11.5f; break;
 		default: break;
 	}
