@@ -171,6 +171,7 @@ StelSkyDrawer::StelSkyDrawer(StelCore* acore) :
 	photoSensorFormat = qBound(0, conf->value("viewing/photographic_sensor_format", static_cast<int>(PhotoSensorFullFrame)).toInt(), PHOTO_SENSOR_FORMAT_COUNT - 1);
 	photoFilm = qBound(0, conf->value("viewing/photographic_film", 0).toInt(), PHOTO_FILM_COUNT - 1);
 	photoFilmPush = qBound(0, conf->value("viewing/photographic_film_push", 0).toInt(), PHOTO_FILM_MAX_PUSH);
+	updatePhotoActiveFilmSpec();
 	photoDigitalISO = photoISO;
 	if (photoFilm != PhotoFilmNone)
 	{
@@ -2827,22 +2828,13 @@ const StelSkyDrawer::PhotoFilmSpec& StelSkyDrawer::getPhotoFilmSpec(int film)
 // the reciprocity failure at the brightness of the point (as the shader does it, without the color shift)
 float StelSkyDrawer::photoFilmRecordedExposure(float x) const
 {
-	const PhotoReciprocityParams p = getPhotoReciprocityParams();
-	if (!p.enabled || !(x > 0.f))
+	if (!getFlagPhotoFilmActive() || !flagPhotoReciprocityPerPoint || !(x > 0.f))
 		return x;
-	const double tn = qMin(1e20, static_cast<double>(p.time)*PHOTO_MIDDLE_GREY_EXPOSURE/static_cast<double>(x));
-	if (tn <= static_cast<double>(p.times[0]))
+	const PhotoFilmSpec& f = photoActiveFilmSpec;
+	if (f.points <= 0)
 		return x;
-	for (int i = 1; i < p.points; ++i)
-		if (tn <= static_cast<double>(p.times[i]))
-		{
-			const double u = std::log(tn/static_cast<double>(p.times[i-1]))/std::log(static_cast<double>(p.times[i]/p.times[i-1]));
-			const double te = static_cast<double>(p.effective[i-1])*std::pow(static_cast<double>(p.effective[i]/p.effective[i-1]), u);
-			return static_cast<float>(static_cast<double>(x)*te/tn);
-		}
-	const int last = p.points - 1;
-	const double te = static_cast<double>(p.effective[last])*std::pow(tn/static_cast<double>(p.times[last]), static_cast<double>(p.exponent));
-	return static_cast<float>(static_cast<double>(x)*te/tn);
+	const double tn = qMin(1e20, getPhotoEffectiveExposureTime()*PHOTO_MIDDLE_GREY_EXPOSURE/static_cast<double>(x));
+	return static_cast<float>(static_cast<double>(x)*photoFilmEffectiveTime(f, tn)/tn);
 }
 
 // The camera exposure that a film records as xr (the inverse of photoFilmRecordedExposure(), which grows
@@ -2888,23 +2880,29 @@ StelSkyDrawer::PhotoReciprocityParams StelSkyDrawer::getPhotoReciprocityParams()
 	return p;
 }
 
-double StelSkyDrawer::getPhotoFilmEffectiveTime(double t) const
+double StelSkyDrawer::photoFilmEffectiveTime(const PhotoFilmSpec& f, double t)
 {
-	if (!getFlagPhotoFilmActive() || !(t > 0.))
-		return t;
-	const PhotoFilmSpec& f = getPhotoActiveFilmSpec();
-	if (f.points <= 0 || t <= f.time[0])
+	if (f.points <= 0 || !(t > f.time[0]))
 		return t;
 	for (int i = 1; i < f.points; ++i)
 	{
 		if (t <= f.time[i])
 		{
+			// log-log interpolation between the points of the data sheet
 			const double u = std::log(t/f.time[i-1]) / std::log(f.time[i]/f.time[i-1]);
 			return f.effective[i-1] * std::pow(f.effective[i]/f.effective[i-1], u);
 		}
 	}
+	// beyond the last point: the Schwarzschild exponent
 	const int last = f.points - 1;
 	return f.effective[last] * std::pow(t/f.time[last], f.exponent);
+}
+
+double StelSkyDrawer::getPhotoFilmEffectiveTime(double t) const
+{
+	if (!getFlagPhotoFilmActive() || !(t > 0.))
+		return t;
+	return photoFilmEffectiveTime(photoActiveFilmSpec, t);
 }
 
 Vec3f StelSkyDrawer::getPhotoFilmTint(double t) const
@@ -3000,6 +2998,7 @@ void StelSkyDrawer::setPhotoFilm(int film)
 	// The lens glow of the film camera or of the digital camera (see setPhotoHaloStrength())
 	const bool haloChanges = (photoFilm == PhotoFilmNone) != (f == PhotoFilmNone);
 	photoFilm = f;
+	updatePhotoActiveFilmSpec();
 	if (haloChanges)
 	{
 		photoHaloFraction = (f != PhotoFilmNone) ? photoFilmHaloFraction : photoDigitalHaloFraction;
@@ -3031,17 +3030,21 @@ void StelSkyDrawer::setPhotoFilm(int film)
 // changed by it.
 const StelSkyDrawer::PhotoFilmSpec& StelSkyDrawer::getPhotoActiveFilmSpec() const
 {
-	photoPushedFilmSpec = getPhotoFilmSpec(photoFilm);
+	return photoActiveFilmSpec;
+}
+
+void StelSkyDrawer::updatePhotoActiveFilmSpec()
+{
+	photoActiveFilmSpec = getPhotoFilmSpec(photoFilm);
 	if (photoFilm == PhotoFilmNone || photoFilmPush == 0)
-		return photoPushedFilmSpec;
+		return;
 	const double p = static_cast<double>(photoFilmPush);
-	const bool mono = photoPushedFilmSpec.type == PhotoFilmMonochrome;
-	photoPushedFilmSpec.iso *= std::exp2(p);
+	const bool mono = photoActiveFilmSpec.type == PhotoFilmMonochrome;
+	photoActiveFilmSpec.iso *= std::exp2(p);
 	const double contrast = 1. + 0.12*p;
-	photoPushedFilmSpec.gamma *= contrast;
-	photoPushedFilmSpec.toneA = static_cast<float>(static_cast<double>(photoPushedFilmSpec.toneA)*contrast);
-	photoPushedFilmSpec.granularity *= std::pow(mono ? 1.15 : 1.12, p);
-	return photoPushedFilmSpec;
+	photoActiveFilmSpec.gamma *= contrast;
+	photoActiveFilmSpec.toneA = static_cast<float>(static_cast<double>(photoActiveFilmSpec.toneA)*contrast);
+	photoActiveFilmSpec.granularity *= std::pow(mono ? 1.15 : 1.12, p);
 }
 
 void StelSkyDrawer::setPhotoFilmPush(int stops)
@@ -3050,6 +3053,7 @@ void StelSkyDrawer::setPhotoFilmPush(int stops)
 	if (p == photoFilmPush)
 		return;
 	photoFilmPush = p;
+	updatePhotoActiveFilmSpec();
 	if (photoFilm != PhotoFilmNone)
 	{
 		const double iso = getPhotoActiveFilmSpec().iso;

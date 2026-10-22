@@ -476,6 +476,9 @@ public:
 	bool getFlagPhotoFilmActive() const {return photoFilm != PhotoFilmNone && getFlagPhotographicModeActive();}
 	//! The exposure time that counts for the film (reciprocity failure), for the exposure time t (seconds)
 	double getPhotoFilmEffectiveTime(double t) const;
+	//! The time a film f counts an exposure of t seconds as (reciprocity failure, see PhotoFilmSpec), for the whole
+	//! picture (getPhotoFilmEffectiveTime()) and for each point after its brightness (photoFilmRecordedExposure())
+	static double photoFilmEffectiveTime(const PhotoFilmSpec& f, double t);
 	//! The relative sensitivity of the red, green and blue layers of the film after the exposure time t (seconds)
 	Vec3f getPhotoFilmTint(double t) const;
 	//! Black and white film: the weights of linear red, green and blue (0 otherwise)
@@ -1526,7 +1529,10 @@ private:
 	float photoAntihalationDensity = -1.f;
 	//! Push processing of the film (stops), and the film's data with it
 	int photoFilmPush = 0;
-	mutable PhotoFilmSpec photoPushedFilmSpec = {};
+	//! The data of the film in use, with the push processing applied (see updatePhotoActiveFilmSpec())
+	PhotoFilmSpec photoActiveFilmSpec = {};
+	//! Recompute photoActiveFilmSpec: whenever the film or its push processing changes
+	void updatePhotoActiveFilmSpec();
 	//! Film: the reciprocity failure per point after its brightness (else the same for the whole picture)
 	bool flagPhotoReciprocityPerPoint = true;
 	//! Film: the sky from its spectrum (X, Y, Z, W), else from its color (rgbToFilm)
