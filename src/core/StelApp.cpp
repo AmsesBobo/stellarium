@@ -955,7 +955,7 @@ highp float vignetting(highp vec2 fragCoord)
 
 // Sensor noise (see StelSkyDrawer::getPhotoNoiseParams()), in electrons of one photosite
 uniform bool photoNoise;
-uniform highp float photoNoiseWhite;   // electrons at saturation (white)
+uniform highp float photoNoiseWhite;   // electrons per scene unit (the sensor saturates at StelSkyDrawer::PHOTO_SENSOR_SATURATION)
 uniform highp float photoNoiseRead2;   // read noise variance (e^2)
 uniform highp float photoNoiseDark;    // mean dark signal over the exposure (e)
 uniform highp float photoNoiseSites;   // photosites per screen pixel
@@ -970,7 +970,7 @@ highp vec4 noiseHash(highp vec3 p)
 	p4 += dot(p4, p4.wzxy + 33.33);
 	return fract((p4.xxyz + p4.yzzw) * p4.zywx);
 }
-// The signal of the sensor (1.0 = saturated) with its noise, per color channel:
+// The signal of the sensor (scene units) with its noise, per color channel:
 // - photon (shot) noise: the photons arrive at random, Poisson statistics, variance = number of electrons
 // - read noise of the electronics, and the noise of the dark current (thermal electrons)
 // - hot pixels: a few photosites with a much larger dark current, always at the same place on the sensor

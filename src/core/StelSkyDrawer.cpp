@@ -1327,7 +1327,8 @@ float StelSkyDrawer::luminanceToSurfacebrightness(float lum)
 // Compute RMag and CMag from magnitude for a point source.
 bool StelSkyDrawer::computePhotoRCMag(float mag, RCMag* rcMag) const
 {
-	// Total recorded light of the star (sum over all pixels, linear units, 1.0 = one saturated pixel)
+	// Total recorded light of the star (sum over all pixels, scene units: middle grey 0.18, the sensor saturates
+	// at PHOTO_SENSOR_SATURATION)
 	const float flux = photoFluxMag0 * std::pow(10.f, -0.4f*mag);
 	// Radius where a Moffat component of the given total light drops to the visibility threshold
 	auto radiusAtThreshold = [this](float componentFlux, float alpha, float beta) -> float
@@ -2539,7 +2540,7 @@ void StelSkyDrawer::updatePhotoToneCurve()
 	double midOut = 0.18;
 	switch (photoToneCurve)
 	{
-		case PhotoToneStandard: a = 1.65f; d = 1.f; clip = 2.26f; break;
+		case PhotoToneStandard: a = 1.65f; d = 1.f; clip = PHOTO_SENSOR_SATURATION; break;
 		case PhotoToneFilm:     a = 1.15f; d = 1.f; clip = 11.5f; break;
 		default: break;
 	}
@@ -3171,16 +3172,16 @@ StelSkyDrawer::PhotoNoiseParams StelSkyDrawer::getPhotoNoiseParams(const StelPro
 	if (photoNoise == PhotoNoiseOff || !getFlagPhotographicModeActive() || getFlagPhotoFilmActive())
 		return p;
 	p.enabled = true;
-	// The sensor collects the light in electrons. The scene buffer is scaled so that 1.0 is a saturated
-	// photosite at the current ISO: at the base ISO that is the full well, at a higher ISO the amplifier
-	// reaches white with proportionally fewer electrons. That is why a high ISO is noisy: for the same
+	// The sensor collects the light in electrons. A photosite saturates at the scene value
+	// PHOTO_SENSOR_SATURATION (the same point where the standard tone curve clips): at the base ISO that is the
+	// full well, at a higher ISO the amplifier reaches white with proportionally fewer electrons. That is why a high ISO is noisy: for the same
 	// brightness in the picture the sensor has caught fewer photons (for the same exposure time and aperture,
 	// the photons are the same, but so is the noise relative to the signal).
 	const float iso = qMax(static_cast<float>(photoISO), PHOTO_SENSOR_BASE_ISO);
 	// A smaller photosite holds fewer electrons and collects less dark current, in proportion to its area
 	const double pitch = getPhotoSensorPitch();
 	const float area = static_cast<float>((pitch*pitch)/(PHOTO_SENSOR_PITCH*PHOTO_SENSOR_PITCH));
-	p.white = PHOTO_SENSOR_FULL_WELL * area * PHOTO_SENSOR_BASE_ISO / iso;
+	p.white = PHOTO_SENSOR_FULL_WELL * area * PHOTO_SENSOR_BASE_ISO / iso / PHOTO_SENSOR_SATURATION;
 	// Read noise: the part after the amplifier shrinks (in electrons) at higher ISO ("ISO invariance")
 	const float downstream = PHOTO_READ_NOISE_DOWNSTREAM * PHOTO_SENSOR_BASE_ISO / iso;
 	p.read2 = PHOTO_READ_NOISE_UPSTREAM*PHOTO_READ_NOISE_UPSTREAM + downstream*downstream;

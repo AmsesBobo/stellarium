@@ -248,6 +248,10 @@ public:
 	static constexpr float PHOTO_READ_NOISE_DOWNSTREAM = 15.f;
 	static constexpr float PHOTO_DARK_CURRENT = 0.05f;
 	static constexpr float PHOTO_DARK_DOUBLING = 6.f;
+	//! Where the sensor saturates, in scene units (middle grey at the metered exposure is 0.18): 3.65 stops above
+	//! middle grey, as the camera makers set the ISO speed (standard output sensitivity, ISO 12232), measured on a
+	//! Canon EOS R6 (see updatePhotoToneCurve()). The noise model and the standard tone curve both use it.
+	static constexpr float PHOTO_SENSOR_SATURATION = 2.26f;
 	static constexpr float PHOTO_HOT_PIXEL_FRACTION = 2e-5f;
 	static constexpr float PHOTO_HOT_PIXEL_CURRENT = 20.f;
 	static constexpr float PHOTO_SENSOR_WARMING = 4.f;
@@ -255,7 +259,7 @@ public:
 	struct PhotoNoiseParams
 	{
 		bool enabled = false;
-		float white = 1.f;       //!< electrons of one photosite at saturation (white) at the current ISO
+		float white = 1.f;       //!< electrons of one photosite per scene unit at the current ISO (it saturates at PHOTO_SENSOR_SATURATION)
 		float read2 = 0.f;       //!< variance of the read noise of one photosite (electrons^2)
 		float dark = 0.f;        //!< mean dark signal of one photosite over the exposure (electrons)
 		float sites = 1.f;       //!< photosites per screen pixel
