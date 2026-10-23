@@ -106,7 +106,12 @@ StelPhotoMeter::StelPhotoMeter() = default;
 StelPhotoMeter::~StelPhotoMeter()
 {
 	QOpenGLContext* ctx = QOpenGLContext::currentContext();
-	if (ctx && (pbo[0] || pbo[1]))
+	if (!ctx)
+		return;
+	for (GLsync& f : fence)
+		if (f)
+			ctx->extraFunctions()->glDeleteSync(f);
+	if (pbo[0] || pbo[1])
 		ctx->extraFunctions()->glDeleteBuffers(2, pbo);
 }
 
@@ -162,6 +167,10 @@ void StelPhotoMeter::measure(GLuint sceneTexture, int w, int h, double sceneScal
 		init();
 	if (!ok || !vao || w < GRID || h < GRID)
 		return;
+	// The previous measurement is still on its way (the GPU is behind, see takeReading()): it is read first, a new
+	// one starts after that. So a GPU that lags a few frames gives a reading every few frames, never none.
+	if (pending[1 - current])
+		return;
 	QOpenGLExtraFunctions& gl = *QOpenGLContext::currentContext()->extraFunctions();
 
 	GLint savedViewport[4];
@@ -190,6 +199,9 @@ void StelPhotoMeter::measure(GLuint sceneTexture, int w, int h, double sceneScal
 	gl.glBindBuffer(GL_PIXEL_PACK_BUFFER, pbo[current]);
 	gl.glReadPixels(0, 0, GRID, GRID, GL_RGBA, GL_FLOAT, nullptr);
 	gl.glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+	if (fence[current])
+		gl.glDeleteSync(fence[current]);
+	fence[current] = gl.glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
 	pending[current] = true;
 	pendingInfo[current].sceneScale = sceneScale;
 	pendingInfo[current].exposureTime = exposureTime;
@@ -205,11 +217,21 @@ void StelPhotoMeter::measure(GLuint sceneTexture, int w, int h, double sceneScal
 
 bool StelPhotoMeter::takeReading(Reading& reading, double clipLevel)
 {
-	// The buffer filled by the last measure() (in the previous frame, so the transfer is done)
+	// The buffer filled by the last measure(), in the previous frame. Its transfer is usually done by now; if the
+	// GPU is still behind, it is tried again in the next frame instead of waiting for it here (mapping the buffer
+	// would block until the GPU is done).
 	const int slot = 1 - current;
 	if (!ok || !pending[slot])
 		return false;
 	QOpenGLExtraFunctions& gl = *QOpenGLContext::currentContext()->extraFunctions();
+	if (fence[slot])
+	{
+		const GLenum status = gl.glClientWaitSync(fence[slot], 0, 0);
+		if (status == GL_TIMEOUT_EXPIRED)
+			return false;
+		gl.glDeleteSync(fence[slot]);
+		fence[slot] = nullptr;
+	}
 	gl.glBindBuffer(GL_PIXEL_PACK_BUFFER, pbo[slot]);
 	const void* data = gl.glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, BUFFER_SIZE, GL_MAP_READ_BIT);
 	bool result = false;

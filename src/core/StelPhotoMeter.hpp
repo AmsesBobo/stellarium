@@ -80,6 +80,8 @@ private:
 	std::unique_ptr<QOpenGLFramebufferObject> fbo;
 	GLuint pbo[2] = {0, 0};
 	bool pending[2] = {false, false};
+	//! Fences after the transfers: a reading is taken only when its transfer is done (the GPU may lag behind)
+	GLsync fence[2] = {nullptr, nullptr};
 	Reading pendingInfo[2];
 	int pendingW[2] = {0, 0}, pendingH[2] = {0, 0};
 	int current = 0;
