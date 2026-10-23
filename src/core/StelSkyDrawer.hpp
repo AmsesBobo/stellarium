@@ -168,7 +168,7 @@ class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 	Q_PROPERTY(int photoMount READ getPhotoMount WRITE setPhotoMount NOTIFY photoMountChanged)
 	//! Sensor noise (see PhotoNoise): off, as in the whole picture on the screen, or as in a 100% view of the sensor
 	Q_PROPERTY(int photoNoise READ getPhotoNoise WRITE setPhotoNoise NOTIFY photoNoiseChanged)
-	//! Sensor format (see PhotoSensorFormat): full frame or APS-C. It sets the focal length for the field of view
+	//! Sensor format (see PhotoSensorFormat): from medium format to compact cameras. It sets the focal length for the field of view
 	//! (and so the depth of field), and the light the sensor collects for the picture (and so the noise).
 	Q_PROPERTY(int photoSensorFormat READ getPhotoSensorFormat WRITE setPhotoSensorFormat NOTIFY photoSensorFormatChanged)
 	//! Photographic mode: film in the camera instead of the digital sensor (see PhotoFilm; 0 = the digital sensor).
@@ -415,9 +415,12 @@ public:
 		PhotoSensorAPSCCanon = 2,      //!< 22.3 x 14.9 mm (crop factor 1.61, Canon)
 		PhotoSensorMicroFourThirds = 3,//!< 17.3 x 13.0 mm (crop factor 2.0, Olympus/OM System, Panasonic)
 		PhotoSensorOneInch = 4,        //!< 13.2 x 8.8 mm (crop factor 2.7, compact cameras)
-		PhotoSensorMediumFormat = 5    //!< 43.8 x 32.9 mm (crop factor 0.79, Fujifilm GFX, Hasselblad X)
+		PhotoSensorMediumFormat = 5,   //!< 43.8 x 32.9 mm (crop factor 0.79, Fujifilm GFX, Hasselblad X)
+		PhotoSensorTwoThirds = 6,      //!< 2/3": 8.8 x 6.6 mm (crop factor 3.9, Fujifilm X10/X20, bridge cameras)
+		PhotoSensor1_1_7 = 7,          //!< 1/1.7": 7.6 x 5.7 mm (crop factor 4.6, Canon PowerShot G and S series)
+		PhotoSensor1_2_3 = 8           //!< 1/2.3": 6.17 x 4.55 mm (crop factor 5.6, most compact and superzoom cameras)
 	};
-	static constexpr int PHOTO_SENSOR_FORMAT_COUNT = 6;
+	static constexpr int PHOTO_SENSOR_FORMAT_COUNT = 9;
 	//! Size of a sensor: its diagonal (m) and the pitch of a photosite (m), and a short name for the info line
 	//! (empty for full frame). The diagonal of the view is the diagonal of the sensor, which gives the focal length
 	//! of the lens: f = (sensor diagonal) x (focal length in pixels) / (diagonal of the view in pixels).
@@ -1036,6 +1039,8 @@ public slots:
 	static QString photoExposureTimeText(double seconds);
 	//! A focus distance as on the scale of a lens (see photoFocusDistance)
 	static QString photoFocusDistanceText(double meters);
+	//! The focal length as a lens is marked, in millimeters: below 10 mm with a tenth (the 4.5 mm of a compact camera)
+	static double photoNominalFocalLength(double millimeters);
 	//! Automatic exposure: use a reading of the exposure meter. Called by StelApp once per frame.
 	//! @param deltaTime time since the last call, seconds (for the smooth adaptation)
 	void applyPhotoMeterReading(const StelPhotoMeter::Reading& reading, double deltaTime);

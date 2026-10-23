@@ -181,6 +181,9 @@ void PhotographicModeDialog::fillComboBoxes()
 		ui->sensorComboBox->addItem(q_("APS-C Canon (22.3 x 14.9 mm)"), StelSkyDrawer::PhotoSensorAPSCCanon);
 		ui->sensorComboBox->addItem(q_("Micro Four Thirds (17.3 x 13 mm)"), StelSkyDrawer::PhotoSensorMicroFourThirds);
 		ui->sensorComboBox->addItem(q_("1-inch (13.2 x 8.8 mm)"), StelSkyDrawer::PhotoSensorOneInch);
+		ui->sensorComboBox->addItem(q_("2/3-inch (8.8 x 6.6 mm)"), StelSkyDrawer::PhotoSensorTwoThirds);
+		ui->sensorComboBox->addItem(q_("1/1.7-inch (7.6 x 5.7 mm)"), StelSkyDrawer::PhotoSensor1_1_7);
+		ui->sensorComboBox->addItem(q_("1/2.3-inch (6.2 x 4.6 mm)"), StelSkyDrawer::PhotoSensor1_2_3);
 	}
 	{
 		const QSignalBlocker blocker(ui->filmComboBox);
@@ -453,7 +456,7 @@ void PhotographicModeDialog::createDialogContent()
 	});
 	connect(drawer, &StelSkyDrawer::photoSensorFormatChanged,          this, &PhotographicModeDialog::updateCameraWidgets);
 	ui->focalLengthSpinBox->setStepType(QAbstractSpinBox::AdaptiveDecimalStepType);
-	connect(ui->focalLengthSpinBox, QOverload<int>::of(&QSpinBox::valueChanged), this, [drawer](int mm)
+	connect(ui->focalLengthSpinBox, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [drawer](double mm)
 	{
 		drawer->setPhotoFocalLength(mm);
 	});
@@ -672,7 +675,10 @@ void PhotographicModeDialog::updateFocalLength()
 	const StelCore* core = StelApp::getInstance().getCore();
 	const StelSkyDrawer* drawer = core->getSkyDrawer();
 	const QSignalBlocker blocker(ui->focalLengthSpinBox);
-	ui->focalLengthSpinBox->setValue(qRound(1000.*drawer->getPhotoFocalLengthForFov(core->getMovementMgr()->getAimFov())));
+	// As the lens is marked: below 10 mm with a tenth (small sensors), whole millimeters above
+	const double mm = StelSkyDrawer::photoNominalFocalLength(1000.*drawer->getPhotoFocalLengthForFov(core->getMovementMgr()->getAimFov()));
+	ui->focalLengthSpinBox->setDecimals(mm < 10. ? 1 : 0);
+	ui->focalLengthSpinBox->setValue(mm);
 }
 
 void PhotographicModeDialog::updateStarWidgets()

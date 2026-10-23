@@ -345,14 +345,15 @@ void StelSkyDrawer::setPhotoFocalLength(double millimeters)
 	core->getMovementMgr()->zoomTo(getPhotoFovForFocalLength(millimeters/1000.), 0.5f);
 }
 
-// The focal lengths of lenses that are common in astrophotography and landscape photography: fisheyes and wide
-// angles for the Milky Way and star trails, standard and short telephoto lenses for constellations, long
-// telephoto lenses and small telescopes for nebulae, and the telescopes of amateurs (an 8" SCT is about 2000 mm).
+// The focal lengths of lenses that are common in astrophotography and landscape photography: the wide end of the
+// zoom lenses of compact cameras (small sensors), fisheyes and wide angles for the Milky Way and star trails,
+// standard and short telephoto lenses for constellations, long telephoto lenses and small telescopes for
+// nebulae, and the telescopes of amateurs (an 8" SCT is about 2000 mm).
 const std::vector<double>& StelSkyDrawer::getPhotoCommonFocalLengths()
 {
 	static const std::vector<double> focalLengths = {
-		8., 10., 12., 14., 15., 16., 17., 18., 20., 24., 28., 35., 40., 50., 70., 75., 85., 100., 105., 135.,
-		180., 200., 250., 300., 400., 500., 600., 800., 1000., 1200., 1500., 2000., 2500., 3000.};
+		4., 4.5, 5., 6., 8., 10., 12., 14., 15., 16., 17., 18., 20., 24., 28., 35., 40., 50., 70., 75., 85., 100.,
+		105., 135., 180., 200., 250., 300., 400., 500., 600., 800., 1000., 1200., 1500., 2000., 2500., 3000.};
 	return focalLengths;
 }
 
@@ -446,7 +447,10 @@ const StelSkyDrawer::PhotoSensorSpec& StelSkyDrawer::getPhotoSensorSpec(int form
 		{ 0.026820, 3.72e-6, "APS-C 1.6x", 22.3/14.9 },                // 22.3 mm / 6000 (24 Mpx)
 		{ 0.021640, 3.34e-6, "4/3", 17.3/13.0 },                       // 17.3 mm / 5184 (20 Mpx)
 		{ 0.015864, 2.41e-6, "1\"", 13.2/8.8 },                        // 13.2 mm / 5472 (20 Mpx)
-		{ 0.054780, 5.30e-6, "MF", 43.8/32.9 }                         // 43.8 mm / 8256 (51 Mpx)
+		{ 0.054780, 5.30e-6, "MF", 43.8/32.9 },                        // 43.8 mm / 8256 (51 Mpx)
+		{ 0.011000, 2.20e-6, "2/3\"", 8.8/6.6 },                      // 8.8 mm / 4000 (12 Mpx)
+		{ 0.009500, 2.08e-6, "1/1.7\"", 7.6/5.7 },                    // 7.6 mm / 3648 (10 Mpx)
+		{ 0.007666, 1.54e-6, "1/2.3\"", 6.17/4.55 }                   // 6.17 mm / 4000 (12 Mpx)
 	};
 	return specs[qBound(0, format, PHOTO_SENSOR_FORMAT_COUNT - 1)];
 }

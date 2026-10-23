@@ -91,6 +91,11 @@ double StelSkyDrawer::photoNominalExposureTime(double seconds)
 	return bestDistance < 0.2 ? best : seconds;
 }
 
+double StelSkyDrawer::photoNominalFocalLength(double millimeters)
+{
+	return millimeters < 9.95 ? std::round(10.*millimeters)/10. : std::round(millimeters);
+}
+
 QString StelSkyDrawer::photoFocusDistanceText(double meters)
 {
 	const QString infinity = QString(QChar(0x221E));
@@ -475,7 +480,7 @@ void StelSkyDrawer::drawPhotoInfoLine(StelCore* core) const
 	parts << QString("f/%1").arg(QLocale().toString(apertureShown, 'g', 3));
 	// Focal length of the lens for this field on the sensor in use, and the focus when it is not at infinity
 	{
-		QString lens = QString("%1 mm").arg(qRound(1000.*getPhotoFocalLength(*core->getProjection(StelCore::FrameJ2000))));
+		QString lens = QString("%1 mm").arg(QLocale().toString(photoNominalFocalLength(1000.*getPhotoFocalLength(*core->getProjection(StelCore::FrameJ2000))), 'g', 5));
 		const char* sensor = getFlagPhotoFilmActive() ? getPhotoActiveFilmSpec().shortName
 		                                              : getPhotoSensorSpec(photoSensorFormat).shortName;
 		if (sensor[0] != 0)
