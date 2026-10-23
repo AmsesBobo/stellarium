@@ -368,7 +368,7 @@
           <item row="16" column="1">
            <widget class="QComboBox" name="sensorComboBox">
             <property name="toolTip">
-             <string>The size of the sensor. For the same field of view a smaller sensor needs a shorter lens, which gives more depth of field; at the same f-number and exposure time it collects less light for the picture, which gives more noise (APS-C about 1.2 stops, Micro Four Thirds 2, 1-inch 3 more than full frame; medium format 0.7 less). Changing the sensor keeps the lens: the field of view changes by the crop factor.</string>
+             <string>The size of the sensor. For the same field of view a smaller sensor needs a shorter lens, which gives more depth of field; at the same f-number and exposure time it collects less light for the picture, which gives more noise (APS-C about 1.2 stops, Micro Four Thirds 2, 1-inch 3, the small sensors of compact cameras 4 to 5 more than full frame; medium format 0.7 less). Changing the sensor keeps the lens: the field of view changes by the crop factor.</string>
             </property>
            </widget>
           </item>
@@ -415,7 +415,7 @@
            </widget>
           </item>
           <item row="18" column="1">
-           <widget class="QSpinBox" name="focalLengthSpinBox">
+           <widget class="QDoubleSpinBox" name="focalLengthSpinBox">
             <property name="toolTip">
              <string>The focal length of the lens: sets the field of view for the sensor. Zooming with the mouse changes it, like a zoom lens.</string>
             </property>
@@ -428,14 +428,17 @@
             <property name="suffix">
              <string> mm</string>
             </property>
+            <property name="decimals">
+             <number>0</number>
+            </property>
             <property name="minimum">
-             <number>4</number>
+             <double>3.000000000000000</double>
             </property>
             <property name="maximum">
-             <number>5000</number>
+             <double>5000.000000000000000</double>
             </property>
             <property name="value">
-             <number>50</number>
+             <double>50.000000000000000</double>
             </property>
            </widget>
           </item>
