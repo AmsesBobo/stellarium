@@ -159,6 +159,13 @@ void PhotographicModeDialog::fillComboBoxes()
 		ui->meteringComboBox->addItem(q_("Highlight-weighted"), StelSkyDrawer::PhotoMeteringHighlight);
 	}
 	{
+		const QSignalBlocker blocker(ui->zoomStepsComboBox);
+		ui->zoomStepsComboBox->clear();
+		ui->zoomStepsComboBox->addItem(q_("Free"), StelSkyDrawer::PhotoZoomFree);
+		ui->zoomStepsComboBox->addItem(q_("Whole millimeters"), StelSkyDrawer::PhotoZoomWholeMillimeters);
+		ui->zoomStepsComboBox->addItem(q_("Common focal lengths"), StelSkyDrawer::PhotoZoomCommonFocalLengths);
+	}
+	{
 		const QSignalBlocker blocker(ui->toneCurveComboBox);
 		ui->toneCurveComboBox->clear();
 		ui->toneCurveComboBox->addItem(q_("Linear"), StelSkyDrawer::PhotoToneLinear);
@@ -324,7 +331,6 @@ void PhotographicModeDialog::createDialogContent()
 	connectBoolProperty(ui->vignettingCheckBox,       "StelSkyDrawer.flagPhotoVignetting");
 	connectBoolProperty(ui->aberrationsCheckBox,      "StelSkyDrawer.flagPhotoAberrations");
 	connectBoolProperty(ui->lensFlareCheckBox,        "StelSkyDrawer.flagPhotoLensFlare");
-	connectBoolProperty(ui->zoomWholeMillimetersCheckBox, "StelSkyDrawer.flagPhotoZoomWholeMillimeters");
 	connectBoolProperty(ui->frameMaskCheckBox,        "StelSkyDrawer.flagPhotoFrameMask");
 
 	fillComboBoxes();
@@ -382,6 +388,12 @@ void PhotographicModeDialog::createDialogContent()
 			drawer->setPhotoToneCurve(ui->toneCurveComboBox->itemData(index).toInt());
 	});
 	connect(drawer, &StelSkyDrawer::photoToneCurveChanged,             this, &PhotographicModeDialog::updateCameraWidgets);
+	connect(ui->zoomStepsComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this, drawer](int index)
+	{
+		if (index >= 0)
+			drawer->setPhotoZoomSteps(ui->zoomStepsComboBox->itemData(index).toInt());
+	});
+	connect(drawer, &StelSkyDrawer::photoZoomStepsChanged,             this, &PhotographicModeDialog::updateCameraWidgets);
 	connect(ui->whiteBalanceComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this, drawer](int index)
 	{
 		if (index >= 0)
@@ -548,6 +560,10 @@ void PhotographicModeDialog::updateCameraWidgets()
 	{
 		const QSignalBlocker blocker(ui->toneCurveComboBox);
 		ui->toneCurveComboBox->setCurrentIndex(qMax(0, ui->toneCurveComboBox->findData(drawer->getPhotoToneCurve())));
+	}
+	{
+		const QSignalBlocker blocker(ui->zoomStepsComboBox);
+		ui->zoomStepsComboBox->setCurrentIndex(qMax(0, ui->zoomStepsComboBox->findData(drawer->getPhotoZoomSteps())));
 	}
 	{
 		const QSignalBlocker blocker(ui->sensorComboBox);

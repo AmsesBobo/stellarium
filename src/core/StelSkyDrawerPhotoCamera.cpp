@@ -30,6 +30,8 @@
 #include <QSettings>
 #include <QDebug>
 #include <QtGlobal>
+#include <algorithm>
+#include <cmath>
 
 void StelSkyDrawer::setFlagPhotographicMode(bool b)
 {
@@ -343,40 +345,95 @@ void StelSkyDrawer::setPhotoFocalLength(double millimeters)
 	core->getMovementMgr()->zoomTo(getPhotoFovForFocalLength(millimeters/1000.), 0.5f);
 }
 
-void StelSkyDrawer::setFlagPhotoZoomWholeMillimeters(bool b)
+// The focal lengths of lenses that are common in astrophotography and landscape photography: fisheyes and wide
+// angles for the Milky Way and star trails, standard and short telephoto lenses for constellations, long
+// telephoto lenses and small telescopes for nebulae, and the telescopes of amateurs (an 8" SCT is about 2000 mm).
+const std::vector<double>& StelSkyDrawer::getPhotoCommonFocalLengths()
 {
-	if (b == flagPhotoZoomWholeMillimeters)
+	static const std::vector<double> focalLengths = {
+		8., 10., 12., 14., 15., 16., 17., 18., 20., 24., 28., 35., 40., 50., 70., 75., 85., 100., 105., 135.,
+		180., 200., 250., 300., 400., 500., 600., 800., 1000., 1200., 1500., 2000., 2500., 3000.};
+	return focalLengths;
+}
+
+namespace
+{
+//! The common focal length nearest to @a mm, in their ratio (as the zoom goes)
+double nearestCommonFocalLength(double mm)
+{
+	const std::vector<double>& steps = StelSkyDrawer::getPhotoCommonFocalLengths();
+	double nearest = steps.front();
+	for (const double f : steps)
+		if (std::fabs(std::log(f/mm)) < std::fabs(std::log(nearest/mm)))
+			nearest = f;
+	return nearest;
+}
+}
+
+void StelSkyDrawer::setPhotoZoomSteps(int steps)
+{
+	const int s = qBound(static_cast<int>(PhotoZoomFree), steps, static_cast<int>(PhotoZoomCommonFocalLengths));
+	if (s == photoZoomSteps)
 		return;
-	flagPhotoZoomWholeMillimeters = b;
-	// Turning it on sets the lens to the nearest whole focal length right away
-	if (b && getFlagPhotographicModeActive())
+	photoZoomSteps = s;
+	// Turning it on sets the lens to the nearest step right away
+	if (s != PhotoZoomFree && getFlagPhotographicModeActive())
 	{
-		const double mm = std::round(1000.*getPhotoFocalLengthForFov(core->getMovementMgr()->getAimFov()));
-		if (mm >= 1.)
-			setPhotoFocalLength(mm);
+		const double mm = 1000.*getPhotoFocalLengthForFov(core->getMovementMgr()->getAimFov());
+		if (mm > 0. && std::isfinite(mm))
+			setPhotoFocalLength(s == PhotoZoomCommonFocalLengths ? nearestCommonFocalLength(mm) : qMax(1., std::round(mm)));
 	}
-	StelApp::immediateSave("viewing/flag_photographic_zoom_whole_millimeters", b);
-	emit flagPhotoZoomWholeMillimetersChanged(b);
+	StelApp::immediateSave("viewing/photographic_zoom_steps", s);
+	emit photoZoomStepsChanged(s);
 }
 
 double StelSkyDrawer::getPhotoWheelZoomFov(double currentFov, double targetFov) const
 {
-	if (!flagPhotoZoomWholeMillimeters || !getFlagPhotographicModeActive())
+	if (photoZoomSteps == PhotoZoomFree || !getFlagPhotographicModeActive())
 		return targetFov;
 	const double current = 1000.*getPhotoFocalLengthForFov(currentFov);
 	const double target = 1000.*getPhotoFocalLengthForFov(targetFov);
 	if (!(current > 0.) || !(target > 0.) || !std::isfinite(target))
 		return targetFov;
-	// The nearest whole millimeter, but at least the next one in the direction of the zoom, so that every
-	// step of the wheel (also the small steps of a touchpad) changes the lens. The tolerance keeps a lens
-	// already at a whole focal length (up to rounding) from counting as between two.
-	constexpr double tolerance = 0.01;
-	double mm = std::round(target);
-	if (targetFov < currentFov)       // zoom in: longer focal length
-		mm = qMax(mm, std::floor(current + tolerance) + 1.);
-	else if (targetFov > currentFov)  // zoom out: shorter focal length
-		mm = qMin(mm, std::ceil(current - tolerance) - 1.);
-	mm = qMax(mm, 1.);
+	const bool zoomIn = targetFov < currentFov;   // longer focal length
+	const bool zoomOut = targetFov > currentFov;  // shorter focal length
+	double mm = target;
+	if (photoZoomSteps == PhotoZoomWholeMillimeters)
+	{
+		// The nearest whole millimeter, but at least the next one in the direction of the zoom, so that every
+		// step of the wheel (also the small steps of a touchpad) changes the lens. The tolerance keeps a lens
+		// already at a whole focal length (up to rounding) from counting as between two.
+		constexpr double tolerance = 0.01;
+		mm = std::round(target);
+		if (zoomIn)
+			mm = qMax(mm, std::floor(current + tolerance) + 1.);
+		else if (zoomOut)
+			mm = qMin(mm, std::ceil(current - tolerance) - 1.);
+		mm = qMax(mm, 1.);
+	}
+	else
+	{
+		// Each step of the wheel changes the lens to the next common focal length in the direction of the zoom, as
+		// one would take the next lens out of the bag; beyond the first and the last one the lens stays there
+		const std::vector<double>& steps = getPhotoCommonFocalLengths();
+		constexpr double tolerance = 1.001; // a lens already at a step (up to rounding) is not between two
+		if (zoomIn)
+		{
+			const auto next = std::upper_bound(steps.cbegin(), steps.cend(), current*tolerance);
+			if (next == steps.cend())
+				return currentFov;
+			mm = *next;
+		}
+		else if (zoomOut)
+		{
+			const auto next = std::lower_bound(steps.cbegin(), steps.cend(), current/tolerance);
+			if (next == steps.cbegin())
+				return currentFov;
+			mm = *(next - 1);
+		}
+		else
+			mm = nearestCommonFocalLength(current);
+	}
 	return getPhotoFovForFocalLength(mm/1000.);
 }
 
@@ -621,7 +678,8 @@ void StelSkyDrawer::savePhotoSettings(QSettings* conf) const
 	conf->setValue("viewing/photographic_iso", photoFilm != PhotoFilmNone ? photoDigitalISO : (photoProgramRunning ? photoUserISO : photoISO));
 	conf->setValue("viewing/photographic_film", photoFilm);
 	conf->setValue("viewing/photographic_film_push", photoFilmPush);
-	conf->setValue("viewing/flag_photographic_zoom_whole_millimeters", getFlagPhotoZoomWholeMillimeters());
+	conf->setValue("viewing/photographic_zoom_steps", getPhotoZoomSteps());
+	conf->remove("viewing/flag_photographic_zoom_whole_millimeters"); // (replaced by the steps)
 	conf->setValue("viewing/flag_photographic_portrait", getFlagPhotoPortrait());
 	conf->setValue("viewing/photographic_eclipse_atmosphere", getPhotoEclipseAtmosphere());
 	conf->setValue("viewing/flag_photographic_frame_mask", getFlagPhotoFrameMask());
@@ -740,7 +798,7 @@ void StelSkyDrawer::resetPhotographicSettings()
 	setFlagPhotoFilmSpectralSky(false);
 	setPhotoFilm(PhotoFilmNone);
 	setPhotoSensorFormat(PhotoSensorFullFrame);
-	setFlagPhotoZoomWholeMillimeters(false);
+	setPhotoZoomSteps(PhotoZoomFree);
 	setFlagPhotoPortrait(false);
 	setFlagPhotoFrameMask(true);
 	setPhotoEclipseAtmosphere(1);

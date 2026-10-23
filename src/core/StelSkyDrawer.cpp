@@ -163,7 +163,9 @@ StelSkyDrawer::StelSkyDrawer(StelCore* acore) :
 		photoHaloFraction = photoFilmHaloFraction;
 	}
 	updatePhotoToneCurve();
-	flagPhotoZoomWholeMillimeters = conf->value("viewing/flag_photographic_zoom_whole_millimeters", false).toBool();
+	// (older settings had only the whole millimeters, as a flag)
+	const int oldZoomSteps = conf->value("viewing/flag_photographic_zoom_whole_millimeters", false).toBool() ? PhotoZoomWholeMillimeters : PhotoZoomFree;
+	photoZoomSteps = qBound(static_cast<int>(PhotoZoomFree), conf->value("viewing/photographic_zoom_steps", oldZoomSteps).toInt(), static_cast<int>(PhotoZoomCommonFocalLengths));
 	flagPhotoPortrait = conf->value("viewing/flag_photographic_portrait", false).toBool();
 	flagPhotoFrameMask = conf->value("viewing/flag_photographic_frame_mask", true).toBool();
 	photoEclipseAtmosphere = qBound(0, conf->value("viewing/photographic_eclipse_atmosphere", 1).toInt(), 3);
