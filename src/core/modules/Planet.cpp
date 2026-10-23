@@ -4745,9 +4745,13 @@ void Planet::draw3dModel(StelCore* core, StelProjector::ModelViewTranformP trans
 
 		// Photographic mode: a star trail or a defocused lens spreads the disk. It is drawn into an image of its
 		// own, which is then put into the scene spread out (see StelSkyDrawer::beginPhotoBodyImage()); labels,
-		// lines and markers are drawn elsewhere and stay sharp. Not for OBJ models (they use a shadow buffer).
+		// lines and markers are drawn elsewhere and stay sharp. OBJ models cannot be drawn into it (they use a
+		// shadow buffer) and stay sharp, except the Moon: when its image is spread, it is drawn as a sphere instead
+		// of its 3D model, since a sharp Moon among trailed stars or in a picture out of focus looks wrong.
+		// With a short exposure (no trail) its 3D model is drawn as before.
+		const bool useObjModel = ssm->getFlagUseObjModels() && (!objModelPath.isEmpty() || isMoon);
 		bool photoBodyImage = false;
-		if (photoMode && !(ssm->getFlagUseObjModels() && (!objModelPath.isEmpty() || isMoon)))
+		if (photoMode && (!useObjModel || isMoon))
 		{
 			double outerRadius = getSpheroidAngularRadius(core)*M_PI_180;
 			if (rings)
@@ -4758,7 +4762,8 @@ void Planet::draw3dModel(StelCore* core, StelProjector::ModelViewTranformP trans
 
 		if (!survey || survey.colors->getInterstate() < 1.0f)
 		{
-			bool drawingModel = ssm->getFlagUseObjModels() && (!objModelPath.isEmpty() || isMoon);
+			// a spread image is drawn as a sphere (see above)
+			bool drawingModel = useObjModel && !photoBodyImage;
 			if (drawingModel)
 				drawingModel = drawObjModel(light, &sPainter, isMoon, screenRd);
 			if (!drawingModel)
