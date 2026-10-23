@@ -27,6 +27,7 @@
 #include "StelApp.hpp"
 #include "StelCore.hpp"
 #include "StelPainter.hpp"
+#include "StelSkyDrawer.hpp"
 #include "StelModuleMgr.hpp"
 #include "StelTranslator.hpp"
 #include "StelUtils.hpp"
@@ -79,6 +80,7 @@ S3DRenderer::S3DRenderer(QObject *parent)
       requiresCubemap(false), cubemappingUsedLastFrame(false),
       lazyDrawing(false), updateOnlyDominantOnMoving(true), updateSecondDominantOnMoving(true), needsMovementEndUpdate(false),
       needsCubemapUpdate(true), needsMovementUpdate(false), lazyInterval(2.0), lastCubemapUpdate(0.0), lastCubemapUpdateRealTime(0), lastMovementEndRealTime(0),
+      lastCubemapPhotoScale(0.f), cubemapFloat(false),
       cubeMapCubeTex(0), cubeMapCubeDepth(0), cubeMapTex(), cubeRB(0), dominantFace(0), secondDominantFace(1), cubeFBO(0), cubeSideFBO(), cubeMappingCreated(false),
       cubeVertexBuffer(QOpenGLBuffer::VertexBuffer), transformedCubeVertexBuffer(QOpenGLBuffer::VertexBuffer), cubeIndexBuffer(QOpenGLBuffer::IndexBuffer), cubeIndexCount(0),
       lightOrthoNear(0.1f), lightOrthoFar(1000.0f), parallaxScale(0.015f)
@@ -809,6 +811,9 @@ bool S3DRenderer::renderShadowMaps()
 
 void S3DRenderer::calculateLighting()
 {
+	if (calculatePhotoLighting())
+		return;
+
 	//calculate which light source we need + intensity
 	float ambientBrightness=0.0f, directionalBrightness=0.0f, emissiveFactor;
 	const float eclipseFactor=static_cast<float>(GETSTELMODULE(SolarSystem)->getSolarEclipseFactor(StelApp::getInstance().getCore()).first);
@@ -980,6 +985,109 @@ void S3DRenderer::calculateLighting()
 	lightInfo.emissive = QVector3D(emissiveFactor,emissiveFactor,emissiveFactor);
 	lightInfo.specular = specular*solarTint;
 	lightInfo.torchDiffuse = QVector3D(torchDiff,torchDiff,torchDiff);
+}
+
+bool S3DRenderer::calculatePhotoLighting()
+{
+	// The photographic mode of the sky: the scene in the units of the camera, as the landscapes (see
+	// LandscapeMgr::update()). The textures are the reflectance of the surfaces (a grey card of 18% is 0.18): a surface
+	// lit with the illuminance E (lux) has the luminance reflectance x E / pi, and the camera records luminance x
+	// scene scale. The light comes from
+	// - the Sun, else the Moon, else Venus, whichever stands highest in this order above the horizon: directional,
+	//   with shadows (their magnitude with extinction, the color of the extinction),
+	// - the sky: luminance x pi on the surfaces (twilight, moonlit sky, airglow and light pollution included),
+	// - the lights of the scene (emissive textures) and the torch: artificial lamps.
+	// The minimal brightness of the landscapes is not used: at night the scene is as dark as it is.
+	const StelSkyDrawer* drawer = core->getSkyDrawer();
+	if (!drawer->getFlagPhotographicModeActive())
+		return false;
+	const float sceneScale = drawer->getPhotoSceneScale();
+	Landscape* l = landscapeMgr->getCurrentLandscape();
+
+	// illuminance (lux) of a source of the given magnitude: 2.54e-6 lux for V = 0
+	auto illuminance = [](float mag) { return 2.54e-6f * std::pow(10.f, -0.4f*mag); };
+	auto tinted = [](const Vec3f& c, float x) { return QVector3D(c[0]*x, c[1]*x, c[2]*x); };
+
+	Vec3d sunPosition = sun->getAltAzPosAuto(core);
+	sunPosition.normalize();
+	Vec3d moonPosition = moon->getAltAzPosAuto(core);
+	moonPosition.normalize();
+	Vec3d venusPosition = venus->getAltAzPosAuto(core);
+	venusPosition.normalize();
+
+	lightInfo.shadowCaster = LightParameters::SC_None;
+	lightInfo.backgroundAmbient = 0.f;
+	lightInfo.sunAmbient = 0.f;
+	lightInfo.moonAmbient = 0.f;
+	lightInfo.landscapeOpacity = 0.f;
+
+	// The directional light
+	Vec3d lightPosition = sunPosition;
+	float direct = 0.f; // illuminance on a surface facing the source (lux)
+	if (sunPosition[2] > 0.)
+	{
+		const double eclipseFactor = GETSTELMODULE(SolarSystem)->getSolarEclipseFactor(core).first;
+		direct = illuminance(sun->getVMagnitudeWithExtinction(core, sun->getVMagnitude(core, eclipseFactor)));
+		lightInfo.directionalSource = LightParameters::DS_Sun;
+		if (shaderParameters.shadows) lightInfo.shadowCaster = LightParameters::SC_Sun;
+	}
+	else if (moonPosition[2] > 0.)
+	{
+		lightPosition = moonPosition;
+		direct = illuminance(moon->getVMagnitudeWithExtinction(core));
+		lightInfo.directionalSource = LightParameters::DS_Moon;
+		if (shaderParameters.shadows) lightInfo.shadowCaster = LightParameters::SC_Moon;
+	}
+	else if (venusPosition[2] > 0.)
+	{
+		lightPosition = venusPosition;
+		direct = illuminance(venus->getVMagnitudeWithExtinction(core));
+		lightInfo.directionalSource = LightParameters::DS_Venus;
+		if (shaderParameters.shadows) lightInfo.shadowCaster = LightParameters::SC_Venus;
+	}
+	else
+		lightInfo.directionalSource = LightParameters::DS_Sun_Horiz;
+	lightInfo.lightDirectionV3f = lightPosition.toVec3f();
+	lightInfo.lightDirectionWorld = lightPosition.toQVector();
+
+	// An artificial push (see directionalLightPush), and the source hidden behind the horizon of the landscape
+	direct *= directionalLightPush;
+	if (direct > 0.f && l)
+	{
+		lightInfo.landscapeOpacity = l->getOpacity(lightPosition);
+		direct *= 1.0f - l->getEffectiveLandFadeValue() * lightInfo.landscapeOpacity;
+	}
+	const Vec3f tint = drawer->getPhotoExtinctionTint(lightPosition);
+	const float directValue = direct * sceneScale / static_cast<float>(M_PI);
+	lightInfo.directional = tinted(tint, directValue);
+	// the highlights of shiny surfaces: the image of the source, in proportion to its light
+	lightInfo.specular = lightInfo.directional;
+
+	// The sky light: a surface under a sky of luminance L gets the illuminance pi x L, blue by day (blue shadows)
+	float skyLuminance = 0.f;
+	if (landscapeMgr->getFlagAtmosphere())
+		skyLuminance = landscapeMgr->getAtmosphereAverageLuminance();
+	const Vec3f skyTint = sunPosition[2] > -0.1 ? Vec3f(0.86f, 1.0f, 1.26f) : Vec3f(1.f);
+	lightInfo.ambient = tinted(skyTint, skyLuminance * sceneScale);
+
+	// Lights of the scene: as the illumination layer of the landscapes, a few cd/m^2 for full white (a lamp
+	// saturates in a long exposure)
+	float emissiveFactor = 0.f;
+	if (l)
+		emissiveFactor = static_cast<float>(requiresCubemap && lazyDrawing ? l->getTargetLightscapeBrightness() : l->getEffectiveLightscapeBrightness());
+	else if (sunPosition[2] < -0.14)
+		emissiveFactor = 1.f;
+	else if (sunPosition[2] < -0.05)
+		emissiveFactor = 1.f - static_cast<float>(sunPosition[2] + 0.14)/(-0.05f + 0.14f);
+	const float lightsLuminance = 3.f;
+	const float emissive = emissiveFactor * lightsLuminance * sceneScale;
+	lightInfo.emissive = QVector3D(emissive, emissive, emissive);
+
+	// The torch: a lamp at the camera, about 20 lux close by at full brightness
+	const float torch = shaderParameters.torchLight ? torchBrightness * 20.f * sceneScale / static_cast<float>(M_PI) : 0.f;
+	lightInfo.torchDiffuse = QVector3D(torch, torch, torch);
+	lightInfo.torchAttenuation = 1.0f / (torchRange * torchRange);
+	return true;
 }
 
 void S3DRenderer::calcCubeMVP(const Vec3d translation)
@@ -1172,6 +1280,8 @@ void S3DRenderer::generateCubeMap()
 	{
 		lastCubemapUpdate = core->getJD();
 		lastCubemapUpdateRealTime = QDateTime::currentMSecsSinceEpoch();
+		const StelSkyDrawer* drawer = core->getSkyDrawer();
+		lastCubemapPhotoScale = drawer->getFlagPhotographicModeActive() ? drawer->getPhotoSceneScale() : 0.f;
 	}
 }
 
@@ -1806,10 +1916,14 @@ bool S3DRenderer::initCubemapping()
 	}
 
 
+	// Photographic mode: the colors are the light in the units of the camera (linear, 1 = saturation of a digital
+	// sensor): 8 bits would clip the highlights and band in the shadows, which the camera curve brightens.
+	// (cubemapFloat: made for the photographic mode; floating-point where the context allows it.)
+	cubemapFloat = core->getSkyDrawer()->getFlagPhotographicModeActive();
 #if !QT_CONFIG(opengles2)
 	//if we are on an ES context, it may not be possible to specify texture bitdepth
 	bool isEs = QOpenGLContext::currentContext()->isOpenGLES();
-	GLint colorFormat = isEs ? GL_RGBA : GL_RGBA8;
+	GLint colorFormat = isEs ? GL_RGBA : (cubemapFloat ? GL_RGBA16F : GL_RGBA8);
 	GLint depthFormat = isEs ? GL_DEPTH_COMPONENT : GL_DEPTH_COMPONENT24;
 	GLenum rbDepth = isEs ? GL_DEPTH_COMPONENT16 : GL_DEPTH_COMPONENT24;
 #else
@@ -2351,6 +2465,12 @@ void S3DRenderer::draw(StelCore* core, S3DScene &scene)
 
 	if(requiresCubemap)
 	{
+		// Photographic mode: floating-point colors in the cubemap (see initCubemapping())
+		const StelSkyDrawer* drawer = core->getSkyDrawer();
+		const bool photoMode = drawer->getFlagPhotographicModeActive();
+		if (cubeMappingCreated && photoMode != cubemapFloat)
+			reinitCubemapping = true;
+
 		if(!cubeMappingCreated || reinitCubemapping)
 		{
 			//init cubemaps
@@ -2370,8 +2490,12 @@ void S3DRenderer::draw(StelCore* core, S3DScene &scene)
 
 			needsMovementUpdate = false;
 
+			// Photographic mode: a new exposure (or the automatic exposure following the light) needs a new cubemap
+			const float photoScale = photoMode ? drawer->getPhotoSceneScale() : 0.f;
+			const bool exposureChanged = photoMode && !(std::fabs(photoScale - lastCubemapPhotoScale) <= 0.01f*lastCubemapPhotoScale);
+
 			//check if cubemap requires redraw
-			if(qAbs(curTime-lastCubemapUpdate) > lazyInterval * StelCore::JD_SECOND || reinitCubemapping)
+			if(qAbs(curTime-lastCubemapUpdate) > lazyInterval * StelCore::JD_SECOND || reinitCubemapping || exposureChanged)
 			{
 				needsCubemapUpdate = true;
 				needsMovementEndUpdate = false;
