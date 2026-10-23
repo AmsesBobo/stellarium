@@ -64,6 +64,17 @@ VARYING highp vec4 shadowCoord;
 
 //light direction in model space, pre-normalized
 uniform highp vec3 lightDirection;
+
+// A point that is seen faces the observer. At the edge of the disk the normal can point away from him: the shading point
+// of a pixel lies outside the triangle (with multisampling, the center of a pixel only partly covered), so the
+// normal is extrapolated beyond the limb, onto the far side. When the Sun is behind the body (a crescent), that
+// side is lit and the pixel turns white on the dark limb. Such a normal is turned back onto the limb.
+highp vec3 facingObserver(in highp vec3 n)
+{
+    highp float d = dot(n, eyeDirection);
+    return d < 0. ? normalize(n - eyeDirection * (d - 1e-4)) : n;
+}
+
 #if defined(IS_OBJ) || defined(IS_MOON)
     #define OREN_NAYAR 1
     //x = A, y = B, z = scaling factor (rho/pi * E0), w roughness
@@ -279,7 +290,7 @@ void main()
     mediump float lum = 1.;
 #else
     //simple Lambert illumination
-    mediump float c = dot(lightDirection, normalize(normalVS));
+    mediump float c = dot(lightDirection, facingObserver(normalize(normalVS)));
     mediump float lum = clamp(c, 0.0, 1.0);
 #endif
 #ifdef RINGS_SUPPORT
@@ -407,7 +418,7 @@ void main()
     else
         normal = vec3(0,0,1);
 
-    normal = normalize(normalX*normal.x+normalY*normal.y+normalZ*normal.z);
+    normal = facingObserver(normalize(normalX*normal.x+normalY*normal.y+normalZ*normal.z));
     // normal now contains the real surface normal taking normal map into account
 
     mediump float horizonShadowCoefficient = 1.;
@@ -459,7 +470,7 @@ void main()
     }
 #else
     // important to normalize here again
-    mediump vec3 normal = normalize(normalVS);
+    mediump vec3 normal = facingObserver(normalize(normalVS));
 #endif
 #ifdef OREN_NAYAR
     // Use an Oren-Nayar model for rough surfaces
