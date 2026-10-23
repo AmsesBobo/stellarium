@@ -211,6 +211,12 @@ private:
 	double lastCubemapUpdate; //when the last lazy draw happened (JDay)
 	qint64 lastCubemapUpdateRealTime; //when the last lazy draw happened (real system time, QDateTime::currentMSecsSinceEpoch)
 	qint64 lastMovementEndRealTime; //the timepoint when the last movement was stopped
+	//! Photographic mode: the scene scale of the camera (StelSkyDrawer::getPhotoSceneScale()) when the cubemap was
+	//! last drawn completely; when the exposure changes, the lazy cubemap is drawn again (0: not in photographic mode)
+	float lastCubemapPhotoScale;
+	//! The cubemap was made for the photographic mode: floating-point colors (the light of the scene in the units of the
+	//! camera, deep shadows and highlights above 1 too) where the context allows it; otherwise 8 bits as before
+	bool cubemapFloat;
 	GLuint cubeMapCubeTex; //GL_TEXTURE_CUBE_MAP, used in CUBEMAP or CUBEMAP_GSACCEL modes
 	GLuint cubeMapCubeDepth; //this is a depth-cubemap, only used in CUBEMAP_GSACCEL mode
 	GLuint cubeMapTex[6]; //GL_TEXTURE_2D, for "legacy" TEXTURES mode
@@ -341,6 +347,9 @@ private:
 	void calculateShadowCaster();
 	//! Calculates lighting related stuff and puts it in the lightInfo structure
 	void calculateLighting();
+	//! Photographic mode: the light in physical units (see calculateLighting()), so that the scene follows the
+	//! exposure of the camera like the sky and the landscapes. Returns false when the mode is off.
+	bool calculatePhotoLighting();
 	//! Sets uniforms constant over the whole pass (=projection matrix, lighting & shadow info)
 	void setupPassUniforms(QOpenGLShaderProgram *shader);
 	//! Sets up shader uniforms constant over the whole frame/side of cubemap (=modelview dependent stuff)
