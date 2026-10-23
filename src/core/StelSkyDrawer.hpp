@@ -177,8 +177,9 @@ class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 	//! Push processing of the film, in stops (0: normal): more speed, contrast and grain
 	Q_PROPERTY(int photoFilmPush READ getPhotoFilmPush WRITE setPhotoFilmPush NOTIFY photoFilmPushChanged)
 	Q_PROPERTY(bool flagPhotoFilmSpectralSky READ getFlagPhotoFilmSpectralSky WRITE setFlagPhotoFilmSpectralSky NOTIFY flagPhotoFilmSpectralSkyChanged)
-	//! Zooming with the mouse wheel steps the focal length in whole millimeters, as marked on a zoom lens
-	Q_PROPERTY(bool flagPhotoZoomWholeMillimeters READ getFlagPhotoZoomWholeMillimeters WRITE setFlagPhotoZoomWholeMillimeters NOTIFY flagPhotoZoomWholeMillimetersChanged)
+	//! Zooming with the mouse wheel in steps of the focal length (see PhotoZoomSteps): free, whole millimeters as
+	//! marked on a zoom lens, or the focal lengths of common lenses
+	Q_PROPERTY(int photoZoomSteps READ getPhotoZoomSteps WRITE setPhotoZoomSteps NOTIFY photoZoomStepsChanged)
 	//! The camera is turned for a portrait (upright) picture: the long side of the sensor is vertical
 	Q_PROPERTY(bool flagPhotoPortrait READ getFlagPhotoPortrait WRITE setFlagPhotoPortrait NOTIFY flagPhotoPortraitChanged)
 	//! Dim the view outside the frame of the sensor (what the picture holds), like a viewfinder
@@ -378,9 +379,9 @@ public:
 	double getPhotoFocalLengthForFov(double fov) const;
 	//! The field of view (degrees, as StelMovementMgr) of a lens of the focal length f (m) on the sensor in use
 	double getPhotoFovForFocalLength(double f) const;
-	//! The field of view a zoom from @a currentFov towards @a targetFov ends at when the mouse wheel zoom steps in
-	//! whole millimeters (flagPhotoZoomWholeMillimeters, in photographic mode): the nearest whole focal length,
-	//! at least one millimeter away in the direction of the zoom. Otherwise @a targetFov.
+	//! The field of view a zoom from @a currentFov towards @a targetFov ends at when the mouse wheel zoom steps
+	//! (photoZoomSteps, in photographic mode): the nearest step of the focal length, at least the next one in the
+	//! direction of the zoom. Otherwise @a targetFov.
 	double getPhotoWheelZoomFov(double currentFov, double targetFov) const;
 	//! Write all the settings of the photographic mode to @a conf ("Save settings" of the configuration dialog;
 	//! with immediate saving on, each setter writes its own). While the program mode runs, the aperture and the
@@ -552,6 +553,14 @@ public:
 	//! Range of the automatic white balance (K), like in cameras
 	static constexpr double PHOTO_AWB_MIN_KELVIN = 3000.;
 	static constexpr double PHOTO_AWB_MAX_KELVIN = 8000.;
+	//! Steps of the mouse wheel zoom in the photographic mode
+	enum PhotoZoomSteps {
+		PhotoZoomFree = 0,               //!< any focal length
+		PhotoZoomWholeMillimeters = 1,   //!< whole millimeters, as on the scale of a zoom lens
+		PhotoZoomCommonFocalLengths = 2  //!< the focal lengths of common lenses (getPhotoCommonFocalLengths())
+	};
+	//! The focal lengths of common lenses and telescopes, in millimeters, increasing (the steps of PhotoZoomCommonFocalLengths)
+	static const std::vector<double>& getPhotoCommonFocalLengths();
 	//! Metering modes of the automatic exposure
 	enum PhotoMeteringMode {
 		PhotoMeteringCenterWeighted = 0, //!< 75% in a central circle, 25% over the whole image
@@ -932,9 +941,9 @@ public slots:
 	bool getFlagPhotoFilmSpectralSky() const {return flagPhotoFilmSpectralSky;}
 	//! Zoom the view to the field of a lens of the given focal length (millimeters) on the sensor in use
 	void setPhotoFocalLength(double millimeters);
-	//! Zooming with the mouse wheel in whole millimeters of focal length (see flagPhotoZoomWholeMillimeters)
-	void setFlagPhotoZoomWholeMillimeters(bool b);
-	bool getFlagPhotoZoomWholeMillimeters() const {return flagPhotoZoomWholeMillimeters;}
+	//! The steps of the mouse wheel zoom (PhotoZoomSteps)
+	void setPhotoZoomSteps(int steps);
+	int getPhotoZoomSteps() const {return photoZoomSteps;}
 	//! Turn the camera for a portrait picture. The lens stays: the field of view changes with the frame.
 	void setFlagPhotoPortrait(bool b);
 	bool getFlagPhotoPortrait() const {return flagPhotoPortrait;}
@@ -1201,7 +1210,7 @@ signals:
 	void photoFilmChanged(int film);
 	void photoFilmPushChanged(int stops);
 	void flagPhotoFilmSpectralSkyChanged(bool b);
-	void flagPhotoZoomWholeMillimetersChanged(bool b);
+	void photoZoomStepsChanged(int steps);
 	void flagPhotoPortraitChanged(bool b);
 	void flagPhotoFrameMaskChanged(bool b);
 	void photoEclipseAtmosphereChanged(int state);
@@ -1643,8 +1652,8 @@ private:
 	int photoFilm = PhotoFilmNone;
 	double photoDigitalISO = 1600.;            //!< the ISO of the digital sensor, kept while a film is in use
 	mutable float photoWBMatrixFilm[9] = {1,0,0, 0,1,0, 0,0,1};
-	//! Mouse wheel zoom in whole millimeters of focal length
-	bool flagPhotoZoomWholeMillimeters = false;
+	//! Steps of the mouse wheel zoom (PhotoZoomSteps)
+	int photoZoomSteps = PhotoZoomFree;
 	//! Frame of the sensor: portrait orientation, and the dimming outside it
 	bool flagPhotoPortrait = false;
 	bool flagPhotoFrameMask = true;

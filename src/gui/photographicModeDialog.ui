@@ -439,13 +439,17 @@
             </property>
            </widget>
           </item>
-          <item row="19" column="0" colspan="2">
-           <widget class="QCheckBox" name="zoomWholeMillimetersCheckBox">
-            <property name="toolTip">
-             <string>Zooming with the mouse wheel steps the focal length in whole millimeters, as on the scale of a zoom lens. Each step of the wheel changes it by at least one millimeter.</string>
-            </property>
+          <item row="19" column="0">
+           <widget class="QLabel" name="zoomStepsLabel">
             <property name="text">
-             <string>Mouse wheel zoom in whole millimeters</string>
+             <string>Mouse wheel zoom:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="19" column="1">
+           <widget class="QComboBox" name="zoomStepsComboBox">
+            <property name="toolTip">
+             <string>How the mouse wheel changes the focal length: freely, in whole millimeters as on the scale of a zoom lens, or between the focal lengths of common lenses and telescopes (8, 10, 12, 14 ... 50, 70, 85 ... 200, 300, 400 ... 3000 mm). In whole millimeters each step of the wheel changes it by at least one millimeter, between common focal lengths it takes the next one.</string>
             </property>
            </widget>
           </item>

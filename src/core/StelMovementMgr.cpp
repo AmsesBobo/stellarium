@@ -581,7 +581,7 @@ void StelMovementMgr::handleMouseWheel(QWheelEvent* event)
 		const double zoomFactor = exp(-mouseZoomSpeed * numSteps / 60.);
 		const float zoomDuration = 0.2f;
 		double aimFov = getAimFov() * zoomFactor;
-		// Photographic mode may step the focal length of the lens in whole millimeters
+		// Photographic mode may step the focal length of the lens (whole millimeters or common lenses)
 		if (const StelSkyDrawer* skyDrawer = core->getSkyDrawer())
 			aimFov = skyDrawer->getPhotoWheelZoomFov(getAimFov(), aimFov);
 		zoomTo(aimFov, zoomDuration);
