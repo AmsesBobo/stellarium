@@ -349,6 +349,11 @@ highp float chromaAlpha(highp float blur)
 void main(void)
 {
 	highp float r = length(vOffset);
+	// Beyond the radius of the sprite the fade below makes the pixel black: skip the work (the trailed image
+	// measures its fade from the trail, see below). The stars are added up, so a skipped pixel adds nothing.
+	bool trailed = vTrailInfo.z > 0.5;
+	if (!trailed && r >= vRadius)
+		discard;
 	highp float Rd = vShape.x;     // disk radius
 	highp float Rl = vShape.z;     // radius of a disk with the area of the lit part
 	highp float cosPhase = vShape.w;
@@ -375,7 +380,7 @@ void main(void)
 	}
 	highp float r2 = d * d;
 	highp float brightness = max(vColor.r, max(vColor.g, vColor.b));
-	highp float profile;
+	highp float profile = 0.;
 	highp vec3 chroma = vec3(0.); // change of the core in each color (chromatic aberration of the lens)
 	// The colored fringes show only where the change of the core makes a visible color difference (a few
 	// steps of the screen): bright stars. The others (most) skip it. The change is about (shift + blur)/alpha
@@ -390,47 +395,6 @@ void main(void)
 	// Where the halo and the spikes start: the lit part, or the blur disk of a defocused image
 	highp vec2 spikeP = vOffset - vSunDir * (Rd - Rl*Rl/max(Rd, 1e-6)); // from the photocenter of the lit part
 	highp float spikeR = Rl;
-	if (vDefocus.x > 0.5)
-	{
-		highp float Reff = vDefocus.y;
-		highp float rp = length(spikeP);
-		// A blur disk smaller than the PSF core only widens the core
-		highp float t = smoothstep(0.5, 2.0, Reff / coreFwhm);
-		highp float core = 0.;
-		if (t < 1.)
-		{
-			highp float k = 1.6 * Reff / coreFwhm;
-			highp float alphaWide = coreAlpha * sqrt(1. + k*k);
-			core += (1. - t) * moffat(rp*rp, alphaWide, coreBeta);
-		}
-		if (t > 0.)
-			core += t * defocusDisk(spikeP, Reff);
-		profile = coreFraction * vNorm.w * core;
-		highp float dh = max(0., rp - Reff);
-		r2 = dh * dh;
-		spikeR = Reff;
-	}
-	else if (Rd <= 0. && (comaLength > 0. || astigLength > 0.) && vLens.x > 0.05)
-	{
-		highp float base = aberratedCore(vOffset, coreAlpha);
-		profile = coreFraction * vNorm.x * base;
-		// Chromatic aberration of a star: the red and the blue core differ from the green one (green is the reference)
-		if (showChroma)
-			chroma = coreFraction * vNorm.x * vec3(aberratedCore(chromaOffset(chromaShift.r), chromaAlpha(chromaBlur.r)) - base, 0.,
-			                                       aberratedCore(chromaOffset(chromaShift.b), chromaAlpha(chromaBlur.b)) - base);
-	}
-	else
-	{
-		highp float base = moffat(r2, coreAlpha, coreBeta);
-		profile = coreFraction * vNorm.x * base;
-		if (showChroma && Rd <= 0.)
-		{
-			highp vec2 oR = chromaOffset(chromaShift.r);
-			highp vec2 oB = chromaOffset(chromaShift.b);
-			chroma = coreFraction * vNorm.x * vec3(moffat(dot(oR, oR), chromaAlpha(chromaBlur.r), coreBeta) - base, 0.,
-			                                       moffat(dot(oB, oB), chromaAlpha(chromaBlur.b), coreBeta) - base);
-		}
-	}
 	// The halo and the spikes matter only for bright stars: skip them where even their
 	// peak would stay below what can show on the screen (most stars)
 	bool showHalo = brightness * haloFraction * vNorm.y * (haloBeta - 1.) / (PI * haloAlpha * haloAlpha) > visibleThreshold;
@@ -441,7 +405,15 @@ void main(void)
 	highp vec2 trailNormal = vec2(0.);
 	// Star trail: during the exposure the image moves along an arc around the celestial pole. The trailed image
 	// is the stationary one integrated along the arc: straight segments of equal exposure time, each integrated exactly.
-	if (vTrailInfo.z > 0.5)
+	// It is computed first: a long trail does not need the stationary image at all (tau = 1 below).
+	highp float tau = 0.;
+	highp float coreT = 0.;
+	highp float haloT = 0.;
+	highp float dmin = 1e30;
+	highp vec2 nearest = vec2(0.);
+	highp float tNearest = 0.5;
+	highp float Rdf = vDefocus.x > 0.5 ? vDefocus.y : 0.;
+	if (trailed)
 	{
 		highp vec2 A = vTrail.xy;
 		highp vec2 B = vTrail.zw;
@@ -449,17 +421,28 @@ void main(void)
 		highp vec2 p = spikeP; // from the photocenter
 		int K = int(vTrailInfo.x + 0.5);
 		highp float invK = 1. / float(K);
-		highp float Rdf = vDefocus.x > 0.5 ? vDefocus.y : 0.;
+		// The distance from the trail first: beyond the radius of the sprite the pixel is black (see the fade)
+		highp vec2 P0 = A;
+		for (int k = 1; k <= 16; ++k)
+		{
+			if (k > K) break;
+			highp float t = float(k) * invK;
+			highp vec2 P1 = (1.-t)*(1.-t)*A + 2.*t*(1.-t)*C + t*t*B;
+			highp vec2 seg = P1 - P0;
+			highp float L = length(seg);
+			highp vec2 e = L > 1e-4 ? seg / L : vec2(1., 0.);
+			highp vec2 q = p - P0;
+			dmin = min(dmin, length(q - e*clamp(dot(q, e), 0., L)));
+			P0 = P1;
+		}
+		if (dmin >= vRadius)
+			discard;
+		dmin = 1e30;
 		// a small blur disk only widens the core, as for the stationary image
 		highp float kd = 1.6 * Rdf / coreFwhm;
 		highp float alphaCore = coreAlpha * sqrt(1. + kd*kd);
 		highp float alphaHalo = sqrt(haloAlpha*haloAlpha + 0.5*Rdf*Rdf);
-		highp float coreT = 0.;
-		highp float haloT = 0.;
-		highp float dmin = 1e30;
-		highp vec2 nearest = vec2(0.);
-		highp float tNearest = 0.5;
-		highp vec2 P0 = A;
+		P0 = A;
 		for (int k = 1; k <= 16; ++k)
 		{
 			if (k > K) break;
@@ -495,7 +478,55 @@ void main(void)
 			coreT = mix(coreT, coverage / (PI*Rdf*Rdf + 2.*Rdf*trailLength), tD);
 		}
 		// A short trail keeps the details of the stationary image (aberrations, the shape of the blur disk)
-		highp float tau = smoothstep(0.5, 2.0, trailLength / max(coreFwhm, 2.*Rdf));
+		tau = smoothstep(0.5, 2.0, trailLength / max(coreFwhm, 2.*Rdf));
+	}
+	// The stationary image (not needed under a long trail)
+	if (tau < 1.)
+	{
+		if (vDefocus.x > 0.5)
+		{
+			highp float Reff = vDefocus.y;
+			highp float rp = length(spikeP);
+			// A blur disk smaller than the PSF core only widens the core
+			highp float t = smoothstep(0.5, 2.0, Reff / coreFwhm);
+			highp float core = 0.;
+			if (t < 1.)
+			{
+				highp float k = 1.6 * Reff / coreFwhm;
+				highp float alphaWide = coreAlpha * sqrt(1. + k*k);
+				core += (1. - t) * moffat(rp*rp, alphaWide, coreBeta);
+			}
+			if (t > 0.)
+				core += t * defocusDisk(spikeP, Reff);
+			profile = coreFraction * vNorm.w * core;
+			highp float dh = max(0., rp - Reff);
+			r2 = dh * dh;
+			spikeR = Reff;
+		}
+		else if (Rd <= 0. && (comaLength > 0. || astigLength > 0.) && vLens.x > 0.05)
+		{
+			highp float base = aberratedCore(vOffset, coreAlpha);
+			profile = coreFraction * vNorm.x * base;
+			// Chromatic aberration of a star: the red and the blue core differ from the green one (green is the reference)
+			if (showChroma)
+				chroma = coreFraction * vNorm.x * vec3(aberratedCore(chromaOffset(chromaShift.r), chromaAlpha(chromaBlur.r)) - base, 0.,
+				                                       aberratedCore(chromaOffset(chromaShift.b), chromaAlpha(chromaBlur.b)) - base);
+		}
+		else
+		{
+			highp float base = moffat(r2, coreAlpha, coreBeta);
+			profile = coreFraction * vNorm.x * base;
+			if (showChroma && Rd <= 0.)
+			{
+				highp vec2 oR = chromaOffset(chromaShift.r);
+				highp vec2 oB = chromaOffset(chromaShift.b);
+				chroma = coreFraction * vNorm.x * vec3(moffat(dot(oR, oR), chromaAlpha(chromaBlur.r), coreBeta) - base, 0.,
+				                                       moffat(dot(oB, oB), chromaAlpha(chromaBlur.b), coreBeta) - base);
+			}
+		}
+	}
+	if (trailed)
+	{
 		profile = mix(profile, coreFraction * vNorm.w * coreT, tau);
 		chroma *= 1. - tau; // (a trail smears the colored fringes)
 		// (the whole trailed image takes the tint of its nearest point, see trailTint below)
@@ -505,10 +536,10 @@ void main(void)
 		highp float tn = tNearest;
 		trailTint = exp(vTrailLogStart * ((1.-tn)*(1.-2.*tn)) + vTrailLogEnd * (tn*(2.*tn-1.)));
 		// the spikes move with the image: they start from the trail (see below)
-		spikeP = p - nearest;
+		spikeP = spikeP - nearest;
 		spikeR = Rdf;
 		fadeDistance = dmin;
-		highp vec2 chord = B - A;
+		highp vec2 chord = vTrail.zw - vTrail.xy;
 		highp float chordLength = length(chord);
 		trailNormal = chordLength > 1e-3 ? vec2(-chord.y, chord.x) / chordLength : vec2(0.);
 	}
