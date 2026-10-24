@@ -889,6 +889,13 @@ void StelApp::prepareRenderBuffer()
 	renderBuffer->bind();
 }
 
+void StelApp::requestPhotoLuminance(double x, double y)
+{
+	photoProbeRequested = true;
+	photoProbeX = x;
+	photoProbeY = y;
+}
+
 void StelApp::applyRenderBuffer(GLuint drawFbo)
 {
 	if (!renderBuffer) return;
@@ -1442,20 +1449,26 @@ void StelApp::highGraphicsModeDraw()
 		                                postProcessorVAO.get(), halation.radius, halation.density);
 	}
 
+	// The meter and the luminance probe need a plain texture: the multisampled scene resolved into sceneFBO (once)
+	bool sceneResolved = bloomDone || !sceneMultisampledFBO;
+	const auto resolveScene = [&]()
+	{
+		if (sceneResolved)
+			return;
+		sceneResolved = true;
+#if !QT_CONFIG(opengles2)
+		const auto glh = StelOpenGL::highGraphicsFunctions();
+		GL(glh->glBindFramebuffer(GL_READ_FRAMEBUFFER, sceneMultisampledFBO));
+		GL(glh->glBindFramebuffer(GL_DRAW_FRAMEBUFFER, sceneFBO->handle()));
+		GL(glh->glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST));
+		GL(glh->glBindFramebuffer(GL_FRAMEBUFFER, sceneFBO->handle()));
+#endif
+	};
+
 	// Photographic mode: the exposure meter of the automatic exposure and white balance
 	if (photoMode && (skyDrawer->getFlagPhotoAutoExposureActive() || skyDrawer->getFlagPhotoAutoWhiteBalanceActive()))
 	{
-#if !QT_CONFIG(opengles2)
-		if (sceneMultisampledFBO && !bloomDone)
-		{
-			// The meter needs a plain texture: resolve the multisampled scene into sceneFBO
-			const auto glh = StelOpenGL::highGraphicsFunctions();
-			GL(glh->glBindFramebuffer(GL_READ_FRAMEBUFFER, sceneMultisampledFBO));
-			GL(glh->glBindFramebuffer(GL_DRAW_FRAMEBUFFER, sceneFBO->handle()));
-			GL(glh->glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST));
-			GL(glh->glBindFramebuffer(GL_FRAMEBUFFER, sceneFBO->handle()));
-		}
-#endif
+		resolveScene();
 		if (!photoMeter)
 			photoMeter.reset(new StelPhotoMeter);
 		// First the reading of the previous frame (its transfer is finished by now), then this frame
@@ -1483,6 +1496,36 @@ void StelApp::highGraphicsModeDraw()
 		photoMeterLastMs = -1;
 		core->getSkyDrawer()->applyPhotoMeterReading(StelPhotoMeter::Reading(), 0.); // marks the next reading as the first
 	}
+
+	// Photographic mode: the luminance at a point (requestPhotoLuminance(), e.g. under the mouse pointer), a few
+	// times per second. Each result is taken in a later frame, when its transfer is done.
+	if (photoMode && photoProbeRequested)
+	{
+		if (!photoProbe)
+			photoProbe.reset(new StelPhotoProbe);
+		const qint64 now = QDateTime::currentMSecsSinceEpoch();
+		double luminance = 0.;
+		if (photoProbe->takeReading(luminance))
+		{
+			photoProbeLuminance = luminance;
+			photoProbeResultMs = now;
+		}
+		if (!photoProbe->isPending() && (photoProbeLastMs < 0 || now - photoProbeLastMs >= PHOTO_PROBE_INTERVAL_MS))
+		{
+			resolveScene();
+			photoProbe->measure(sceneFBO->handle(), static_cast<int>(std::floor(photoProbeX)), static_cast<int>(std::floor(photoProbeY)),
+			                    static_cast<int>(w), static_cast<int>(h), photoSceneScale);
+			photoProbeLastMs = now;
+		}
+	}
+	else
+	{
+		if (photoProbe)
+			photoProbe->reset();
+		photoProbeLastMs = -1;
+		photoProbeLuminance = -1.;
+	}
+	photoProbeRequested = false;
 
 	if(sceneMultisampledFBO && !bloomDone)
 	{

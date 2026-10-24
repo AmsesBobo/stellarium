@@ -304,3 +304,87 @@ StelPhotoMeter::Reading StelPhotoMeter::evaluate(const float* cells, int w, int 
 	r.greyBlue = grey[2];
 	return r;
 }
+
+// ---- StelPhotoProbe ----
+
+StelPhotoProbe::~StelPhotoProbe()
+{
+	QOpenGLContext* ctx = QOpenGLContext::currentContext();
+	if (!ctx)
+		return;
+	if (fence)
+		ctx->extraFunctions()->glDeleteSync(fence);
+	if (pbo)
+		ctx->extraFunctions()->glDeleteBuffers(1, &pbo);
+}
+
+void StelPhotoProbe::measure(GLuint fbo, int x, int y, int w, int h, double sceneScale)
+{
+	QOpenGLContext* ctx = QOpenGLContext::currentContext();
+	if (!ctx)
+		return;
+	QOpenGLExtraFunctions& gl = *ctx->extraFunctions();
+	if (!initTried)
+	{
+		initTried = true;
+		gl.glGenBuffers(1, &pbo);
+		gl.glBindBuffer(GL_PIXEL_PACK_BUFFER, pbo);
+		gl.glBufferData(GL_PIXEL_PACK_BUFFER, SIZE*SIZE*4*static_cast<int>(sizeof(float)), nullptr, GL_STREAM_READ);
+		gl.glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+		ok = pbo != 0;
+	}
+	if (!ok || pending || !(sceneScale > 0.) || w < SIZE || h < SIZE)
+		return;
+	// the square around the point, inside the image
+	const int x0 = qBound(0, x - SIZE/2, w - SIZE);
+	const int y0 = qBound(0, y - SIZE/2, h - SIZE);
+
+	GLint savedReadFbo = 0;
+	gl.glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &savedReadFbo);
+	gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, fbo);
+	gl.glBindBuffer(GL_PIXEL_PACK_BUFFER, pbo);
+	gl.glReadPixels(x0, y0, SIZE, SIZE, GL_RGBA, GL_FLOAT, nullptr);
+	gl.glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+	gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, static_cast<GLuint>(savedReadFbo));
+	if (fence)
+		gl.glDeleteSync(fence);
+	fence = gl.glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+	pending = true;
+	pendingScale = sceneScale;
+	pendingCount = SIZE*SIZE;
+}
+
+bool StelPhotoProbe::takeReading(double& luminance)
+{
+	if (!ok || !pending)
+		return false;
+	QOpenGLExtraFunctions& gl = *QOpenGLContext::currentContext()->extraFunctions();
+	if (fence)
+	{
+		// not done yet: try again in the next frame instead of waiting here
+		if (gl.glClientWaitSync(fence, 0, 0) == GL_TIMEOUT_EXPIRED)
+			return false;
+		gl.glDeleteSync(fence);
+		fence = nullptr;
+	}
+	gl.glBindBuffer(GL_PIXEL_PACK_BUFFER, pbo);
+	const void* data = gl.glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, SIZE*SIZE*4*static_cast<int>(sizeof(float)), GL_MAP_READ_BIT);
+	bool result = false;
+	if (data)
+	{
+		const float* px = static_cast<const float*>(data);
+		double sum = 0.;
+		for (int i=0; i<pendingCount; ++i)
+		{
+			const double Y = 0.2126*static_cast<double>(px[4*i]) + 0.7152*static_cast<double>(px[4*i+1]) + 0.0722*static_cast<double>(px[4*i+2]);
+			if (Y > 0. && std::isfinite(Y))
+				sum += Y;
+		}
+		luminance = sum / pendingCount / pendingScale;
+		gl.glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
+		result = true;
+	}
+	gl.glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+	pending = false;
+	return result;
+}

@@ -92,4 +92,39 @@ private:
 	Reading evaluate(const float* cells, int w, int h, double clipLevel) const;
 };
 
+//! The luminance at one point of the scene image (e.g. under the mouse pointer, see StelApp::requestPhotoLuminance()).
+//! The scene image holds linear light times the scene scale of the exposure, so the luminance of the scene (cd/m^2,
+//! before the camera: no tone curve, vignetting, noise or lens halo) is the value divided by that scale.
+//! A few pixels are read back asynchronously, like the exposure meter: the value is taken in a later frame, when
+//! the GPU has done the transfer, so that the rendering never waits for it.
+class StelPhotoProbe
+{
+public:
+	//! Size of the measured square (pixels): the mean of SIZE x SIZE pixels around the point
+	static constexpr int SIZE = 3;
+
+	StelPhotoProbe() = default;
+	~StelPhotoProbe();
+
+	//! Start a measurement of the framebuffer @a fbo (w x h pixels, a floating-point color buffer) at the pixel
+	//! (x, y), counted from the lower left. It is ignored while the previous one is still on its way.
+	void measure(GLuint fbo, int x, int y, int w, int h, double sceneScale);
+	//! Get the result of the last measure() when it is finished: the mean luminance in cd/m^2.
+	//! Returns false if there is none (yet).
+	bool takeReading(double& luminance);
+	//! Whether a measurement is on its way
+	bool isPending() const { return pending; }
+	//! Forget a pending measurement
+	void reset() { pending = false; }
+
+private:
+	GLuint pbo = 0;
+	GLsync fence = nullptr;
+	bool pending = false;
+	double pendingScale = 0.;
+	int pendingCount = 0;
+	bool initTried = false;
+	bool ok = false;
+};
+
 #endif // STELPHOTOMETER_HPP

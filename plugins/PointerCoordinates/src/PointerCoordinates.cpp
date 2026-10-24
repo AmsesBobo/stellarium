@@ -31,6 +31,7 @@
 #endif
 #include "StelUtils.hpp"
 #include "SolarSystem.hpp"
+#include "StelSkyDrawer.hpp"
 #include "PointerCoordinates.hpp"
 #include "PointerCoordinatesWindow.hpp"
 #include "planetsephems/precession.h"
@@ -41,6 +42,7 @@
 #include <QPixmap>
 #include <QPair>
 #include <QMetaEnum>
+#include <cmath>
 
 StelModule* PointerCoordinatesStelPluginInterface::getStelModule() const
 {
@@ -75,6 +77,7 @@ PointerCoordinates::PointerCoordinates():
 	, flagShowConstellation(false)
 	, flagShowCrossedLines(false)
 	, flagShowElongation(false)
+	, flagShowLuminance(false)
 	, textColor(Vec3f(1,0.5,0))
 	, coordinatesPoint(Vec3d(0,0,0))
 	, fontSize(14)
@@ -117,6 +120,7 @@ void PointerCoordinates::init()
 	setFlagShowConstellation(flagShowConstellation);
 	setFlagShowCrossedLines(flagShowCrossedLines);
 	setFlagShowElongation(flagShowElongation);
+	setFlagShowLuminance(flagShowLuminance);
 }
 
 void PointerCoordinates::draw(StelCore *core)
@@ -359,11 +363,58 @@ void PointerCoordinates::draw(StelCore *core)
 		sPainter.drawText(x, y, coordsText);
 	}
 
+	// Photographic mode: the luminance under the pointer, as the camera would meter it (see StelApp::requestPhotoLuminance())
+	if (flagShowLuminance && core->getSkyDrawer()->getFlagPhotographicModeActive())
+	{
+		StelApp& app = StelApp::getInstance();
+		const QPoint m = StelMainView::getInstance().getMousePos();
+		// the center of the pixel under the pointer, in device pixels from the lower left
+		app.requestPhotoLuminance((m.x() + 0.5)*ppx, (params.viewportXywh[3] - m.y() - 0.5)*ppx);
+		const double L = app.getPhotoLuminance();
+		if (L >= 0.)
+		{
+			// Surface brightness: V mag/arcsec^2 (as a sky quality meter shows it), 0 mag/arcsec^2 = 1.08e5 cd/m^2
+			const QString mu = L > 0. ? QString(" (%1 mag/arcsec²)").arg(-2.5*std::log10(L/10.8e4), 0, 'f', 2) : QString();
+			coordsText = QString("%1: %2 cd/m²%3").arg(q_("Luminance"), luminanceString(L), mu);
+			y = getCoordinatesPlace(coordsText, flagShowElongation ? 3 : 2).second;
+			if (getCurrentCoordinatesPlace()!=Custom)
+				y *= ppx;
+			sPainter.drawText(x, y, coordsText);
+		}
+	}
+
 	if (flagShowCrossedLines)
 	{
 		QPoint m = StelMainView::getInstance().getMousePos();
 		sPainter.drawLine2d(m.x()*ppx, 0, m.x()*ppx, params.viewportXywh[3]*ppx);
 		sPainter.drawLine2d(0, (params.viewportXywh[3]-m.y())*ppx, params.viewportXywh[2]*ppx, (params.viewportXywh[3]-m.y())*ppx);
+	}
+}
+
+// A luminance with three significant digits: plain between 0.01 and 100000 cd/m^2, else as a power of ten
+// (from the dark night sky, about 1e-4 cd/m^2, to the Sun, about 1e9 cd/m^2)
+QString PointerCoordinates::luminanceString(double L)
+{
+	if (!(L > 0.))
+		return QStringLiteral("0");
+	const int exponent = static_cast<int>(std::floor(std::log10(L)));
+	if (exponent >= -2 && exponent < 5)
+		return QString::number(L, 'f', qMax(0, 2 - exponent));
+	static const QString superscripts = QStringLiteral("⁰¹²³⁴⁵⁶⁷⁸⁹");
+	QString power;
+	for (const QChar c : QString::number(std::abs(exponent)))
+		power += superscripts.at(c.digitValue());
+	if (exponent < 0)
+		power.prepend(QChar(0x207B)); // superscript minus
+	return QString("%1×10%2").arg(L/std::pow(10., exponent), 0, 'f', 2).arg(power);
+}
+
+void PointerCoordinates::setFlagShowLuminance(bool b)
+{
+	if (b != flagShowLuminance)
+	{
+		flagShowLuminance = b;
+		emit flagShowLuminanceChanged(b);
 	}
 }
 
@@ -426,6 +477,7 @@ void PointerCoordinates::loadConfiguration(void)
 	flagShowConstellation = conf->value("flag_show_constellation", false).toBool();
 	flagShowCrossedLines = conf->value("flag_show_crossed_lines", false).toBool();
 	flagShowElongation = conf->value("flag_show_elongation", false).toBool();
+	flagShowLuminance = conf->value("flag_show_luminance", false).toBool();
 
 	conf->endGroup();
 }
@@ -445,6 +497,7 @@ void PointerCoordinates::saveConfiguration(void)
 	conf->setValue("flag_show_constellation", getFlagShowConstellation());
 	conf->setValue("flag_show_crossed_lines", getFlagShowCrossedLines());
 	conf->setValue("flag_show_elongation", getFlagShowElongation());
+	conf->setValue("flag_show_luminance", getFlagShowLuminance());
 
 	conf->endGroup();
 }
