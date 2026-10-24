@@ -293,6 +293,18 @@ public:
 
 	static constexpr int getDefaultGuiFontSize() { return DEFAULT_FONT_SIZE; }
 
+	//! Photographic mode: measure the luminance of the scene at a point of the window (e.g. under the mouse pointer,
+	//! for the Pointer Coordinates plugin). Call it in every frame while the value is wanted (from a draw() method):
+	//! the point is measured at most PHOTO_PROBE_INTERVAL_MS apart, read back without waiting for the GPU.
+	//! @param x, y the point in device pixels of the window, from the lower left
+	void requestPhotoLuminance(double x, double y);
+	//! The newest result of requestPhotoLuminance(): the luminance of the scene in cd/m^2 (as the camera would meter
+	//! it, before the tone curve, vignetting, noise and lens halo). Negative when there is none: photographic mode off,
+	//! or no request for a while.
+	double getPhotoLuminance() const { return photoProbeLuminance; }
+	//! Time between two measurements of requestPhotoLuminance() (5 per second)
+	static constexpr int PHOTO_PROBE_INTERVAL_MS = 200;
+
 	static bool isInitialized() {if (singleton) return singleton->initialized; else return false;}
 	
 	///////////////////////////////////////////////////////////////////////////
@@ -564,6 +576,13 @@ private:
 	std::unique_ptr<class StelPhotoMeter> photoMeter;
 	//! Milliseconds of the last meter reading (for the smooth adaptation of the exposure)
 	qint64 photoMeterLastMs = -1;
+	//! Photographic mode: the luminance at a point (see requestPhotoLuminance())
+	std::unique_ptr<class StelPhotoProbe> photoProbe;
+	bool photoProbeRequested = false;
+	double photoProbeX = 0., photoProbeY = 0.;
+	qint64 photoProbeLastMs = -1;     //!< when the last measurement started
+	qint64 photoProbeResultMs = -1;   //!< when the last result came
+	double photoProbeLuminance = -1.;
 	//! Whether the scene buffers have a floating-point format (needed for the photographic mode)
 	bool sceneFBOIsFloat = false;
 	GLuint sceneMultisampledFBO = 0;

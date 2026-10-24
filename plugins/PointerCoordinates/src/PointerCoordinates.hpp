@@ -55,6 +55,8 @@ class PointerCoordinates : public StelModule
 	Q_PROPERTY(bool showConstellation	READ getFlagShowConstellation		WRITE setFlagShowConstellation		NOTIFY flagShowConstellationChanged)
 	Q_PROPERTY(bool showCrossedLines	READ getFlagShowCrossedLines		WRITE setFlagShowCrossedLines		NOTIFY flagShowCrossedLinesChanged)
 	Q_PROPERTY(bool showElongation	READ getFlagShowElongation	WRITE setFlagShowElongation	NOTIFY flagShowElongationChanged)
+	//! Photographic mode: show the luminance of the sky (or whatever is there) under the mouse pointer
+	Q_PROPERTY(bool showLuminance	READ getFlagShowLuminance	WRITE setFlagShowLuminance	NOTIFY flagShowLuminanceChanged)
 	Q_PROPERTY(int fontSize		READ getFontSize		WRITE setFontSize		NOTIFY fontSizeChanged)
 	Q_PROPERTY(Vec3f fontColor	READ getFontColor		WRITE setFontColor		NOTIFY fontColorChanged)
 
@@ -115,9 +117,12 @@ public:
 	bool getFlagShowCrossedLines(void) { return flagShowCrossedLines; }
 	bool getFlagShowElongation(void) const { return flagShowElongation; }
 	bool getFlagShowConstellation(void) const { return flagShowConstellation; }
+	bool getFlagShowLuminance(void) const { return flagShowLuminance; }
 
 	QPair<int, int> getCoordinatesPlace(const QString &text, int line = 1);
 	QPair<int, int> getCustomCoordinatesPlace() { return customPosition; }
+	//! A luminance (cd/m^2) for the display, with three significant digits
+	static QString luminanceString(double L);
 
 signals:
 	void flagCoordinatesVisibilityChanged(bool b);
@@ -126,6 +131,7 @@ signals:
 	void flagShowConstellationChanged(bool b);
 	void flagShowCrossedLinesChanged(bool b);
 	void flagShowElongationChanged(bool b);
+	void flagShowLuminanceChanged(bool b);
 	void fontSizeChanged(int i);
 	void fontColorChanged(Vec3f);
 
@@ -167,6 +173,7 @@ public slots:
 
 	void setFlagShowConstellation(bool b){ flagShowConstellation=b; }
 	void setFlagShowElongation(bool b){ flagShowElongation=b; }
+	void setFlagShowLuminance(bool b);
 
 	//! Get color for text
 	//! @return color
@@ -199,6 +206,7 @@ private:
 	bool flagShowConstellation;
 	bool flagShowCrossedLines;
 	bool flagShowElongation;
+	bool flagShowLuminance;
 	Vec3f textColor;
 	Vec3d coordinatesPoint;
 	int fontSize;

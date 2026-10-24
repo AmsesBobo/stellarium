@@ -124,6 +124,16 @@
            </widget>
           </item>
           <item>
+           <widget class="QCheckBox" name="checkBoxLuminance">
+            <property name="toolTip">
+             <string>Photographic mode only: the luminance of the sky (or whatever is there) under the mouse pointer in cd/m², as the camera would meter it (before the tone curve, vignetting and noise), and as surface brightness in mag/arcsec² like a sky quality meter. Updated five times per second.</string>
+            </property>
+            <property name="text">
+             <string>Show luminance under mouse cursor (photographic mode)</string>
+            </property>
+           </widget>
+          </item>
+          <item>
            <layout class="QHBoxLayout" name="horizontalLayout_4">
             <item>
              <widget class="QLabel" name="labelCoordinateSystem">
