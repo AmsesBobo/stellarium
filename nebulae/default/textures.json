@@ -64,6 +64,7 @@
 	{
 		"imageCredits": {"short" : "Dylan O'Donnell", "infoUrl": "http://deography.com/m8-lagoon-nebula-ngc6559/"},
 		"imageUrl" : "m8.png",
+		"halphaScale" : 7.301e+04,
 		"worldCoords" :	[[[272.9501,-25.1911], [270.2975,-25.3538], [270.1469,-22.9536], [272.7492,-22.7959]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 1.412181098,
@@ -128,6 +129,7 @@
 	{
 		"imageCredits" : {"short" : "Sun Gang"},
 		"imageUrl" : "m16.png",
+		"halphaScale" : 2.062e+04,
 		"worldCoords" : [[[275.6711,-14.2988], [274.2266,-14.7144], [273.803,-13.3131], [275.2407,-12.8992]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.266023154,
@@ -136,6 +138,7 @@
 	{
 		"imageCredits" : {"short" : "Dylan O'Donnell","infoUrl": "http://deography.com/the-tree-of-life-m17-omega-nebula/"},
 		"imageUrl" : "m17.png",
+		"halphaScale" : 6.054e+04,
 		"worldCoords" :	[[[275.4221,-16.5786], [274.7231,-16.3399], [274.9727,-15.6695], [275.6695,-15.9082]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.266023154,
@@ -160,6 +163,7 @@
 	{
 		"imageCredits": {"short" : "Hewholooks","infoUrl":"https://commons.wikimedia.org/wiki/File:TrifidHunterWilson.jpg"},
 		"imageUrl" : "m20.png",
+		"halphaScale" : 3.104e+04,
 		"worldCoords" :	[[[270.8906,-23.2528], [270.2961,-23.2424], [270.309,-22.6959], [270.9014,-22.7064]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" :  0.23456 ,
@@ -320,6 +324,7 @@
 	{
 		"imageCredits" : {"short" : "HG731GZ"},
 		"imageUrl" : "m42.png",
+		"halphaScale" : 3.325e+04,
 		"worldCoords" : [[[86.083,-7.122], [82.8645,-7.5215], [82.4686,-4.3286], [85.6746,-3.9321]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.266023154,
@@ -944,6 +949,7 @@
 	{
 		"imageCredits": {"short" : "Hewholooks", "infoUrl": "https://commons.wikimedia.org/wiki/File:NGC281HunterWilson.jpg"},
 		"imageUrl" : "n281.png",
+		"halphaScale" : 9630,
 		"worldCoords" :	[[[13.8464,56.2272], [12.2879,56.3026], [12.4096,57.1681], [14.0015,57.0913]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 1.1216,
@@ -1289,6 +1295,7 @@
 	{
 		"imageCredits" : {"short" : "Zhao Jingna"},
 		"imageUrl" : "n1499.png",
+		"halphaScale" : 1.115e+05,
 		"worldCoords" : [[[62.0851,34.5972], [58.2295,34.6213], [58.1822,37.7877], [62.1935,37.7646]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.266023154,
@@ -1521,6 +1528,7 @@
 	{
 		"imageCredits" : {"short" : "Keesscherer","infoUrl": "https://commons.wikimedia.org/wiki/File:2244_and_the_Rosette_Nebula.jpg"},
 		"imageUrl" : "n2244.png",
+		"halphaScale" : 9151,
 		"worldCoords" : [[[99.0401,4.4594], [97.5523,3.9357], [97.0246,5.4202], [98.5161,5.9412]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.266023154,
@@ -1537,6 +1545,7 @@
 	{
 		"imageCredits" : {"short" : "Giuseppe Donatiello, post-processing: Sun Shuwei","infoUrl": "https://flickr.com/photos/133259498@N05/52927746141/"},
 		"imageUrl" : "n2264.png",
+		"halphaScale" : 4.701e+05,
 		"worldCoords" :	[[[101.9569, 7.4362],[97.4181,7.5785],[97.5169,12.1697],[102.1149,12.0417]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.866023154,
@@ -1657,6 +1666,7 @@
 	{
 		"imageCredits" : {"short" : "SunShuwei"},
 		"imageUrl" : "n2467.png",
+		"halphaScale" : 7.69e+04,
 		"worldCoords" : [[[118.5516,-26.7092], [117.9094,-26.7082], [117.9114,-26.1348], [118.5504,-26.1352]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.2169148018,
@@ -2041,6 +2051,7 @@
 	{
 		"imageCredits" : {"Short":"Cappellettiariel, post-processing: Sun Shuwei","infoUrl": "https://commons.wikimedia.org/wiki/File:Desde_NGC_3576_hasta_NGC_3293_-_1x2_Mosaico_en_Paleta_Hubble.jpg"},
 		"imageUrl" : "n3503.png",
+		"halphaScale" : 2.206e+04,
 		"worldCoords" :	[[[166.6735, -60.2994],[164.0174,-60.3733],[163.9263,-59.0544],[166.4799,-58.986]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.2169148018,
@@ -2081,6 +2092,7 @@
 	{
 		"imageCredits" : {"short" : "ESO/Digitized Sky Survey 2","infoUrl": "http://www.eso.org/public/images/eso1347c/"},
 		"imageUrl" : "n3572.png",
+		"halphaScale" : 2.388e+05,
 		"worldCoords" :	[[[168.6791,-59.8218], [167.7311,-60.5048], [166.3691,-60.0216], [167.3265,-59.3492]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.266023154,
@@ -2089,6 +2101,7 @@
 	{
 		"imageCredits" : {"short" : "ESO/La Silla Observatory","infoUrl": "http://www.eso.org/public/news/eso1425/"},
 		"imageUrl" : "n3603.png",
+		"halphaScale" : 1.088e+05,
 		"worldCoords" : [[[169.5249,-61.7268], [167.3855,-61.7186], [167.4354,-60.7065], [169.5063,-60.7131]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.2222381739,
@@ -2929,6 +2942,7 @@
 	{
 		"imageCredits" : {"short" : "Ivan Bok","infoUrl": "https://commons.wikimedia.org/wiki/File:The_Rim_Nebula.jpg"},
 		"imageUrl" : "n6188.png",
+		"halphaScale" : 2.807e+04,
 		"worldCoords" : [[[250.7588,-49.1422], [248.3221,-49.1601], [248.3333,-47.5668], [250.6933,-47.5507]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.2222381739,
@@ -3041,6 +3055,7 @@
 	{
 		"imageCredits" : {"short" : "Dylan O'Donnell","infoUrl": "http://deography.com/cats-paw-nebula-ngc-6334/"},
 		"imageUrl" : "n6334.png",
+		"halphaScale" : 2.838e+04,
 		"worldCoords" : [[[260.4757,-36.5544], [258.9799,-36.5579], [258.986,-35.3563], [260.4592,-35.3521]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.2222381739,
@@ -3089,6 +3104,7 @@
 	{
 		"imageCredits" : {"short" : "Dylan O'Donnell","infoUrl": "http://deography.com/ngc-6357-lobster-nebula/"},
 		"imageUrl" : "n6357.png",
+		"halphaScale" : 1.246e+04,
 		"worldCoords" : [[[262.5646,-35.1127], [260.3463,-35.1206], [260.3619,-33.3049], [262.5344,-33.3015]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.2222381739,
@@ -3297,6 +3313,7 @@
 	{
 		"imageCredits" : {"short" : "Sun Shuwei"},
 		"imageUrl" : "n6590.png",
+		"halphaScale" : 5097,
 		"worldCoords" : [[[274.6368,-19.9483], [274.1322,-19.9483], [274.1322,-19.4733], [274.6368,-19.4733]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.2222381739,
@@ -3457,6 +3474,7 @@
 	{
 		"imageCredits" : {"short" : "Hewholooks","infoUrl": "https://commons.wikimedia.org/wiki/File:Sh_2-86RGBHaRGBHunter.jpg"},
 		"imageUrl" : "n6823.png",
+		"halphaScale" : 1.887e+04,
 		"worldCoords" : [[[296.189,22.9624], [295.416,22.9635], [295.4165,23.675], [296.1923,23.6739]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.2222381739,
@@ -3561,6 +3579,7 @@
 	{
 		"imageCredits" : {"short" : "Jose A Mtanous","infoUrl": "https://commons.wikimedia.org/wiki/File:Veil_Nebula_Complex_NGC_6960,_6992,_6995,_6974,_6979,_IC_1340.jpg"},
 		"imageUrl" : "n6960.png",
+		"halphaScale" : 4894,
 		"worldCoords" : [[[315.8752,29.5222], [311.7748,28.1769], [310.11,31.7295], [314.3417,33.1323]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.266023154,
@@ -3570,6 +3589,7 @@
 	{
 		"imageCredits" : {"short" : "Adam Block/Steward Observatory/University of Arizona","infoUrl": "http://www.caelumobservatory.com/gallery/n7000astrograph.shtml"},
 		"imageUrl" : "n7000.png",
+		"halphaScale" : 5606,
 		"worldCoords" : [[[316.7411,41.8383], [311.1343,42.0255], [311.1982,46.2025], [317.2162,45.9995]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.2066023154,
@@ -3818,6 +3838,7 @@
 	{
 		"imageCredits" : {"short" : "Adam Block/Steward Observatory/University of Arizona","infoUrl": "http://www.caelumobservatory.com/gallery/n7822astrograph.shtml"},
 		"imageUrl" : "n7822.png",
+		"halphaScale" : 3099,
 		"worldCoords" :	[[[4.7222, 65.1434], [355.3278,65.3558], [355.0842,69.2936], [6.1424,69.0407]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.266023154,
@@ -3874,6 +3895,7 @@
 	{
 		"imageCredits" : {"Short": "Giuseppe Donatiello, post-processing: Sun Shuwei", "infoUrl": "https://flickr.com/photos/133259498@N05/54237051434/"},
 		"imageUrl" : "ic410.png",
+		"halphaScale" : 7.574e+05,
 		"worldCoords" :	[[[82.6748, 32.8689],[80.2838, 32.8992],[80.2947,34.9106],[82.7425,34.8754]]],						
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.5904768338,
@@ -3906,6 +3928,7 @@
 	{
 		"imageCredits": {"short" : "Giuseppe Donatiello, post-processing: Sun Shuwei", "infoUrl": "https://flickr.com/photos/133259498@N05/52705027741/"},
 		"imageUrl" : "ic443.png",
+		"halphaScale" : 1.262e+04,
 		"worldCoords" :	[[[96.7151, 21.4441],[93.5911,21.5018],[93.624,24.4111],[96.8127,24.3468]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.825361111,
@@ -3946,6 +3969,7 @@
 	{
 		"imageCredits" : {"short" : "Giuseppe Donatiello","infoUrl": "https://commons.wikimedia.org/wiki/File:IC_1396_rev_20140921_s_(18237481073).jpg"},
 		"imageUrl" : "ic1396.png",
+		"halphaScale" : 5148,
 		"worldCoords" : [[[327.971,55.789], [321.9393,55.6675], [321.4078,59.0535], [328.0314,59.1846]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.2222381739,
@@ -3978,6 +4002,7 @@
 	{
 		"imageCredits" : {"short" : "Giuseppe Donatiello, post-processing: Sun Shuwei","infoUrl": "https://flickr.com/photos/133259498@N05/54332176110/"},
 		"imageUrl" : "ic1848.png",
+		"halphaScale" : 3.113e+04,
 		"worldCoords" :	[[[47.7714, 59.4179],[41.6553, 59.6183],[41.7777,62.7246],[48.5162,62.5005]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.866023154,
@@ -4018,6 +4043,7 @@
 	{
 		"imageCredits" : {"short" : "Giuseppe Donatiello, post-processing: Sun Shuwei","infoUrl": "https://flickr.com/photos/133259498@N05/52667644262/"},
 		"imageUrl" : "ic2177.png",
+		"halphaScale" : 1.208e+05,
 		"worldCoords" :	[[[108.1268, -12.5925],[105.0025,-12.6029],[105.0071,-9.5595],[108.1016,-9.5513]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.2222381739,
@@ -4058,6 +4084,7 @@
 	{
 		"imageCredits" : {"Short" : "Dylan O'Donnell","infoUrl": "http://deography.com/ic2944-running-chicken-nebula/"},
 		"imageUrl" : "ic2944.png",
+		"halphaScale" : 7.321e+04,
 		"worldCoords" : [[[175.8976,-64.1877], [171.591,-64.1742], [171.7531,-62.3001], [175.7884,-62.3114]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.2169148018,
@@ -4114,6 +4141,7 @@
 	{
 		"imageCredits" : {"short" : "Dylan O'Donnell","infoUrl": "http://deography.com/the-prawn-nebula-ic-4628/"},
 		"imageUrl" : "ic4628.png",
+		"halphaScale" : 2.909e+04,
 		"worldCoords" :	[[[255.2636,-40.8541], [253.6521,-41.0932], [253.3557,-39.8727], [254.9397,-39.6389]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 2.066023154,
@@ -4363,6 +4391,7 @@
 	{
 		"imageCredits" : {"short" : "Sun Shuwei"},
 		"imageUrl" : "barnard_loop-1.png",
+		"halphaScale" : 1.179e+06,
 		"worldCoords" : [[[94.3450,-11.5421], [85.5375,-11.6019], [85.5418,-2.9301], [94.1902,-2.9259]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 2.066023154,
@@ -4451,6 +4480,7 @@
 	{
 		"imageCredits" : {"short" : "ESO, post-processing: Sun Shuwei","infoUrl": "https://www.eso.org/public/images/eso1719a/"},
 		"imageUrl" : "sh2-54.png",
+		"halphaScale" : 2.1e+05,
 		"worldCoords" :	[[[275.3557, -12.8587],[273.7974,-12.8563],[273.8056,-11.3398],[275.3533,-11.3416]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.266023154,
@@ -4531,6 +4561,7 @@
 	{
 		"imageCredits" : {"short" : "This image file was remixed, transformed, and post-processed by Sun Shuwei from the original file. The original image file was published by Carsten Frenzl at https://flickr.com/photos/castro-pic/50666893358/."},
 		"imageUrl" : "sh2-115.png",
+		"halphaScale" : 3.444e+04,
 		"worldCoords" :	[[[309.2757, 46.4141],[307.7998,46.4571],[307.8466,47.4742],[309.3531,47.4321]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.2222381739,
@@ -4539,6 +4570,7 @@
 	{
 		"imageCredits" : {"short" : "Sebastian Goralik, post-processing: Sun Shuwei","infoUrl": "https://www.flickr.com/photos/sebastiangoralik/52461026093/in/dateposted/"},
 		"imageUrl" : "sh2-119.png",
+		"halphaScale" : 1.752e+05,
 		"worldCoords" :	[[[321.6109, 42.3942],[317.7005,42.2476],[317.3995,45.1348],[321.4982,45.2851]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.2222381739,
@@ -4547,6 +4579,7 @@
 	{
 		"imageCredits" : {"short" : "Manuel Peitsch, post-processing: Sun Shuwei","infoUrl": "https://manuel-astro.ch/project/sh2-124/"},
 		"imageUrl" : "sh2-124.png",
+		"halphaScale" : 5199,
 		"worldCoords" :	[[[326.4496, 49.3027],[323.2501,49.3302],[323.2228,51.4161],[326.5669,51.3861]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.2222381739,
@@ -4563,6 +4596,7 @@
 	{
 		"imageCredits" : {"short" : "Bart Delsaert","infoUrl": "https://delsaert.com/2018/09/04/sh2-132/"},
 		"imageUrl" : "sh2-132.png",
+		"halphaScale" : 7.951e+04,
 		"worldCoords" :	[[[335.7132,55.2292], [333.3112,55.2414], [333.2908,56.6112], [335.7774,56.5967]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.2165786418,
@@ -4571,6 +4605,7 @@
 	{
 		"imageCredits" : {"short" : "Sebastian Goralik, post-processing: Sun Shuwei","infoUrl": "https://flickr.com/photos/sebastiangoralik/54344263735/"},
 		"imageUrl" : "sh2-135.png",
+		"halphaScale" : 4.224e+04,
 		"worldCoords" :	[[[336.0512, 58.4238],[334.9188,58.4351],[334.9374,59.0303],[336.0907,59.0174]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.2222381739,
@@ -4603,6 +4638,7 @@
 	{
 		"imageCredits" : {"short" : "Sebastian Goralik, post-processing: Sun Shuwei","infoUrl": "https://flickr.com/photos/sebastiangoralik/52511009750/"},
 		"imageUrl" : "sh2-157.png",
+		"halphaScale" : 3.256e+05,
 		"worldCoords" :	[[[350.8075, 59.4501],[347.7274,59.3013],[347.3302,60.8632],[350.5763,61.0223]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.2222381739,
@@ -4619,6 +4655,7 @@
 	{
 		"imageCredits" : {"Short":"Astrophoto Andy, post-processing: Sun Shuwei","infoUrl": "https://www.flickr.com/photos/andyweeks/53246079280/in/dateposted/"},
 		"imageUrl" : "sh2-173.png",
+		"halphaScale" : 7038,
 		"worldCoords" :	[[[6.3644, 61.3789],[4.8925,61.4023],[4.9255,62.1081],[6.4337,62.0839]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.266023154,
@@ -4683,6 +4720,7 @@
 	{
 		"imageCredits": {"short" : "Giuseppe Donatiello, post-processing: Sun Shuwei", "infoUrl": "https://flickr.com/photos/133259498@N05/52705027741/"},
 		"imageUrl" : "sh2-247.png",
+		"halphaScale" : 2667,
 		"worldCoords" :	[[[92.3406, 21.4059],[91.8948,21.4059],[91.8942,21.8209],[92.3412,21.8209]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.2165786418,
@@ -4691,6 +4729,7 @@
 	{
 		"imageCredits" : {"short" : "Sebastian Goralik, post-processing: Sun Shuwei","infoUrl": "https://www.flickr.com/photos/sebastiangoralik/54347851877/"},
 		"imageUrl" : "sh2-261.png",
+		"halphaScale" : 2.833e+04,
 		"worldCoords" :	[[[92.9617, 15.1176],[91.7264,15.1391],[91.7459,16.3309],[92.9875,16.3088]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.266023154,
@@ -4707,6 +4746,7 @@
 	{
 		"imageCredits" : {"short" : "Wang Lingyi"},
 		"imageUrl" : "sh2-264.png",
+		"halphaScale" : 2.7e+05,
 		"worldCoords" : [[[88.3755,5.6946], [80.2485,5.7106], [80.1547,13.7946], [88.4733,13.7906]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 2.066023154,
@@ -4715,6 +4755,7 @@
 	{
 		"imageCredits" : {"short" : "Wang Jianjun, post-processing: Sun Shuwei"},
 		"imageUrl" : "sh2-280.png",
+		"halphaScale" : 1.348e+05,
 		"worldCoords" :	[[[99.2943, 2.0057],[98.1742,2.0051],[98.1733,3.1246],[99.2938,3.1243]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.366023154,
@@ -4723,6 +4764,7 @@
 	{
 		"imageCredits" : {"short" : "ESO/Digitized Sky Survey 2. Acknowledgement: Davide De Martin, post-processing: Sun Shuwei","infoUrl": "https://www.eso.org/public/images/eso2309d/"},
 		"imageUrl" : "sh2-282.png",
+		"halphaScale" : 1.687e+05,
 		"worldCoords" :	[[[99.8278, 1.1897],[99.1552,1.1896],[99.1551,1.861],[99.8278,1.8611]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.366023154,
@@ -4731,6 +4773,7 @@
 	{
 		"imageCredits" : {"short" : "ESO/Digitized Sky Survey 2. Acknowledgement: Davide De Martin, post-processing: Sun Shuwei","infoUrl": "https://www.eso.org/public/images/eso2309d/"},
 		"imageUrl" : "sh2-284.png",
+		"halphaScale" : 9.847e+04,
 		"worldCoords" :	[[[101.6604, -0.1821],[100.9432,-0.1821],[100.9433,0.5343],[101.6607,0.5343]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.366023154,
@@ -4739,6 +4782,7 @@
 	{
 		"imageCredits" : {"short" : "DSS"},
 		"imageUrl" : "sh2-301.png",
+		"halphaScale" : 4546,
 		"worldCoords" :	[[[107.6459, -18.6593],[107.2212,-18.6601],[107.2204,-18.2575],[107.6445,-18.2567]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.2222381739,
@@ -4763,6 +4807,7 @@
 	{
 		"imageCredits" : {"short" : "Manuel Peitsch, post-processing: Sun Shuwei","infoUrl": "https://manuel-astro.ch/project/rcw-29/"},
 		"imageUrl" : "rcw29.png",
+		"halphaScale" : 4788,
 		"worldCoords" :	[[[125.7294, -42.8676],[125.0753,-42.8677],[125.0774,-42.3881],[125.7268,-42.3879]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.666023154,
@@ -4771,6 +4816,7 @@
 	{
 		"imageCredits" : {"short" : "ESO/Digitized Sky Survey 2, post-processing: Sun Shuwei","infoUrl": "https://www.eso.org/public/images/eso1420c/"},
 		"imageUrl" : "rcw32.png",
+		"halphaScale" : 2.033e+04,
 		"worldCoords" : [[[134.0124,-43.2605], [128.4534,-43.3379], [128.5208,-39.29834], [133.7403,-39.2243]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.666023154,
@@ -4779,6 +4825,7 @@
 	{
 		"imageCredits" : {"short" : "ESO/Digitized Sky Survey 2","infoUrl": "https://www.eso.org/public/images/eso0929d/"},
 		"imageUrl" : "rcw38.png",
+		"halphaScale" : 1.168e+04,
 		"worldCoords" : [[[135.3254,-47.7481], [134.3934,-47.7597], [134.3811,-47.1342], [135.3023,-47.1225]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.266023154,
@@ -4787,6 +4834,7 @@
 	{
 		"imageCredits" : {"short" : "ESO","infoUrl": "http://www.eso.org/public/outreach/press-rel/pr-2008/phot-37-08.html"},
 		"imageUrl" : "rcw49.png",
+		"halphaScale" : 6915,
 		"worldCoords" : [[[156.5676,-58.0382], [155.5399,-58.0378], [155.5481,-57.4941], [156.5601,-57.494]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.266023154,
@@ -4828,6 +4876,7 @@
 	{
 		"imageCredits": {"short" : "Manuel Peitsch, post-processing: Sun Shuwei", "infoUrl": "https://manuel-astro.ch/project/rcw-89/"},
 		"imageUrl" : "rcw89.png",
+		"halphaScale" : 4744,
 		"worldCoords" :	[[[228.7161, -59.2029],[227.9838,-59.2023],[227.9891,-58.8277],[228.7131,-58.8282]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.2169148018,
@@ -5100,6 +5149,7 @@
 	{
 		"imageCredits": {"short" : "Giuseppe Donatiello, post-processing: Sun Shuwei", "infoUrl": "https://flickr.com/photos/133259498@N05/52353835925/"},
 		"imageUrl" : "lbn437.png",
+		"halphaScale" : 6.11e+04,
 		"worldCoords" :	[[[341.2831, 37.2715],[336.1303,37.5419],[336.3371,41.6397],[341.7973,41.3508]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.866023154,
@@ -5220,6 +5270,7 @@
 	{
 		"imageCredits" : {"short" : "Giuseppe Donatiello, post-processing: Sun Shuwei","infoUrl": "https://flickr.com/photos/133259498@N05/53925202478/"}, 
 		"imageUrl" : "dwb111.png",
+		"halphaScale" : 1.133e+05,
 		"worldCoords" :	[[[309.0075, 43.4665],[303.5645,42.2692],[301.6844,46.1882],[307.4432,47.4828]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]], 
 		"minResolution" : 0.2222381739, 
@@ -5245,6 +5296,7 @@
 	{
 		"imageCredits" : {"short" : "Harel Boren","infoUrl": "http://www.pbase.com/boren/image/151851961/original"},
 		"imageUrl" : "etaCarinae.png",
+		"halphaScale" : 1.382e+05,
 		"worldCoords" : [[[163.98,-61.3168], [157.8101,-61.2812], [158.143,-58.3275], [163.7832,-58.3588]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.266023154,
@@ -5261,6 +5313,7 @@
 	{
 		"imageCredits" : {"Short":"Plover Hill Observatory","infoUrl": "http://www.madpc.co.uk/~peterv/"},
 		"imageUrl" : "GammaCygni-vasey.png",
+		"halphaScale" : 3905,
 		"worldCoords" : [[[307.4900, 38.3650], [303.1000, 38.5280], [303.2100, 41.9600], [307.8150, 41.7900]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.2169148018,
@@ -5317,6 +5370,7 @@
 	{
 		"imageCredits" : {"short" : "Manuel Peitsch, post-processing: Sun Shuwei","infoUrl": "https://manuel-astro.ch/project/vela-supernova-remnant/"},
 		"imageUrl" : "velasnr-1.png",
+		"halphaScale" : 2.487e+04,
 		"worldCoords" :	[[[136.4406, -46.5025],[129.8326,-46.6039],[129.9443,-42.0541],[136.0689,-41.9666]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.7222381739,

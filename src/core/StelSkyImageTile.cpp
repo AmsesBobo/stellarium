@@ -281,6 +281,19 @@ void StelSkyImageTile::getTilesToDraw(QMultiMap<double, StelSkyImageTile*>& resu
 // of the whole image is the catalog magnitude of the brightest object in it. Then they appear with the exposure
 // and stand in the right proportion to the stars and the Milky Way, while the shape within keeps the
 // processing of the picture.
+// Emission nebulae have no useful catalog magnitude, most of them none at all (Sharpless, RCW, the California
+// Nebula), or the light of the cluster in them (M 16, IC 1396). Their images are measured against the all-sky
+// H-alpha map of Finkbeiner (2003, ApJS 146, 407; WHAM, VTSS and SHASSA, 6 arcmin): the texture, smoothed to the
+// resolution of the map, against the H-alpha intensity above the local background ("halphaScale" in textures.json,
+// the median ratio over the bright parts of the nebula). The V light per Rayleigh is PHOTO_HALPHA_LUMINANCE.
+namespace
+{
+	//! Luminance (cd/m^2) of an emission nebula per Rayleigh of H-alpha. From its line spectrum (H-beta 1/2.86 of
+	//! H-alpha, [O III] about twice H-beta, as in StelSkyDrawerPhotoFilm.cpp), through the V band: 100 R make about
+	//! 25.1 V mag/arcsec^2, 0.98e-7 cd/m^2 per R. NGC 7000 and M 42, measured by their catalog magnitudes (4.0) and the
+	//! map, give 1.01e-7 and 1.08e-7.
+	constexpr double PHOTO_HALPHA_LUMINANCE = 1.0e-7;
+}
 // Photographic mode: the calibration of each image, kept for the session. Measuring it reads the texture back
 // from the graphics card (photoTextureStatistics()), which stalls the drawing; a tile is deleted when it leaves
 // the view and made again when it comes back, the image stays the same.
@@ -309,6 +322,17 @@ void StelSkyImageTile::computePhotoLuminanceScale(StelCore* core)
 	photoLuminanceScale = -1.f;
 	if (skyConvexPolygons.isEmpty() || !tex)
 		return;
+	// luminance (cd/m^2) of a surface brightness in V mag/arcsec^2
+	auto surfaceLuminance = [](double mu) { return 10.8e4 * std::pow(10., -0.4*mu); };
+	if (photoHalphaScale > 0.f)
+	{
+		// An emission nebula measured by H-alpha (its brightest texel not brighter than 15 mag/arcsec^2, as below)
+		photoObjectType = static_cast<int>(Nebula::NebHII);
+		photoLuminanceScale = static_cast<float>(qMin(PHOTO_HALPHA_LUMINANCE*static_cast<double>(photoHalphaScale), surfaceLuminance(15.)));
+		if (!absoluteImageURI.isEmpty())
+			photoCalibrations.insert(absoluteImageURI, {photoLuminanceScale, photoObjectType});
+		return;
+	}
 	float mean = 0.f, meanSquare = 0.f;
 	if (!core->getSkyDrawer()->photoTextureStatistics(*tex, StelSkyDrawer::PHOTO_DSO_DESTRETCH, mean, meanSquare) || !(mean > 1e-7f) || !(meanSquare > 0.f))
 		return;
@@ -319,8 +343,6 @@ void StelSkyImageTile::computePhotoLuminanceScale(StelCore* core)
 		area += poly->getArea();
 	if (!(area > 0.))
 		return;
-	// luminance (cd/m^2) of a surface brightness in V mag/arcsec^2
-	auto surfaceLuminance = [](double mu) { return 10.8e4 * std::pow(10., -0.4*mu); };
 	// Images without a catalog object to measure them by (faint nebulae, dust, star fields): their lit parts
 	// at a faint surface brightness of 22 mag/arcsec^2
 	double scale = surfaceLuminance(22.) / lit;
@@ -345,6 +367,10 @@ void StelSkyImageTile::computePhotoLuminanceScale(StelCore* core)
 			// Globular clusters: about half of their light is in stars too faint for the star catalogs
 			if (object->getDSOType() == Nebula::NebGc)
 				mag += 0.75f;
+			// Reflection nebulae: the catalogs (van den Bergh) give the magnitude of the star that lights them; the
+			// nebula reflects a part of its light, here a tenth (the Pleiades: its brightest parts about 21 mag/arcsec^2)
+			if (object->getDSOType() == Nebula::NebRn)
+				mag += 2.5f;
 			// The total light of the object (lux) is the light of the image: its mean luminance (cd/m^2) over
 			// the solid angle of the image. The lit parts between 17 mag/arcsec^2 (the cores of bright nebulae
 			// and galaxies) and 24 (the faintest nebulae a camera records): beyond, the image shows other things
@@ -630,6 +656,13 @@ void StelSkyImageTile::loadFromQVariantMap(const QVariantMap& map)
 	if (map.contains("alphaBlend"))
 	{
 		alphaBlend = map.value("alphaBlend").toBool();
+	}
+
+	if (map.contains("halphaScale"))
+	{
+		photoHalphaScale = map.value("halphaScale").toFloat(&ok);
+		if (!ok || !(photoHalphaScale > 0.f))
+			photoHalphaScale = 0.f;
 	}
 
 	// Load the convex polygons (if any)

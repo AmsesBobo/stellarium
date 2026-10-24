@@ -144,6 +144,9 @@ protected:
 	float photoLuminanceScale = 0.f;
 	//! Photographic mode: the type of the catalog object the image was measured by (Nebula::NebulaType), or -1
 	int photoObjectType = -1;
+	//! Photographic mode: emission nebulae, the H-alpha intensity (Rayleigh) of a texel of value 1 (linear, taken to
+	//! the power PHOTO_DSO_DESTRETCH), measured against an all-sky H-alpha map ("halphaScale" in the JSON; 0: none)
+	float photoHalphaScale = 0.f;
 	//! Photographic mode: the colors of an emission nebula on the color film in use (negative: none)
 	Vec3f photoEmissionColor = Vec3f(-1.f);
 	//! Compute photoLuminanceScale (the texture must be loaded and bound)
