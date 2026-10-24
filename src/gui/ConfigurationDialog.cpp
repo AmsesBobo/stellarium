@@ -1347,6 +1347,8 @@ void ConfigurationDialog::saveAllSettings()
         conf->setValue("astro/flag_nebula_name",                        propMgr->getStelPropertyValue("NebulaMgr.flagHintDisplayed").toBool());
         conf->setValue("astro/flag_use_type_filter",                    propMgr->getStelPropertyValue("NebulaMgr.flagTypeFiltersUsage").toBool());
         conf->setValue("astro/flag_nebula_display_no_texture",          !propMgr->getStelPropertyValue("StelSkyLayerMgr.flagShow").toBool() );
+        conf->setValue("astro/flag_nebula_image_brightness_limit",      propMgr->getStelPropertyValue("StelSkyLayerMgr.flagImageBrightnessLimit").toBool());
+        conf->setValue("astro/nebula_image_brightness_limit",           propMgr->getStelPropertyValue("StelSkyLayerMgr.imageBrightnessLimit").toDouble());
 
         conf->setValue("astro/flag_size_limits_usage",                  propMgr->getStelPropertyValue("NebulaMgr.flagUseSizeLimits").toBool());
         conf->setValue("astro/size_limit_min",                          QString::number(propMgr->getStelPropertyValue("NebulaMgr.minSizeLimit").toDouble(), 'f', 2));

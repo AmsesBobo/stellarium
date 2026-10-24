@@ -37,6 +37,10 @@ class StelSkyLayerMgr : public StelModule
 {
 	Q_OBJECT
 	Q_PROPERTY(bool flagShow READ getFlagShow WRITE setFlagShow NOTIFY flagShowChanged)
+	//! Show only the images of nebulae whose bright parts are at least as bright as imageBrightnessLimit
+	Q_PROPERTY(bool flagImageBrightnessLimit READ getFlagImageBrightnessLimit WRITE setFlagImageBrightnessLimit NOTIFY flagImageBrightnessLimitChanged)
+	//! The faintest surface brightness (V mag/arcsec^2) of the bright parts of an image that is shown
+	Q_PROPERTY(double imageBrightnessLimit READ getImageBrightnessLimit WRITE setImageBrightnessLimit NOTIFY imageBrightnessLimitChanged)
 
 public:
 	StelSkyLayerMgr();
@@ -92,6 +96,14 @@ public slots:
 	// Properties setters and getters
 	//! Set whether Sky Background should be displayed
 	void setFlagShow(bool b) {if (flagShow !=b) { flagShow = b; StelApp::immediateSave("astro/flag_nebula_display_no_texture", !b); emit flagShowChanged(b);}}
+	//! Show only the images of nebulae whose bright parts reach the limit (see setImageBrightnessLimit())
+	void setFlagImageBrightnessLimit(bool b);
+	bool getFlagImageBrightnessLimit() const {return flagImageBrightnessLimit;}
+	//! The limit of the images: the surface brightness of their bright parts (V mag/arcsec^2), as the photographic
+	//! mode calibrates them (catalog magnitude or H-alpha, see StelSkyImageTile). M 42 and M 31 about 20, the
+	//! North America Nebula 23.6, faint Sharpless nebulae 24 to 25. Allowed: 15 to 27.
+	void setImageBrightnessLimit(double mu);
+	double getImageBrightnessLimit() const {return imageBrightnessLimit;}
 	//! Load an image from a file into a quad described with 4 corner coordinates.
 	//! The corners are always given in counterclockwise from top-left, also for azaltimuthal images.
 	//! This should not be called directly from scripts because it is not thread safe.
@@ -161,6 +173,8 @@ public slots:
 
 signals:
 	void flagShowChanged(bool b);
+	void flagImageBrightnessLimitChanged(bool b);
+	void imageBrightnessLimitChanged(double mu);
 	void collectionLoaded();
 
 private slots:
@@ -183,6 +197,8 @@ private:
 
 	// Whether to draw at all
 	bool flagShow;
+	bool flagImageBrightnessLimit = false;
+	double imageBrightnessLimit = 22.;
 };
 
 #endif // STELSKYLAYERMGR_HPP

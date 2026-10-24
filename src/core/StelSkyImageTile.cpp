@@ -28,6 +28,7 @@
 #include "StelSkyDrawer.hpp"
 #include "StelPainter.hpp"
 #include "StelModuleMgr.hpp"
+#include "StelSkyLayerMgr.hpp"
 #include "SolarSystem.hpp"
 #include "NebulaMgr.hpp"
 #include "Nebula.hpp"
@@ -303,6 +304,7 @@ namespace
 	{
 		float luminanceScale;
 		int objectType;
+		float surfaceBrightness;
 	};
 	QHash<QString, PhotoCalibration> photoCalibrations;
 }
@@ -316,23 +318,16 @@ void StelSkyImageTile::computePhotoLuminanceScale(StelCore* core)
 		{
 			photoLuminanceScale = known->luminanceScale;
 			photoObjectType = known->objectType;
+			photoSurfaceBrightness = known->surfaceBrightness;
 			return;
 		}
 	}
 	photoLuminanceScale = -1.f;
+	photoSurfaceBrightness = 99.f;
 	if (skyConvexPolygons.isEmpty() || !tex)
 		return;
 	// luminance (cd/m^2) of a surface brightness in V mag/arcsec^2
 	auto surfaceLuminance = [](double mu) { return 10.8e4 * std::pow(10., -0.4*mu); };
-	if (photoHalphaScale > 0.f)
-	{
-		// An emission nebula measured by H-alpha (its brightest texel not brighter than 15 mag/arcsec^2, as below)
-		photoObjectType = static_cast<int>(Nebula::NebHII);
-		photoLuminanceScale = static_cast<float>(qMin(PHOTO_HALPHA_LUMINANCE*static_cast<double>(photoHalphaScale), surfaceLuminance(15.)));
-		if (!absoluteImageURI.isEmpty())
-			photoCalibrations.insert(absoluteImageURI, {photoLuminanceScale, photoObjectType});
-		return;
-	}
 	float mean = 0.f, meanSquare = 0.f;
 	Vec3f meanColor(0.f);
 	if (!core->getSkyDrawer()->photoTextureStatistics(*tex, StelSkyDrawer::PHOTO_DSO_DESTRETCH, mean, meanSquare, &meanColor) || !(mean > 1e-7f) || !(meanSquare > 0.f))
@@ -343,6 +338,23 @@ void StelSkyImageTile::computePhotoLuminanceScale(StelCore* core)
 		photoObjectType = static_cast<int>(Nebula::NebEn);
 	// typical texture value of the lit parts of the image, whatever their share of it
 	const double lit = static_cast<double>(meanSquare/mean);
+	// The calibration found, and the surface brightness of the lit parts (for the limit of StelSkyLayerMgr)
+	const auto store = [&](double scale)
+	{
+		// Whatever the image: its brightest texel (value 1) not brighter than 15 mag/arcsec^2. An image that is
+		// nearly black (a faint nebula processed dark) would otherwise turn its compression noise into light.
+		photoLuminanceScale = static_cast<float>(qMin(scale, surfaceLuminance(15.)));
+		photoSurfaceBrightness = static_cast<float>(-2.5*std::log10(static_cast<double>(photoLuminanceScale)*lit/10.8e4));
+		if (!absoluteImageURI.isEmpty())
+			photoCalibrations.insert(absoluteImageURI, {photoLuminanceScale, photoObjectType, photoSurfaceBrightness});
+	};
+	if (photoHalphaScale > 0.f)
+	{
+		// An emission nebula measured by H-alpha
+		photoObjectType = static_cast<int>(Nebula::NebHII);
+		store(PHOTO_HALPHA_LUMINANCE*static_cast<double>(photoHalphaScale));
+		return;
+	}
 	double area = 0.;
 	for (const auto& poly : std::as_const(skyConvexPolygons))
 		area += poly->getArea();
@@ -384,11 +396,7 @@ void StelSkyImageTile::computePhotoLuminanceScale(StelCore* core)
 			scale = qBound(surfaceLuminance(24.) / lit, meanLuminance / static_cast<double>(mean), surfaceLuminance(17.) / lit);
 		}
 	}
-	// Whatever the image: its brightest texel (value 1) not brighter than 15 mag/arcsec^2. An image that is
-	// nearly black (a faint nebula processed dark) would otherwise turn its compression noise into light.
-	photoLuminanceScale = static_cast<float>(qMin(scale, surfaceLuminance(15.)));
-	if (!absoluteImageURI.isEmpty())
-		photoCalibrations.insert(absoluteImageURI, {photoLuminanceScale, photoObjectType});
+	store(scale);
 }
 
 // Draw the image on the screen.
@@ -397,6 +405,21 @@ bool StelSkyImageTile::drawTile(StelCore* core, StelPainter& sPainter, const Vec
 {
 	if (!tex->bind())
 		return false;
+
+	// The limit of the images by the surface brightness of their bright parts (in every mode, measured as the
+	// photographic mode calibrates them)
+	static StelSkyLayerMgr* layerMgr = GETSTELMODULE(StelSkyLayerMgr);
+	if (layerMgr && layerMgr->getFlagImageBrightnessLimit())
+	{
+		if (photoLuminanceScale == 0.f)
+		{
+			computePhotoLuminanceScale(core);
+			if (!tex->bind())
+				return false;
+		}
+		if (photoSurfaceBrightness > static_cast<float>(layerMgr->getImageBrightnessLimit()))
+			return true;
+	}
 
 	if (!texFader)
 	{

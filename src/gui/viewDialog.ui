@@ -2965,6 +2965,44 @@
                    </property>
                   </widget>
                  </item>
+                 <item row="2" column="0" colspan="2">
+                  <widget class="QCheckBox" name="nebulaImageLimitCheckBox">
+                   <property name="toolTip">
+                    <string>Show only the images of deep-sky objects whose bright parts reach this surface brightness (V mag/arcsec²), as the photographic mode measures them from the catalog magnitude or the H-alpha of the object. For comparison: M 42 and M 31 about 20, the North America Nebula 23.6, faint Sharpless nebulae 24 to 25. A lower value shows only the brightest images.</string>
+                   </property>
+                   <property name="text">
+                    <string>Limit images:</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="2" column="2">
+                  <widget class="QDoubleSpinBox" name="nebulaImageLimitDoubleSpinBox">
+                   <property name="toolTip">
+                    <string>The faintest surface brightness of the bright parts of an image that is shown (V mag/arcsec²)</string>
+                   </property>
+                   <property name="alignment">
+                    <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+                   </property>
+                   <property name="suffix">
+                    <string notr="true"> mag/″²</string>
+                   </property>
+                   <property name="decimals">
+                    <number>2</number>
+                   </property>
+                   <property name="minimum">
+                    <double>15.000000000000000</double>
+                   </property>
+                   <property name="maximum">
+                    <double>27.000000000000000</double>
+                   </property>
+                   <property name="singleStep">
+                    <double>0.250000000000000</double>
+                   </property>
+                   <property name="value">
+                    <double>22.000000000000000</double>
+                   </property>
+                  </widget>
+                 </item>
                 </layout>
                </item>
               </layout>
@@ -6976,6 +7014,8 @@
   <tabstop>checkBoxSurfaceBrightnessUsage</tabstop>
   <tabstop>nebulaLimitMagnitudeCheckBox</tabstop>
   <tabstop>nebulaLimitMagnitudeDoubleSpinBox</tabstop>
+  <tabstop>nebulaImageLimitCheckBox</tabstop>
+  <tabstop>nebulaImageLimitDoubleSpinBox</tabstop>
   <tabstop>pushButtonConfigureDSOColors</tabstop>
   <tabstop>page_markings</tabstop>
   <tabstop>celestialSphereGroupBox</tabstop>

@@ -425,6 +425,8 @@ void ViewDialog::createDialogContent()
 	connectBoolProperty(ui->nebulaLimitSizeCheckBox, "NebulaMgr.flagUseSizeLimits");
 	connectDoubleProperty(ui->nebulaLimitSizeMinDoubleSpinBox, "NebulaMgr.minSizeLimit");
 	connectDoubleProperty(ui->nebulaLimitSizeMaxDoubleSpinBox, "NebulaMgr.maxSizeLimit");
+	connectBoolProperty(ui->nebulaImageLimitCheckBox, "StelSkyLayerMgr.flagImageBrightnessLimit");
+	connectDoubleProperty(ui->nebulaImageLimitDoubleSpinBox, "StelSkyLayerMgr.imageBrightnessLimit");
 	connect(ui->pushButtonConfigureDSOColors, &QPushButton::clicked, this, &ViewDialog::showConfigureDSOColorsDialog);
 
 	// Landscape section

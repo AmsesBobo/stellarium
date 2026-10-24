@@ -80,8 +80,29 @@ void StelSkyLayerMgr::init()
 	conf->endGroup();
 
 	setFlagShow(!conf->value("astro/flag_nebula_display_no_texture", false).toBool());
+	setFlagImageBrightnessLimit(conf->value("astro/flag_nebula_image_brightness_limit", false).toBool());
+	setImageBrightnessLimit(conf->value("astro/nebula_image_brightness_limit", 22.).toDouble());
 	addAction("actionShow_DSO_Textures", N_("Display Options"), N_("Deep-sky objects background images"), "flagShow", "I");
 	addAction("actionShow_DSO_Textures_Reload", N_("Display Options"), N_("Reload the deep-sky objects background images"), "loadCollection()", "Ctrl+I");
+}
+
+void StelSkyLayerMgr::setFlagImageBrightnessLimit(bool b)
+{
+	if (b == flagImageBrightnessLimit)
+		return;
+	flagImageBrightnessLimit = b;
+	StelApp::immediateSave("astro/flag_nebula_image_brightness_limit", b);
+	emit flagImageBrightnessLimitChanged(b);
+}
+
+void StelSkyLayerMgr::setImageBrightnessLimit(double mu)
+{
+	mu = qBound(15., mu, 27.);
+	if (qFuzzyCompare(mu, imageBrightnessLimit))
+		return;
+	imageBrightnessLimit = mu;
+	StelApp::immediateSave("astro/nebula_image_brightness_limit", mu);
+	emit imageBrightnessLimitChanged(mu);
 }
 
 void StelSkyLayerMgr::loadCollection(int decimateBy)
