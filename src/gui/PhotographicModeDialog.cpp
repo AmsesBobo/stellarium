@@ -332,6 +332,7 @@ void PhotographicModeDialog::createDialogContent()
 	connect(drawer, &StelSkyDrawer::photoAirglowStrengthChanged,      this, &PhotographicModeDialog::updateCameraWidgets);
 	connect(drawer, &StelSkyDrawer::flagPhotoAirglowChanged,          this, &PhotographicModeDialog::updateCameraWidgets);
 	connectBoolProperty(ui->vignettingCheckBox,       "StelSkyDrawer.flagPhotoVignetting");
+	connectBoolProperty(ui->halphaModifiedCheckBox,   "StelSkyDrawer.flagPhotoHalphaModified");
 	connectBoolProperty(ui->aberrationsCheckBox,      "StelSkyDrawer.flagPhotoAberrations");
 	connectBoolProperty(ui->lensFlareCheckBox,        "StelSkyDrawer.flagPhotoLensFlare");
 	connectBoolProperty(ui->frameMaskCheckBox,        "StelSkyDrawer.flagPhotoFrameMask");
@@ -646,6 +647,7 @@ void PhotographicModeDialog::updateCameraWidgets()
 		{
 			ui->isoComboBox->setEnabled(false);
 			ui->sensorComboBox->setEnabled(false);
+			ui->halphaModifiedCheckBox->setEnabled(false);
 			ui->toneCurveComboBox->setEnabled(false);
 			ui->whiteBalanceComboBox->setEnabled(false);
 			ui->whiteBalanceKelvinSpinBox->setEnabled(false);
@@ -654,6 +656,7 @@ void PhotographicModeDialog::updateCameraWidgets()
 		else
 		{
 			ui->sensorComboBox->setEnabled(true);
+			ui->halphaModifiedCheckBox->setEnabled(true);
 			ui->toneCurveComboBox->setEnabled(true);
 			ui->whiteBalanceComboBox->setEnabled(true);
 		}

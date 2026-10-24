@@ -138,7 +138,7 @@ void StelPainter::setTextureDisplayAdjustment(float gamma, float saturation, flo
 	textureSaturation = qBound(0.f, saturation, 3.f);
 	textureBrightness = qBound(0.f, brightness, 5.f);
 	textureContrast = qBound(0.f, contrast, 5.f);
-	textureColorChannel = qBound(0, colorChannel, 4);
+	textureColorChannel = qBound(0, colorChannel, 5);
 	textureInvertedColors = invertedColors;
 	texturePremultiplyAlpha = premultiplyAlpha;
 	textureAlpha = qBound(0.f, alpha, 1.f);
@@ -2414,6 +2414,7 @@ void main()
 		"uniform mediump float brightness;\n"
 		"uniform mediump float contrast;\n"
 		"uniform int colorChannel;\n"
+		"uniform mediump vec3 emissionColor;\n"
 		"uniform int invertedColors;\n"
 		"uniform int premultiplyAlpha;\n"
 		"void main(void)\n"
@@ -2421,6 +2422,16 @@ void main()
 		"    mediump vec4 texel = texture2D(tex, texc);\n"
 		"    if (colorChannel == 4)\n"
 		"        texel.rgb = vec3(dot(texel.rgb, vec3(0.2126, 0.7152, 0.0722)));\n"
+		"    else if (colorChannel == 5)\n"
+		"    {\n"
+		"        // the red beyond green and blue is the line emission: in emissionColor per unit luminance (in linear light,\n"
+		"        // the texel to the power 1/gamma, as the light comes out at the end)\n"
+		"        mediump float p = 1.0 / max(gamma, 0.001);\n"
+		"        mediump vec3 lin = pow(max(texel.rgb, vec3(0.0)), vec3(p));\n"
+		"        mediump float e = max(lin.r - max(lin.g, lin.b), 0.0);\n"
+		"        lin += 0.2126 * e * emissionColor - vec3(e, 0.0, 0.0);\n"
+		"        texel.rgb = pow(max(lin, vec3(0.0)), vec3(1.0 / p));\n"
+		"    }\n"
 		"    mediump vec4 color = texel*texColor;\n"
 		"    color.rgb = max(color.rgb * brightness, vec3(0.0));\n"
 		"    if (contrast != 1.0)\n"
@@ -2431,7 +2442,7 @@ void main()
 		"        color.rgb = pow(color.rgb, vec3(1.0 / max(gamma, 0.001)));\n"
 		"    if (invertedColors != 0)\n"
 		"        color.rgb = vec3(1.0) - clamp(color.rgb, vec3(0.0), vec3(1.0));\n"
-		"    if (colorChannel != 0 && colorChannel != 4)\n"
+		"    if (colorChannel >= 1 && colorChannel <= 3)\n"
 		"    {\n"
 		"        mediump float luma = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));\n"
 		"        if (colorChannel == 1)\n"
@@ -2466,6 +2477,7 @@ void main()
 	adjustedTexturesShaderVars.brightness = adjustedTexturesShaderProgram->uniformLocation("brightness");
 	adjustedTexturesShaderVars.contrast = adjustedTexturesShaderProgram->uniformLocation("contrast");
 	adjustedTexturesShaderVars.colorChannel = adjustedTexturesShaderProgram->uniformLocation("colorChannel");
+	adjustedTexturesShaderVars.emissionColor = adjustedTexturesShaderProgram->uniformLocation("emissionColor");
 	adjustedTexturesShaderVars.invertedColors = adjustedTexturesShaderProgram->uniformLocation("invertedColors");
 	adjustedTexturesShaderVars.premultiplyAlpha = adjustedTexturesShaderProgram->uniformLocation("premultiplyAlpha");
 
@@ -2501,6 +2513,7 @@ void main()
 	"uniform mediump float brightness;\n"
 	"uniform mediump float contrast;\n"
 	"uniform int colorChannel;\n"
+		"uniform mediump vec3 emissionColor;\n"
 		"uniform int invertedColors;\n"
 		"uniform int premultiplyAlpha;\n"
 		"uniform mediump float alpha;\n"
@@ -2509,6 +2522,16 @@ void main()
 		"    mediump vec4 texel = texture2D(tex, texc);\n"
 		"    if (colorChannel == 4)\n"
 		"        texel.rgb = vec3(dot(texel.rgb, vec3(0.2126, 0.7152, 0.0722)));\n"
+		"    else if (colorChannel == 5)\n"
+		"    {\n"
+		"        // the red beyond green and blue is the line emission: in emissionColor per unit luminance (in linear light,\n"
+		"        // the texel to the power 1/gamma, as the light comes out at the end)\n"
+		"        mediump float p = 1.0 / max(gamma, 0.001);\n"
+		"        mediump vec3 lin = pow(max(texel.rgb, vec3(0.0)), vec3(p));\n"
+		"        mediump float e = max(lin.r - max(lin.g, lin.b), 0.0);\n"
+		"        lin += 0.2126 * e * emissionColor - vec3(e, 0.0, 0.0);\n"
+		"        texel.rgb = pow(max(lin, vec3(0.0)), vec3(1.0 / p));\n"
+		"    }\n"
 		"    mediump vec4 color = texel*outColor;\n"
 	"    color.a *= alpha;\n"
 	"    color.rgb = max(color.rgb * brightness, vec3(0.0));\n"
@@ -2520,7 +2543,7 @@ void main()
 		"        color.rgb = pow(color.rgb, vec3(1.0 / max(gamma, 0.001)));\n"
 		"    if (invertedColors != 0)\n"
 		"        color.rgb = vec3(1.0) - clamp(color.rgb, vec3(0.0), vec3(1.0));\n"
-		"    if (colorChannel != 0 && colorChannel != 4)\n"
+		"    if (colorChannel >= 1 && colorChannel <= 3)\n"
 		"    {\n"
 		"        mediump float luma = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));\n"
 		"        if (colorChannel == 1)\n"
@@ -2555,6 +2578,7 @@ void main()
 	texturesColorShaderVars.brightness = texturesColorShaderProgram->uniformLocation("brightness");
 	texturesColorShaderVars.contrast = texturesColorShaderProgram->uniformLocation("contrast");
 	texturesColorShaderVars.colorChannel = texturesColorShaderProgram->uniformLocation("colorChannel");
+	texturesColorShaderVars.emissionColor = texturesColorShaderProgram->uniformLocation("emissionColor");
 	texturesColorShaderVars.invertedColors = texturesColorShaderProgram->uniformLocation("invertedColors");
 	texturesColorShaderVars.premultiplyAlpha = texturesColorShaderProgram->uniformLocation("premultiplyAlpha");
 	texturesColorShaderVars.alpha = texturesColorShaderProgram->uniformLocation("alpha");
@@ -3040,6 +3064,7 @@ void StelPainter::drawFromArray(DrawingMode mode, int count, int offset, bool do
 			pr->setUniformValue(shaderVars.brightness, textureBrightness);
 			pr->setUniformValue(shaderVars.contrast, textureContrast);
 			pr->setUniformValue(shaderVars.colorChannel, textureColorChannel);
+			pr->setUniformValue(shaderVars.emissionColor, textureEmissionColor[0], textureEmissionColor[1], textureEmissionColor[2]);
 			pr->setUniformValue(shaderVars.invertedColors, textureInvertedColors ? 1 : 0);
 			pr->setUniformValue(shaderVars.premultiplyAlpha, texturePremultiplyAlpha ? 1 : 0);
 		}
@@ -3078,6 +3103,7 @@ void StelPainter::drawFromArray(DrawingMode mode, int count, int offset, bool do
 		pr->setUniformValue(texturesColorShaderVars.brightness, textureBrightness);
 		pr->setUniformValue(texturesColorShaderVars.contrast, textureContrast);
 		pr->setUniformValue(texturesColorShaderVars.colorChannel, textureColorChannel);
+		pr->setUniformValue(texturesColorShaderVars.emissionColor, textureEmissionColor[0], textureEmissionColor[1], textureEmissionColor[2]);
 		pr->setUniformValue(texturesColorShaderVars.invertedColors, textureInvertedColors ? 1 : 0);
 		pr->setUniformValue(texturesColorShaderVars.premultiplyAlpha, texturePremultiplyAlpha ? 1 : 0);
 		pr->setUniformValue(texturesColorShaderVars.alpha, textureAlpha);

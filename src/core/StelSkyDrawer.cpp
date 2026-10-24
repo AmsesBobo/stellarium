@@ -140,6 +140,7 @@ StelSkyDrawer::StelSkyDrawer(StelCore* acore) :
 	photoWhiteBalance = qBound(0, conf->value("viewing/photographic_white_balance", static_cast<int>(PhotoWBDaylight)).toInt(), 8);
 	photoWhiteBalanceKelvin = qBound(2000., conf->value("viewing/photographic_white_balance_kelvin", 5200.).toDouble(), 12000.);
 	flagPhotoVignetting = conf->value("viewing/flag_photographic_vignetting", true).toBool();
+	flagPhotoHalphaModified = conf->value("viewing/flag_photographic_halpha_modified", false).toBool();
 	flagPhotoAberrations = conf->value("viewing/flag_photographic_aberrations", true).toBool();
 	photoAberrationStrength = qBound(0.f, conf->value("viewing/photographic_aberration_strength", 1.0).toFloat(), 3.f);
 	flagPhotoLensFlare = conf->value("viewing/flag_photographic_lens_flare", true).toBool();

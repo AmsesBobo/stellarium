@@ -623,6 +623,28 @@ void StelSkyDrawer::setFlagPhotoVignetting(bool b)
 	emit flagPhotoVignettingChanged(b);
 }
 
+void StelSkyDrawer::setFlagPhotoHalphaModified(bool b)
+{
+	if (b == flagPhotoHalphaModified)
+		return;
+	flagPhotoHalphaModified = b;
+	StelApp::immediateSave("viewing/flag_photographic_halpha_modified", b);
+	emit flagPhotoHalphaModifiedChanged(b);
+}
+
+Vec3f StelSkyDrawer::getPhotoEmissionColor() const
+{
+	if (getFlagPhotoFilmActive())
+	{
+		const PhotoFilmSpec& f = getPhotoActiveFilmSpec();
+		if (!getPhotoFilmSpectral(f))
+			return Vec3f(-1.f);
+		return Vec3f(f.emission[0], f.emission[1], f.emission[2]);
+	}
+	const float* e = flagPhotoHalphaModified ? PHOTO_EMISSION_DIGITAL_HALPHA : PHOTO_EMISSION_DIGITAL;
+	return Vec3f(e[0], e[1], e[2]);
+}
+
 void StelSkyDrawer::setFlagPhotoLensFlare(bool b)
 {
 	if (b == flagPhotoLensFlare)
@@ -693,6 +715,7 @@ void StelSkyDrawer::savePhotoSettings(QSettings* conf) const
 	conf->setValue("viewing/photographic_mount", getPhotoMount());
 	conf->setValue("viewing/flag_photographic_star_trails", getFlagPhotoStarTrails());
 	conf->setValue("viewing/flag_photographic_vignetting", getFlagPhotoVignetting());
+	conf->setValue("viewing/flag_photographic_halpha_modified", getFlagPhotoHalphaModified());
 	conf->setValue("viewing/flag_photographic_lens_flare", getFlagPhotoLensFlare());
 	conf->setValue("viewing/photographic_lens_flare_strength", getPhotoLensFlareStrength());
 	conf->setValue("viewing/flag_photographic_aberrations", getFlagPhotoAberrations());
@@ -789,6 +812,7 @@ void StelSkyDrawer::resetPhotographicSettings()
 	setPhotoWhiteBalance(PhotoWBDaylight);
 	setPhotoWhiteBalanceKelvin(5200.);
 	setFlagPhotoVignetting(true);
+	setFlagPhotoHalphaModified(false);
 	setFlagPhotoAberrations(true);
 	setPhotoAberrationStrength(1.);
 	setPhotoDetectionSnr(3.);

@@ -312,12 +312,15 @@ public:
 	void setSaturation(float v) { saturation = v; }
 
 	//! Sets texture color adjustment for subsequent simple textured draws.
-	//! colorChannel: 0 all, 1-3 the luminance into red, green or blue only, 4 the luminance of the texture times the color
+	//! colorChannel: 0 all, 1-3 the luminance into red, green or blue only, 4 the luminance of the texture times the color,
+	//! 5 an emission nebula: the red of the texture beyond its green and blue in the color of setTextureEmissionColor()
 	void setTextureDisplayAdjustment(float gamma, float saturation, float brightness,
 	                                 float contrast, int colorChannel, bool invertedColors,
 	                                 bool premultiplyAlpha, float alpha = 1.f);
 	//! Restores neutral texture color adjustment for subsequent simple textured draws.
 	void resetTextureDisplayAdjustment();
+	//! colorChannel 5 of setTextureDisplayAdjustment(): the color of the line emission per unit luminance
+	void setTextureEmissionColor(const Vec3f& c) { textureEmissionColor = c; }
 
 	//! Create the OpenGL shaders programs used by the StelPainter.
 	//! This method needs to be called once at init.
@@ -480,6 +483,7 @@ private:
 	float textureBrightness = 1.f;
 	float textureContrast = 1.f;
 	int textureColorChannel = 0;
+	Vec3f textureEmissionColor = Vec3f(1.f);
 	bool textureInvertedColors = false;
 	bool texturePremultiplyAlpha = false;
 	float textureAlpha = 1.f;
@@ -518,6 +522,7 @@ private:
 		int brightness;
 		int contrast;
 		int colorChannel;
+		int emissionColor;
 		int invertedColors;
 		int premultiplyAlpha;
 	};
@@ -536,6 +541,7 @@ private:
 		int brightness;
 		int contrast;
 		int colorChannel;
+		int emissionColor;
 		int invertedColors;
 		int premultiplyAlpha;
 		int alpha;

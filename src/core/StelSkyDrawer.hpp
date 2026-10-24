@@ -147,6 +147,8 @@ class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 	Q_PROPERTY(double photoWhiteBalanceKelvin READ getPhotoWhiteBalanceKelvin WRITE setPhotoWhiteBalanceKelvin NOTIFY photoWhiteBalanceKelvinChanged)
 	//! Lens: vignetting (natural cos^3 falloff and optical vignetting that shrinks when stopping down)
 	Q_PROPERTY(bool flagPhotoVignetting READ getFlagPhotoVignetting WRITE setFlagPhotoVignetting NOTIFY flagPhotoVignettingChanged)
+	//! Digital sensor modified for H-alpha (the IR-cut filter replaced): emission nebulae get more red
+	Q_PROPERTY(bool flagPhotoHalphaModified READ getFlagPhotoHalphaModified WRITE setFlagPhotoHalphaModified NOTIFY flagPhotoHalphaModifiedChanged)
 	//! Lens: off-axis aberrations of star images (coma and astigmatism), growing towards the corners and with the aperture
 	Q_PROPERTY(bool flagPhotoAberrations READ getFlagPhotoAberrations WRITE setFlagPhotoAberrations NOTIFY flagPhotoAberrationsChanged)
 	//! Lens: strength of the off-axis aberrations (1 = a typical fast lens; 0 ... 3)
@@ -360,7 +362,8 @@ public:
 	//! @a prj with its view turned by the rotation of a sample (see getPhotoImageSamples())
 	StelProjectorP getPhotoImageSampleProjector(const StelProjectorP& prj, const Mat4d& viewRotation) const;
 	//! @param power the texture values are raised to this power first (see PHOTO_DSO_DESTRETCH)
-	bool photoTextureStatistics(class StelTexture& texture, float power, float& mean, float& meanSquare);
+	//! @param meanColor if given, the mean of the red, green and blue values (to the power)
+	bool photoTextureStatistics(class StelTexture& texture, float power, float& mean, float& meanSquare, Vec3f* meanColor = nullptr);
 	//! Images of nebulae are processed pictures: their contrast is compressed ("stretched") to show the faint
 	//! parts. In the photographic mode their values are raised to this power, which gives back a part of the
 	//! real contrast (the core of M42 is some 4 magnitudes brighter than its outer parts, not 2).
@@ -394,6 +397,13 @@ public:
 	//! Optical vignetting: offset of the pupil image against the lens barrel in the corner of the frame,
 	//! in units of the barrel radius. 0.81 gives half the light in the corner when wide open.
 	static constexpr float PHOTO_VIGNETTING_SHIFT = 0.81f;
+	//! The digital sensor (a stock camera, Nikon D5100 as measured by NPL), and the same with its IR-cut filter replaced
+	//! by a clear one (red as at 600 nm up to 700 nm), both with the color matrix of the stock camera, white balanced
+	//! on daylight: an H II region's line spectrum (H-alpha, [N II], [O III], H-beta, ... as for the films, reddened by
+	//! E(B-V) = 0.5). The stock camera sees H-alpha with about 30% of its red, and the [O III] and H-beta lines
+	//! in blue and green: emission nebulae come out pink. Per unit V, so R/V = 2.1 instead of the 4-5 of red pictures.
+	static constexpr float PHOTO_EMISSION_DIGITAL[3] = {2.085f, 0.951f, 2.246f};
+	static constexpr float PHOTO_EMISSION_DIGITAL_HALPHA[3] = {3.531f, 0.794f, 2.364f};
 	//! Coma: length of the comet in the corner, wide open, as a fraction of the image diagonal (scales with 1/N^2).
 	//! 0.002 is about 90 micrometers on a full frame sensor (15 pixels of 6 micrometers): a good fast lens wide
 	//! open, the comet clear in the corners but small; at f/2.8 a quarter of it.
@@ -903,6 +913,12 @@ public slots:
 	int getPhotoToneCurve() const {return photoToneCurve;}
 	void setFlagPhotoVignetting(bool b);
 	bool getFlagPhotoVignetting() const {return flagPhotoVignetting;}
+	void setFlagPhotoHalphaModified(bool b);
+	bool getFlagPhotoHalphaModified() const {return flagPhotoHalphaModified;}
+	//! An emission nebula (H II region) as the camera in use records it: the linear sRGB of the scene for a nebula as
+	//! bright in V as white light of luminance 1 (see StelSkyImageTile). Negative: the camera has no spectral model
+	//! (black and white film), the colors of the picture are used.
+	Vec3f getPhotoEmissionColor() const;
 	void setFlagPhotoLensFlare(bool b);
 	bool getFlagPhotoLensFlare() const {return flagPhotoLensFlare;}
 	void setPhotoLensFlareStrength(double s);
@@ -1204,6 +1220,7 @@ signals:
 	void photoWhiteBalanceChanged(int wb);
 	void photoWhiteBalanceKelvinChanged(double kelvin);
 	void flagPhotoVignettingChanged(bool b);
+	void flagPhotoHalphaModifiedChanged(bool b);
 	void flagPhotoAberrationsChanged(bool b);
 	void flagPhotoLensFlareChanged(bool b);
 	void photoLensFlareStrengthChanged(double s);
@@ -1624,6 +1641,7 @@ private:
 	float photoWBMatrix[9] = {1,0,0, 0,1,0, 0,0,1};    //!< row-major
 	float photoWBInverse[9] = {1,0,0, 0,1,0, 0,0,1};   //!< row-major
 	void updatePhotoWhiteBalanceMatrix();
+	bool flagPhotoHalphaModified = false;
 	//! Lens model
 	bool flagPhotoVignetting = true;
 	bool flagPhotoAberrations = true;

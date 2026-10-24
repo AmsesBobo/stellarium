@@ -366,11 +366,25 @@
            </widget>
           </item>
           <item row="16" column="1">
-           <widget class="QComboBox" name="sensorComboBox">
-            <property name="toolTip">
-             <string>The size of the sensor. For the same field of view a smaller sensor needs a shorter lens, which gives more depth of field; at the same f-number and exposure time it collects less light for the picture, which gives more noise (APS-C about 1.2 stops, Micro Four Thirds 2, 1-inch 3, the small sensors of compact cameras 4 to 5 more than full frame; medium format 0.7 less). Changing the sensor keeps the lens: the field of view changes by the crop factor.</string>
-            </property>
-           </widget>
+           <layout class="QHBoxLayout" name="sensorLayout">
+            <item>
+             <widget class="QComboBox" name="sensorComboBox">
+              <property name="toolTip">
+               <string>The size of the sensor. For the same field of view a smaller sensor needs a shorter lens, which gives more depth of field; at the same f-number and exposure time it collects less light for the picture, which gives more noise (APS-C about 1.2 stops, Micro Four Thirds 2, 1-inch 3, the small sensors of compact cameras 4 to 5 more than full frame; medium format 0.7 less). Changing the sensor keeps the lens: the field of view changes by the crop factor.</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QCheckBox" name="halphaModifiedCheckBox">
+              <property name="text">
+               <string>H-alpha modified</string>
+              </property>
+              <property name="toolTip">
+               <string>A camera whose infrared-cut filter has been replaced by a clear one, as astrophotographers do: it records the red H-alpha light of emission nebulae about three times as well. A stock camera sees H-alpha with about a third of its red and the green and blue lines too, so emission nebulae come out pink; modified, they are red. Only for the digital sensor (a color film has its own colors).</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
           </item>
           <item row="17" column="0">
            <widget class="QLabel" name="filmLabel">

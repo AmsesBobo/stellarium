@@ -35,7 +35,7 @@
 #include <QDebug>
 #include <QtGlobal>
 
-bool StelSkyDrawer::photoTextureStatistics(StelTexture& texture, float power, float& mean, float& meanSquare)
+bool StelSkyDrawer::photoTextureStatistics(StelTexture& texture, float power, float& mean, float& meanSquare, Vec3f* meanColor)
 {
 	mean = meanSquare = -1.f;
 	if (!photoTextureMeanTried)
@@ -125,6 +125,8 @@ void main(void)
 
 	mean = 0.2126f*pixel[0] + 0.7152f*pixel[1] + 0.0722f*pixel[2];
 	meanSquare = pixel[3];
+	if (meanColor)
+		meanColor->set(pixel[0], pixel[1], pixel[2]);
 	return std::isfinite(mean) && std::isfinite(meanSquare);
 }
 

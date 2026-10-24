@@ -147,7 +147,7 @@ protected:
 	//! Photographic mode: emission nebulae, the H-alpha intensity (Rayleigh) of a texel of value 1 (linear, taken to
 	//! the power PHOTO_DSO_DESTRETCH), measured against an all-sky H-alpha map ("halphaScale" in the JSON; 0: none)
 	float photoHalphaScale = 0.f;
-	//! Photographic mode: the colors of an emission nebula on the color film in use (negative: none)
+	//! Photographic mode: the colors of an emission nebula in the camera in use (negative: none, the picture's colors)
 	Vec3f photoEmissionColor = Vec3f(-1.f);
 	//! Compute photoLuminanceScale (the texture must be loaded and bound)
 	void computePhotoLuminanceScale(StelCore* core);

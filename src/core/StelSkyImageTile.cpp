@@ -334,8 +334,13 @@ void StelSkyImageTile::computePhotoLuminanceScale(StelCore* core)
 		return;
 	}
 	float mean = 0.f, meanSquare = 0.f;
-	if (!core->getSkyDrawer()->photoTextureStatistics(*tex, StelSkyDrawer::PHOTO_DSO_DESTRETCH, mean, meanSquare) || !(mean > 1e-7f) || !(meanSquare > 0.f))
+	Vec3f meanColor(0.f);
+	if (!core->getSkyDrawer()->photoTextureStatistics(*tex, StelSkyDrawer::PHOTO_DSO_DESTRETCH, mean, meanSquare, &meanColor) || !(mean > 1e-7f) || !(meanSquare > 0.f))
 		return;
+	// A red picture without a catalog object (Sharpless, RCW, parts of Barnard's Loop): an emission nebula, H-alpha
+	// (on average 2.5 times as much red as green and blue)
+	if (meanColor[0] > 1.25f*(meanColor[1] + meanColor[2]))
+		photoObjectType = static_cast<int>(Nebula::NebEn);
 	// typical texture value of the lit parts of the image, whatever their share of it
 	const double lit = static_cast<double>(meanSquare/mean);
 	double area = 0.;
@@ -414,25 +419,19 @@ bool StelSkyImageTile::drawTile(StelCore* core, StelPainter& sPainter, const Vec
 		ad_lum = photoValue;
 		if (!tex->bind())
 			return false;
-		// A color film sees an emission nebula by its line spectrum (see StelSkyDrawer::getPhotoFilmSpec()): the light
-		// of the image (its luminance, measured by the V magnitude) in the colors the film gives it. The colors of the
-		// image itself come from another camera and are not used.
-		if (drawer->getFlagPhotoFilmActive())
-		{
-			const StelSkyDrawer::PhotoFilmSpec& f = drawer->getPhotoActiveFilmSpec();
-			const bool emission = photoObjectType == Nebula::NebEn || photoObjectType == Nebula::NebHII
-			                   || photoObjectType == Nebula::NebSNR || photoObjectType == Nebula::NebEMO
-			                   || photoObjectType == Nebula::NebCn;
-			if (emission && StelSkyDrawer::getPhotoFilmSpectral(f))
-				photoEmissionColor.set(f.emission[0], f.emission[1], f.emission[2]);
-			else
-				photoEmissionColor.set(-1.f, -1.f, -1.f);
-		}
-		else
-			photoEmissionColor.set(-1.f, -1.f, -1.f);
+		// An emission nebula: its light is in lines, mostly H-alpha. The pictures of it come from cameras modified for
+		// H-alpha or from narrow-band filters, which make it deep red; the camera in use records its line spectrum in
+		// its own colors (StelSkyDrawer::getPhotoEmissionColor(): a stock digital camera pink, a color film red). The
+		// red of the picture beyond its green and blue is taken as that emission, with the same luminance (V); the
+		// rest (stars, blue reflection nebulae in it) keeps the colors of the picture.
+		const bool emission = photoObjectType == Nebula::NebEn || photoObjectType == Nebula::NebHII
+		                   || photoObjectType == Nebula::NebSNR || photoObjectType == Nebula::NebEMO
+		                   || photoObjectType == Nebula::NebCn;
+		photoEmissionColor = emission ? drawer->getPhotoEmissionColor() : Vec3f(-1.f);
 		// Give back a part of the contrast of the processed image: value^p (the shader computes (value*color)^p)
 		sPainter.setTextureDisplayAdjustment(1.f/StelSkyDrawer::PHOTO_DSO_DESTRETCH, 1.f, 1.f, 1.f,
-		                                     photoEmissionColor[0] >= 0.f ? 4 : 0, false, false);
+		                                     photoEmissionColor[0] >= 0.f ? 5 : 0, false, false);
+		sPainter.setTextureEmissionColor(photoEmissionColor);
 	}
 	Vec4f color;
 	if (alphaBlend || texFader->state()==QTimeLine::Running)
@@ -520,10 +519,6 @@ bool StelSkyImageTile::drawTile(StelCore* core, StelPainter& sPainter, const Vec
 		}
 		if (photo)
 		{
-			// An emission nebula on a color film: the film's colors (the texture gives its luminance)
-			if (photoEmissionColor[0] >= 0.f)
-				for (int c=0; c<3; ++c)
-					extinctedColor[c] *= photoEmissionColor[c];
 			// The painter takes sRGB-encoded colors (colorToShader() decodes them): encode the linear values,
 			// taken to the power 1/p (see setTextureDisplayAdjustment() above). The shader computes
 			// (value*color)^p, so the light of the image scales with the linear color given here.
