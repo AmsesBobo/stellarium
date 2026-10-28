@@ -201,6 +201,7 @@ struct LightDomes::Result
 		double glow;              // luminance of the dome 5 degrees above the horizon (cd/m^2)
 	};
 	std::vector<Label> labels;  // the brightest domes first
+	bool satellite = false;     // the light of the satellite map is in it
 };
 
 LightDomes::LightDomes()
@@ -226,6 +227,14 @@ void LightDomes::init()
 	flagDatabaseTowns = conf->value("viewing/flag_photographic_light_domes_database", false).toBool();
 	databaseTownLamp = qBound(0, conf->value("viewing/photographic_light_dome_database_lamp", 0).toInt(), static_cast<int>(LampLED4000));
 	flagTownLabels = conf->value("viewing/flag_photographic_light_dome_labels", false).toBool();
+	lightSource = qBound(0, conf->value("viewing/photographic_light_dome_source", 0).toInt(), static_cast<int>(SourceSatellite));
+	nightLights = new NightLightsMap(this);
+	connect(nightLights, &NightLightsMap::downloadFinished, this, [this](bool ok, const QString& message) {
+		satelliteMessage = ok ? QString() : message;
+		dirty = true;
+		emit satelliteDataChanged();
+	});
+	connect(nightLights, &NightLightsMap::downloadProgress, this, &LightDomes::satelliteDataChanged);
 	dirty = true;
 }
 
@@ -314,6 +323,39 @@ void LightDomes::setFlagTownLabels(bool b)
 	flagTownLabels = b;
 	StelApp::immediateSave("viewing/flag_photographic_light_dome_labels", b);
 	emit flagTownLabelsChanged(b);
+}
+
+void LightDomes::setLightSource(int source)
+{
+	source = qBound(0, source, static_cast<int>(SourceSatellite));
+	if (source == lightSource)
+		return;
+	lightSource = source;
+	StelApp::immediateSave("viewing/photographic_light_dome_source", source);
+	dirty = true;
+	emit lightSourceChanged(source);
+}
+
+bool LightDomes::hasSatelliteData() const
+{
+	const StelLocation& here = StelApp::getInstance().getCore()->getCurrentLocation();
+	return nightLights && here.planetName == QStringLiteral("Earth")
+	       && nightLights->hasRegion(static_cast<double>(here.getLatitude()), static_cast<double>(here.getLongitude()), KERNEL_MAX_DISTANCE);
+}
+
+bool LightDomes::isSatelliteInUse() const
+{
+	return result && result->satellite;
+}
+
+void LightDomes::downloadSatelliteData()
+{
+	const StelLocation& here = StelApp::getInstance().getCore()->getCurrentLocation();
+	if (!nightLights || here.planetName != QStringLiteral("Earth"))
+		return;
+	satelliteMessage.clear();
+	nightLights->download(static_cast<double>(here.getLatitude()), static_cast<double>(here.getLongitude()), KERNEL_MAX_DISTANCE);
+	emit satelliteDataChanged();
 }
 
 void LightDomes::recompute()
@@ -508,12 +550,164 @@ std::shared_ptr<LightDomes::Kernel> LightDomes::computeKernel(const AtmosphereKe
 	return kern;
 }
 
-std::shared_ptr<LightDomes::Result> LightDomes::computeMap(std::shared_ptr<Kernel> kern, const std::vector<Source>& sources, const std::vector<QString>& names, double lumensPerInhabitant)
+namespace
+{
+// The row 5 degrees above the horizon, for the labels
+int labelRow()
+{
+	return qRound((LightDomes::MAP_ALTITUDES - 1)*std::sqrt(5./90.));
+}
+// The VIIRS radiance of the Swedish towns of the location database (Stockholm to Motala and Naessjoe), summed within
+// 1.5 times their radius (townRadius()): 0.013 to 0.022 W/sr per inhabitant upwards, in the band of the satellite
+// (500-900 nm). The satellite map is calibrated with it to the lumens per inhabitant of the population model.
+constexpr double VIIRS_WSR_PER_INHABITANT = 0.018;
+}
+
+void LightDomes::addSatelliteLight(const Kernel& kern, const JobInput& in, Result& res)
+{
+	float pixelDeg = 0.f;
+	const std::vector<NightLightsMap::Pixel> pixels = NightLightsMap::readRegion(in.snapshot, in.latitude, in.longitude, KERNEL_MAX_DISTANCE, &pixelDeg);
+	res.satellite = true;
+	if (pixels.empty())
+		return;
+	// The light of each pixel: its radiance times its area, as the lumens of the population model
+	const double lumensPerWsr = in.lumensPerInhabitant/VIIRS_WSR_PER_INHABITANT;
+	const double pixelRad = static_cast<double>(pixelDeg)*M_PI/180.;
+	const double pixelArea = std::pow(EARTH_RADIUS_KM*1e5*pixelRad, 2);  // cm^2 at the equator
+	const auto unit = [](double latDeg, double lonDeg) {
+		const double la = latDeg*M_PI/180., lo = lonDeg*M_PI/180.;
+		return Vec3d(std::cos(la)*std::cos(lo), std::cos(la)*std::sin(lo), std::sin(la));
+	};
+	const double la0 = in.latitude*M_PI/180., lo0 = in.longitude*M_PI/180.;
+	const Vec3d O = unit(in.latitude, in.longitude);
+	const Vec3d north(-std::sin(la0)*std::cos(lo0), -std::sin(la0)*std::sin(lo0), std::cos(la0));
+	const Vec3d east(-std::sin(lo0), std::cos(lo0), 0.);
+	// The light binned by the distance (the nodes of the table) and the azimuth (1 degree) around the observer
+	std::vector<double> bins(static_cast<size_t>(KERNEL_DISTANCES)*MAP_AZIMUTHS, 0.);
+	const double logRange = std::log(KERNEL_MAX_DISTANCE/KERNEL_MIN_DISTANCE);
+	const auto addLight = [&](const Vec3d& p, double flux) {
+		const double c = qBound(-1., p*O, 1.);
+		const double d = std::acos(c)*EARTH_RADIUS_KM;
+		if (d > KERNEL_MAX_DISTANCE)
+			return;
+		const Vec3d t = p - O*c;
+		const double az = t.normSquared() > 0. ? std::atan2(t*east, t*north)*180./M_PI : 0.;
+		const double fd = qBound(0., std::log(qMax(d, KERNEL_MIN_DISTANCE)/KERNEL_MIN_DISTANCE)/logRange*(KERNEL_DISTANCES - 1), KERNEL_DISTANCES - 1.0001);
+		const int d0 = static_cast<int>(fd);
+		const double td = fd - d0;
+		double fa = az - 0.5;  // column a covers the azimuths a to a+1
+		fa -= 360.*std::floor(fa/360.);
+		const int a0 = static_cast<int>(fa) % MAP_AZIMUTHS, a1 = (a0 + 1) % MAP_AZIMUTHS;
+		const double ta = fa - std::floor(fa);
+		bins[static_cast<size_t>(d0)*MAP_AZIMUTHS + a0]       += flux*(1. - td)*(1. - ta);
+		bins[static_cast<size_t>(d0)*MAP_AZIMUTHS + a1]       += flux*(1. - td)*ta;
+		bins[static_cast<size_t>(d0 + 1)*MAP_AZIMUTHS + a0]   += flux*td*(1. - ta);
+		bins[static_cast<size_t>(d0 + 1)*MAP_AZIMUTHS + a1]   += flux*td*ta;
+	};
+	// the towns of the database, for their labels: the light within 1.5 times their radius
+	std::vector<Vec3d> townCentre;
+	std::vector<double> townCos, townFlux(in.towns.size(), 0.);
+	for (const auto& town : in.towns)
+	{
+		// back from the azimuth and distance to the place
+		const double a = town.azimuth*M_PI/180., g = town.distance/EARTH_RADIUS_KM;
+		townCentre.push_back(O*std::cos(g) + (north*std::cos(a) + east*std::sin(a))*std::sin(g));
+		townCos.push_back(std::cos(1.5*townRadius(town.population)/EARTH_RADIUS_KM));
+	}
+	constexpr double NEAR = 3.;  // km: pixels closer than this are split into 4 x 4 points
+	const double cosNear = std::cos(NEAR/EARTH_RADIUS_KM);
+	for (const auto& px : pixels)
+	{
+		const double lat = static_cast<double>(px.lat), lon = static_cast<double>(px.lon);
+		const double flux = static_cast<double>(px.radiance)*pixelArea*std::cos(lat*M_PI/180.)*1e-9*lumensPerWsr;  // nW -> W/sr -> lm
+		const Vec3d p = unit(lat, lon);
+		for (size_t i=0; i<townCentre.size(); ++i)
+			if (p*townCentre[i] > townCos[i])
+				townFlux[i] += flux;
+		if (p*O < cosNear)
+		{
+			addLight(p, flux);
+			continue;
+		}
+		for (int i=0; i<4; ++i)
+			for (int j=0; j<4; ++j)
+				addLight(unit(lat + (i - 1.5)*0.25*static_cast<double>(pixelDeg), lon + (j - 1.5)*0.25*static_cast<double>(pixelDeg)), flux/16.);
+	}
+	// For each distance the light by the azimuth (only the bins with light)
+	std::vector<std::vector<std::pair<int, float>>> lit(KERNEL_DISTANCES);
+	for (int d=0; d<KERNEL_DISTANCES; ++d)
+		for (int a=0; a<MAP_AZIMUTHS; ++a)
+		{
+			const double f = bins[static_cast<size_t>(d)*MAP_AZIMUTHS + a];
+			if (f > 0.)
+				lit[static_cast<size_t>(d)].emplace_back(a, static_cast<float>(f));
+		}
+	const Vec3f color = lampColor(in.satelliteLamp);
+	// The sky: for each row the sum over the distances of the light around times the table, by the difference of
+	// the azimuths (a circular convolution)
+	std::vector<int> rows(MAP_ALTITUDES);
+	std::iota(rows.begin(), rows.end(), 0);
+	float* map = res.map.data();
+	QtConcurrent::blockingMap(rows, [&kern, &lit, color, map](int row)
+	{
+		std::vector<float> extended(3*2*MAP_AZIMUTHS);  // the table at the azimuth differences -360..359 degrees
+		std::vector<float> sum(3*MAP_AZIMUTHS, 0.f);
+		for (int d=0; d<KERNEL_DISTANCES; ++d)
+		{
+			const auto& list = lit[static_cast<size_t>(d)];
+			if (list.empty())
+				continue;
+			for (int c=0; c<3; ++c)
+			{
+				float* ext = &extended[static_cast<size_t>(c)*2*MAP_AZIMUTHS];
+				for (int k=0; k<2*MAP_AZIMUTHS; ++k)
+				{
+					int delta = std::abs(k - MAP_AZIMUTHS);
+					if (delta > 180)
+						delta = 360 - delta;
+					const int a0 = qMin(delta/static_cast<int>(KERNEL_AZIMUTH_STEP), KERNEL_AZIMUTHS - 2);
+					const float t = static_cast<float>(delta - a0*KERNEL_AZIMUTH_STEP)/static_cast<float>(KERNEL_AZIMUTH_STEP);
+					ext[k] = color[c]*(kern.data[Kernel::index(c, d, row, a0)]*(1.f - t) + kern.data[Kernel::index(c, d, row, a0 + 1)]*t);
+				}
+			}
+			for (const auto& [a, f] : list)
+				for (int c=0; c<3; ++c)
+				{
+					// the column col gets the table at col - a
+					const float* ext = &extended[static_cast<size_t>(c)*2*MAP_AZIMUTHS + MAP_AZIMUTHS - a];
+					float* out = &sum[static_cast<size_t>(c)*MAP_AZIMUTHS];
+					for (int col=0; col<MAP_AZIMUTHS; ++col)
+						out[col] += f*ext[col];
+				}
+		}
+		for (int col=0; col<MAP_AZIMUTHS; ++col)
+			for (int c=0; c<3; ++c)
+				map[(static_cast<size_t>(row)*MAP_AZIMUTHS + col)*3 + c] += sum[static_cast<size_t>(c)*MAP_AZIMUTHS + col];
+	});
+	// The labels of the towns, with the light measured around them
+	const int row = labelRow();
+	for (size_t i=0; i<in.towns.size(); ++i)
+	{
+		const DatabaseTown& town = in.towns[i];
+		if (!(townFlux[i] > 0.) || town.distance <= townRadius(town.population))
+			continue;
+		const double glow = townFlux[i]*static_cast<double>(0.2126f*color[0]*kern.at(0, town.distance, row, 0.)
+		                                                 + 0.7152f*color[1]*kern.at(1, town.distance, row, 0.)
+		                                                 + 0.0722f*color[2]*kern.at(2, town.distance, row, 0.));
+		res.labels.push_back({QString("%1 (%2 km)").arg(town.name).arg(qRound(town.distance)), town.azimuth, glow});
+	}
+}
+
+std::shared_ptr<LightDomes::Result> LightDomes::computeMap(std::shared_ptr<Kernel> kern, const JobInput& in)
 {
 	auto res = std::make_shared<Result>();
 	res->map.assign(static_cast<size_t>(MAP_ALTITUDES)*MAP_AZIMUTHS*3, 0.f);
-	// the row 5 degrees above the horizon, for the labels
-	const int labelRow = qRound((MAP_ALTITUDES - 1)*std::sqrt(5./90.));
+	const std::vector<Source>& sources = in.sources;
+	const std::vector<QString>& names = in.names;
+	const double lumensPerInhabitant = in.lumensPerInhabitant;
+	const int labelRow = ::labelRow();
+	if (in.satellite)
+		addSatelliteLight(*kern, in, *res);
 	for (size_t i=0; i<sources.size(); ++i)
 	{
 		const Source& s = sources[i];
@@ -598,27 +792,41 @@ void LightDomes::startComputation()
 {
 	const AtmosphereKey key = currentAtmosphere();
 	const std::shared_ptr<Kernel> known = (kernel && kernel->key == key) ? kernel : nullptr;
-	std::vector<Source> src = sources;
-	std::vector<QString> names(src.size());
+	JobInput in;
+	in.sources = sources;
+	in.names.resize(in.sources.size());
+	in.lumensPerInhabitant = lumensPerInhabitant;
 	if (flagDatabaseTowns)
 	{
-		for (const auto& t : databaseTowns)
+		// the satellite map when it is there for the place, else the population
+		if (lightSource == SourceSatellite && databasePlanet == QStringLiteral("Earth") && hasSatelliteData())
 		{
-			names.push_back(t.name);
-			Source s;
-			s.azimuth = t.azimuth;
-			s.distance = qMax(0.1, t.distance);
-			s.population = t.population;
-			s.lamp = databaseTownLamp;
-			src.push_back(s);
+			in.satellite = true;
+			in.snapshot = nightLights->snapshot();
+			in.latitude = databaseLatitude;
+			in.longitude = databaseLongitude;
+			in.satelliteLamp = databaseTownLamp;
+			in.towns = databaseTowns;
+		}
+		else
+		{
+			for (const auto& t : databaseTowns)
+			{
+				in.names.push_back(t.name);
+				Source s;
+				s.azimuth = t.azimuth;
+				s.distance = qMax(0.1, t.distance);
+				s.population = t.population;
+				s.lamp = databaseTownLamp;
+				in.sources.push_back(s);
+			}
 		}
 	}
-	const double lm = lumensPerInhabitant;
 	jobAtmosphere = key;
-	job = QtConcurrent::run([known, key, src, names, lm]()
+	job = QtConcurrent::run([known, key, in]()
 	{
 		const std::shared_ptr<Kernel> k = known ? known : computeKernel(key);
-		return std::make_pair(k, computeMap(k, src, names, lm));
+		return std::make_pair(k, computeMap(k, in));
 	});
 	jobRunning = true;
 	dirty = false;

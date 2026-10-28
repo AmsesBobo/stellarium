@@ -34,7 +34,7 @@
     </widget>
    </item>
    <item>
-    <!-- Two columns, so that the window fits on the screen: the camera on the left, the lens and the star images on the right -->
+    <!-- Two columns, so that the window fits on the screen: the camera and the star images on the left, the lens and the light domes on the right -->
     <layout class="QHBoxLayout" name="columnsLayout">
      <property name="spacing">
       <number>0</number>
@@ -543,177 +543,6 @@
         </widget>
        </item>
        <item>
-        <spacer name="leftColumnSpacer">
-         <property name="orientation">
-          <enum>Qt::Vertical</enum>
-         </property>
-         <property name="sizeHint" stdset="0">
-          <size>
-           <width>0</width>
-           <height>0</height>
-          </size>
-         </property>
-        </spacer>
-       </item>
-      </layout>
-     </item>
-     <item>
-      <layout class="QVBoxLayout" name="rightColumnLayout">
-       <property name="spacing">
-        <number>0</number>
-       </property>
-       <item>
-        <widget class="QGroupBox" name="lensGroupBox">
-         <property name="title">
-          <string>Lens</string>
-         </property>
-         <layout class="QGridLayout" name="lensGridLayout">
-          <item row="0" column="0" colspan="2">
-           <widget class="QCheckBox" name="vignettingCheckBox">
-            <property name="toolTip">
-             <string>The picture gets darker towards the corners: the natural falloff of a wide-angle lens, and the optical vignetting of a fast lens, which goes away when you stop down.</string>
-            </property>
-            <property name="text">
-             <string>Vignetting</string>
-            </property>
-           </widget>
-          </item>
-          <item row="1" column="0" colspan="2">
-           <widget class="QCheckBox" name="aberrationsCheckBox">
-            <property name="toolTip">
-             <string>Stars away from the center turn into small comets (coma) and short lines (astigmatism), most in the corners and with the lens wide open. Stopping down makes them sharp. Chromatic aberration: towards the corners the stars get red and blue edges (lateral), and wide open bright stars get purple fringes (axial, gone when stopped down).</string>
-            </property>
-            <property name="text">
-             <string>Coma, astigmatism and color fringes</string>
-            </property>
-           </widget>
-          </item>
-          <item row="2" column="0">
-           <widget class="QLabel" name="aberrationStrengthLabel">
-            <property name="text">
-             <string>Strength of the aberrations:</string>
-            </property>
-           </widget>
-          </item>
-          <item row="2" column="1">
-           <widget class="QSpinBox" name="aberrationStrengthSpinBox">
-            <property name="toolTip">
-             <string>100% is a typical fast lens. Less for a better (or stopped down) lens, more for a simple one.</string>
-            </property>
-            <property name="alignment">
-             <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
-            </property>
-            <property name="suffix">
-             <string> %</string>
-            </property>
-            <property name="maximum">
-             <number>300</number>
-            </property>
-            <property name="singleStep">
-             <number>10</number>
-            </property>
-           </widget>
-          </item>
-          <item row="3" column="0" colspan="2">
-           <widget class="QCheckBox" name="lensFlareCheckBox">
-            <property name="toolTip">
-             <string>Light of the Sun or the Moon reflected between the lens surfaces: colored images of the aperture on the line through the image center and the source, also when the source is just outside the frame. Computed for a real lens design (double Gauss).</string>
-            </property>
-            <property name="text">
-             <string>Lens reflections (ghosts)</string>
-            </property>
-           </widget>
-          </item>
-          <item row="4" column="0">
-           <widget class="QLabel" name="lensFlareStrengthLabel">
-            <property name="text">
-             <string>Strength of the reflections:</string>
-            </property>
-           </widget>
-          </item>
-          <item row="4" column="1">
-           <widget class="QSpinBox" name="lensFlareStrengthSpinBox">
-            <property name="toolTip">
-             <string>100% is a lens with a single-layer coating. A modern multi-coated lens reflects about a third or less.</string>
-            </property>
-            <property name="alignment">
-             <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
-            </property>
-            <property name="suffix">
-             <string> %</string>
-            </property>
-            <property name="maximum">
-             <number>300</number>
-            </property>
-            <property name="singleStep">
-             <number>10</number>
-            </property>
-           </widget>
-          </item>
-          <item row="5" column="0">
-           <widget class="QLabel" name="focusLabel">
-            <property name="text">
-             <string>Focus:</string>
-            </property>
-           </widget>
-          </item>
-          <item row="5" column="1">
-           <widget class="QLabel" name="focusValueLabel">
-            <property name="text">
-             <string notr="true">∞</string>
-            </property>
-            <property name="alignment">
-             <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
-            </property>
-           </widget>
-          </item>
-          <item row="6" column="0">
-           <widget class="QSlider" name="focusSlider">
-            <property name="toolTip">
-             <string>The focus ring of the lens. At infinity (∞) the stars are sharp. Focused nearer, each star becomes a blurred image of the aperture: a disk, or a polygon of the blades when stopped down, cut off in the corners (cat's eye). Faint stars fade away. A short lens forgives a lot, a long one almost nothing; stopping down helps. To the left of ∞ the ring turns beyond infinity, as many lenses allow.</string>
-            </property>
-            <property name="minimum">
-             <number>-100</number>
-            </property>
-            <property name="maximum">
-             <number>1000</number>
-            </property>
-            <property name="pageStep">
-             <number>10</number>
-            </property>
-            <property name="orientation">
-             <enum>Qt::Horizontal</enum>
-            </property>
-           </widget>
-          </item>
-          <item row="6" column="1">
-           <widget class="QPushButton" name="focusInfinityPushButton">
-            <property name="toolTip">
-             <string>Focus at infinity</string>
-            </property>
-            <property name="text">
-             <string notr="true">∞</string>
-            </property>
-           </widget>
-          </item>
-          <item row="7" column="0">
-           <widget class="QLabel" name="lensMaxApertureLabel">
-            <property name="text">
-             <string>Widest aperture:</string>
-            </property>
-           </widget>
-          </item>
-          <item row="7" column="1">
-           <widget class="QComboBox" name="lensMaxApertureComboBox">
-            <property name="toolTip">
-             <string>The widest aperture (smallest f-number) of the lens, as for a lens you own. Neither you nor the program mode can open wider. A slow lens wide open shows the same vignetting and aberrations as a fast lens wide open.</string>
-            </property>
-           </widget>
-          </item>
-         </layout>
-        </widget>
-       </item>
-       <item>
         <widget class="QGroupBox" name="starsGroupBox">
          <property name="title">
           <string>Star images</string>
@@ -889,6 +718,177 @@
         </widget>
        </item>
        <item>
+        <spacer name="leftColumnSpacer">
+         <property name="orientation">
+          <enum>Qt::Vertical</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>0</width>
+           <height>0</height>
+          </size>
+         </property>
+        </spacer>
+       </item>
+      </layout>
+     </item>
+     <item>
+      <layout class="QVBoxLayout" name="rightColumnLayout">
+       <property name="spacing">
+        <number>0</number>
+       </property>
+       <item>
+        <widget class="QGroupBox" name="lensGroupBox">
+         <property name="title">
+          <string>Lens</string>
+         </property>
+         <layout class="QGridLayout" name="lensGridLayout">
+          <item row="0" column="0" colspan="2">
+           <widget class="QCheckBox" name="vignettingCheckBox">
+            <property name="toolTip">
+             <string>The picture gets darker towards the corners: the natural falloff of a wide-angle lens, and the optical vignetting of a fast lens, which goes away when you stop down.</string>
+            </property>
+            <property name="text">
+             <string>Vignetting</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="0" colspan="2">
+           <widget class="QCheckBox" name="aberrationsCheckBox">
+            <property name="toolTip">
+             <string>Stars away from the center turn into small comets (coma) and short lines (astigmatism), most in the corners and with the lens wide open. Stopping down makes them sharp. Chromatic aberration: towards the corners the stars get red and blue edges (lateral), and wide open bright stars get purple fringes (axial, gone when stopped down).</string>
+            </property>
+            <property name="text">
+             <string>Coma, astigmatism and color fringes</string>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="0">
+           <widget class="QLabel" name="aberrationStrengthLabel">
+            <property name="text">
+             <string>Strength of the aberrations:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="1">
+           <widget class="QSpinBox" name="aberrationStrengthSpinBox">
+            <property name="toolTip">
+             <string>100% is a typical fast lens. Less for a better (or stopped down) lens, more for a simple one.</string>
+            </property>
+            <property name="alignment">
+             <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+            </property>
+            <property name="suffix">
+             <string> %</string>
+            </property>
+            <property name="maximum">
+             <number>300</number>
+            </property>
+            <property name="singleStep">
+             <number>10</number>
+            </property>
+           </widget>
+          </item>
+          <item row="3" column="0" colspan="2">
+           <widget class="QCheckBox" name="lensFlareCheckBox">
+            <property name="toolTip">
+             <string>Light of the Sun or the Moon reflected between the lens surfaces: colored images of the aperture on the line through the image center and the source, also when the source is just outside the frame. Computed for a real lens design (double Gauss).</string>
+            </property>
+            <property name="text">
+             <string>Lens reflections (ghosts)</string>
+            </property>
+           </widget>
+          </item>
+          <item row="4" column="0">
+           <widget class="QLabel" name="lensFlareStrengthLabel">
+            <property name="text">
+             <string>Strength of the reflections:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="4" column="1">
+           <widget class="QSpinBox" name="lensFlareStrengthSpinBox">
+            <property name="toolTip">
+             <string>100% is a lens with a single-layer coating. A modern multi-coated lens reflects about a third or less.</string>
+            </property>
+            <property name="alignment">
+             <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+            </property>
+            <property name="suffix">
+             <string> %</string>
+            </property>
+            <property name="maximum">
+             <number>300</number>
+            </property>
+            <property name="singleStep">
+             <number>10</number>
+            </property>
+           </widget>
+          </item>
+          <item row="5" column="0">
+           <widget class="QLabel" name="focusLabel">
+            <property name="text">
+             <string>Focus:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="5" column="1">
+           <widget class="QLabel" name="focusValueLabel">
+            <property name="text">
+             <string notr="true">∞</string>
+            </property>
+            <property name="alignment">
+             <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+            </property>
+           </widget>
+          </item>
+          <item row="6" column="0">
+           <widget class="QSlider" name="focusSlider">
+            <property name="toolTip">
+             <string>The focus ring of the lens. At infinity (∞) the stars are sharp. Focused nearer, each star becomes a blurred image of the aperture: a disk, or a polygon of the blades when stopped down, cut off in the corners (cat's eye). Faint stars fade away. A short lens forgives a lot, a long one almost nothing; stopping down helps. To the left of ∞ the ring turns beyond infinity, as many lenses allow.</string>
+            </property>
+            <property name="minimum">
+             <number>-100</number>
+            </property>
+            <property name="maximum">
+             <number>1000</number>
+            </property>
+            <property name="pageStep">
+             <number>10</number>
+            </property>
+            <property name="orientation">
+             <enum>Qt::Horizontal</enum>
+            </property>
+           </widget>
+          </item>
+          <item row="6" column="1">
+           <widget class="QPushButton" name="focusInfinityPushButton">
+            <property name="toolTip">
+             <string>Focus at infinity</string>
+            </property>
+            <property name="text">
+             <string notr="true">∞</string>
+            </property>
+           </widget>
+          </item>
+          <item row="7" column="0">
+           <widget class="QLabel" name="lensMaxApertureLabel">
+            <property name="text">
+             <string>Widest aperture:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="7" column="1">
+           <widget class="QComboBox" name="lensMaxApertureComboBox">
+            <property name="toolTip">
+             <string>The widest aperture (smallest f-number) of the lens, as for a lens you own. Neither you nor the program mode can open wider. A slow lens wide open shows the same vignetting and aberrations as a fast lens wide open.</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
         <widget class="QGroupBox" name="lightDomesGroupBox">
          <property name="title">
           <string>Light pollution: the light domes of towns</string>
@@ -946,6 +946,44 @@
            </layout>
           </item>
           <item row="2" column="0" colspan="2">
+           <layout class="QHBoxLayout" name="lightDomesSourceLayout">
+            <item>
+             <widget class="QLabel" name="lightDomesSourceLabel">
+              <property name="text">
+               <string>Light of the towns:</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QComboBox" name="lightDomesSourceComboBox">
+              <property name="toolTip">
+               <string>Where the light of the towns comes from: their population (1000 lumens per inhabitant, see below), or the light measured by the VIIRS satellite (night lights of 2024, 15 arc seconds), which also has the villages, roads, industries and greenhouses, calibrated to the same lumens per inhabitant with Swedish towns. The satellite data are downloaded only for the places you ask for (below 1 MB for 400 km around).</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QPushButton" name="lightDomesDownloadPushButton">
+              <property name="toolTip">
+               <string>Download the satellite map of the night lights within 400 km of the current location (from zenodo.org; kept in the cache directory)</string>
+              </property>
+              <property name="text">
+               <string>Download satellite data</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+          <item row="3" column="0" colspan="2">
+           <widget class="QLabel" name="lightDomesSatelliteLabel">
+            <property name="text">
+             <string notr="true">-</string>
+            </property>
+            <property name="wordWrap">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item row="4" column="0" colspan="2">
            <widget class="QTableWidget" name="lightDomesDatabaseTableWidget">
             <property name="toolTip">
              <string>The towns from the location database, the brightest domes first (population divided by the distance to the power 2.5). A town missing here (or a bright industrial area) can be added in your own towns below.</string>
@@ -953,7 +991,7 @@
             <property name="minimumSize">
              <size>
               <width>0</width>
-              <height>120</height>
+              <height>90</height>
              </size>
             </property>
             <property name="editTriggers">
@@ -984,7 +1022,7 @@
             </column>
            </widget>
           </item>
-          <item row="3" column="0" colspan="2">
+          <item row="5" column="0" colspan="2">
            <widget class="QLabel" name="lightDomesDatabaseInfoLabel">
             <property name="text">
              <string notr="true">-</string>
@@ -994,7 +1032,7 @@
             </property>
            </widget>
           </item>
-          <item row="4" column="0" colspan="2">
+          <item row="6" column="0" colspan="2">
            <layout class="QHBoxLayout" name="lightDomesDatabaseButtonLayout">
             <item>
              <widget class="QCheckBox" name="lightDomesLabelsCheckBox">
@@ -1031,14 +1069,14 @@
             </item>
            </layout>
           </item>
-          <item row="5" column="0" colspan="2">
+          <item row="7" column="0" colspan="2">
            <widget class="QLabel" name="lightDomesOwnLabel">
             <property name="text">
              <string>Your own towns:</string>
             </property>
            </widget>
           </item>
-          <item row="6" column="0" colspan="2">
+          <item row="8" column="0" colspan="2">
            <widget class="QTableWidget" name="lightDomesTableWidget">
             <property name="toolTip">
              <string>The towns: their direction (azimuth from north towards east), distance, number of inhabitants and kind of street lamps. Double-click a value to change it.</string>
@@ -1046,7 +1084,7 @@
             <property name="minimumSize">
              <size>
               <width>0</width>
-              <height>120</height>
+              <height>90</height>
              </size>
             </property>
             <property name="selectionBehavior">
@@ -1074,7 +1112,7 @@
             </column>
            </widget>
           </item>
-          <item row="7" column="0" colspan="2">
+          <item row="9" column="0" colspan="2">
            <layout class="QHBoxLayout" name="lightDomesButtonLayout">
             <item>
              <widget class="QPushButton" name="lightDomesAddPushButton">
@@ -1124,7 +1162,7 @@
             </item>
            </layout>
           </item>
-          <item row="8" column="0" colspan="2">
+          <item row="10" column="0" colspan="2">
            <widget class="QLabel" name="lightDomesZenithLabel">
             <property name="toolTip">
              <string>The light of the domes at the zenith (artificial only, without the natural sky)</string>

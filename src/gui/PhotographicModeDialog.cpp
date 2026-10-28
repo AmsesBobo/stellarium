@@ -27,6 +27,7 @@
 #include "StelTranslator.hpp"
 #include "StelModuleMgr.hpp"
 #include "LightDomes.hpp"
+#include "StelLocation.hpp"
 
 #include <QComboBox>
 #include <QSpinBox>
@@ -578,6 +579,16 @@ void PhotographicModeDialog::createDialogContent()
 		connect(domes, &LightDomes::flagDatabaseTownsChanged, this, &PhotographicModeDialog::updateDatabaseTownWidgets);
 		connect(domes, &LightDomes::flagDatabaseTownsChanged, this, &PhotographicModeDialog::updateLightDomeWidgets);
 		connect(domes, &LightDomes::flagEnabledChanged, this, &PhotographicModeDialog::updateDatabaseTownWidgets);
+		// the light of the towns: population or satellite
+		fillSourceComboBox();
+		connect(ui->lightDomesSourceComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this, domes]()
+		{
+			domes->setLightSource(ui->lightDomesSourceComboBox->currentData().toInt());
+		});
+		connect(ui->lightDomesDownloadPushButton, &QPushButton::clicked, domes, &LightDomes::downloadSatelliteData);
+		connect(domes, &LightDomes::lightSourceChanged, this, &PhotographicModeDialog::updateDatabaseTownWidgets);
+		connect(domes, &LightDomes::satelliteDataChanged, this, &PhotographicModeDialog::updateDatabaseTownWidgets);
+		connect(domes, &LightDomes::mapChanged, this, &PhotographicModeDialog::updateDatabaseTownWidgets);
 	}
 	else
 		ui->lightDomesGroupBox->hide();
@@ -601,11 +612,64 @@ void PhotographicModeDialog::fillLampComboBox(QComboBox* box)
 		box->setCurrentIndex(qMax(0, box->findData(current)));
 }
 
+void PhotographicModeDialog::fillSourceComboBox()
+{
+	QComboBox* box = ui->lightDomesSourceComboBox;
+	const int current = box->count() > 0 ? box->currentData().toInt() : -1;
+	box->clear();
+	box->addItem(q_("Population (location database)"), LightDomes::SourcePopulation);
+	box->addItem(q_("Satellite measurements (VIIRS 2024)"), LightDomes::SourceSatellite);
+	if (current >= 0)
+		box->setCurrentIndex(qMax(0, box->findData(current)));
+}
+
+void PhotographicModeDialog::updateSatelliteWidgets()
+{
+	const LightDomes* domes = GETSTELMODULE(LightDomes);
+	if (!dialog || !domes)
+		return;
+	{
+		const QSignalBlocker blocker(ui->lightDomesSourceComboBox);
+		ui->lightDomesSourceComboBox->setCurrentIndex(qMax(0, ui->lightDomesSourceComboBox->findData(domes->getLightSource())));
+	}
+	const bool on = domes->getFlagDatabaseTowns();
+	const bool satellite = domes->getLightSource() == LightDomes::SourceSatellite;
+	ui->lightDomesSourceComboBox->setEnabled(on);
+	ui->lightDomesDownloadPushButton->setVisible(satellite);
+	ui->lightDomesSatelliteLabel->setVisible(satellite);
+	if (!satellite)
+		return;
+	const NightLightsMap* map = domes->getNightLights();
+	const StelLocation& here = StelApp::getInstance().getCore()->getCurrentLocation();
+	const bool onEarth = here.planetName == QStringLiteral("Earth");
+	const bool downloading = map && map->isDownloading();
+	const bool available = domes->hasSatelliteData();
+	ui->lightDomesDownloadPushButton->setEnabled(on && onEarth && map && !downloading && !available);
+	QString status;
+	if (!map || !onEarth)
+		status = q_("Satellite data only for places on the Earth.");
+	else if (downloading)
+		status = q_("Downloading the satellite data...");
+	else if (available)
+		status = map->hasFullFile() ? q_("Satellite data: the whole map is installed.")
+		                            : q_("Satellite data for this place are downloaded.");
+	else
+	{
+		const qint64 size = map->regionDownloadSize(static_cast<double>(here.getLatitude()), static_cast<double>(here.getLongitude()), LightDomes::maxDistance());
+		const QString amount = size < 0 ? q_("below 1 MB") : QString("%1 kB").arg(qMax(1LL, (size + 512)/1024));
+		status = q_("No satellite data for this place yet (%1 to download): the population is used meanwhile.").arg(amount);
+		if (!domes->getSatelliteMessage().isEmpty())
+			status += QStringLiteral(" ") + q_("The last download failed: %1").arg(domes->getSatelliteMessage());
+	}
+	ui->lightDomesSatelliteLabel->setText(QString("%1<br/><small>%2</small>").arg(status.toHtmlEscaped(), NightLightsMap::attribution().toHtmlEscaped()));
+}
+
 void PhotographicModeDialog::updateDatabaseTownWidgets()
 {
 	const LightDomes* domes = GETSTELMODULE(LightDomes);
 	if (!dialog || !domes)
 		return;
+	updateSatelliteWidgets();
 	{
 		const QSignalBlocker blocker(ui->lightDomesDatabaseLampComboBox);
 		ui->lightDomesDatabaseLampComboBox->setCurrentIndex(qMax(0, ui->lightDomesDatabaseLampComboBox->findData(domes->getDatabaseTownLamp())));

@@ -22,6 +22,7 @@
 
 #include "StelModule.hpp"
 #include "VecMath.hpp"
+#include "NightLightsMap.hpp"
 
 #include <QFuture>
 #include <QString>
@@ -68,6 +69,9 @@ class LightDomes : public StelModule
 	Q_PROPERTY(bool flagDatabaseTowns READ getFlagDatabaseTowns WRITE setFlagDatabaseTowns NOTIFY flagDatabaseTownsChanged)
 	//! The street lamps of the towns of the location database (Lamp)
 	Q_PROPERTY(int databaseTownLamp READ getDatabaseTownLamp WRITE setDatabaseTownLamp NOTIFY databaseTownLampChanged)
+	//! Where the light of the towns comes from (LightSource): their population, or the satellite map of the night
+	//! lights (VIIRS), when it is downloaded for the place (else the population)
+	Q_PROPERTY(int lightSource READ getLightSource WRITE setLightSource NOTIFY lightSourceChanged)
 	//! Write the names of the towns of the location database whose domes show at the horizon (like the gazetteer of
 	//! a landscape, in its colors)
 	Q_PROPERTY(bool flagTownLabels READ getFlagTownLabels WRITE setFlagTownLabels NOTIFY flagTownLabelsChanged)
@@ -82,6 +86,11 @@ public:
 		LampLED4000 = 4  //!< white LEDs, 4000 K
 	};
 	Q_ENUM(Lamp)
+	enum LightSource {
+		SourcePopulation = 0, //!< the population of the towns of the location database, 1000 lm per inhabitant
+		SourceSatellite = 1   //!< the light seen by the VIIRS satellite, calibrated to the same lumens per inhabitant
+	};
+	Q_ENUM(LightSource)
 	struct Source
 	{
 		double azimuth = 0.;     //!< degrees from north towards east
@@ -127,6 +136,15 @@ public:
 	bool getFlagDatabaseTowns() const {return flagDatabaseTowns;}
 	int getDatabaseTownLamp() const {return databaseTownLamp;}
 	bool getFlagTownLabels() const {return flagTownLabels;}
+	int getLightSource() const {return lightSource;}
+	//! The satellite map of the night lights
+	NightLightsMap* getNightLights() const {return nightLights;}
+	//! Whether the satellite map is there for the current place
+	bool hasSatelliteData() const;
+	//! Whether the domes now come from the satellite map
+	bool isSatelliteInUse() const;
+	//! The message of the last download of the satellite map (empty when it went well)
+	QString getSatelliteMessage() const {return satelliteMessage;}
 	//! The towns of the location database used now (empty when off), the largest contribution first
 	const std::vector<DatabaseTown>& getDatabaseTowns() const {return databaseTowns;}
 	//! How many places of the database were left out as parts of larger towns
@@ -141,6 +159,9 @@ public slots:
 	void setFlagDatabaseTowns(bool b);
 	void setDatabaseTownLamp(int lamp);
 	void setFlagTownLabels(bool b);
+	void setLightSource(int source);
+	//! Download the satellite map around the current place
+	void downloadSatelliteData();
 	//! Find the towns of the location database again and compute the domes anew
 	void recompute();
 
@@ -152,6 +173,9 @@ signals:
 	void flagDatabaseTownsChanged(bool b);
 	void databaseTownLampChanged(int lamp);
 	void flagTownLabelsChanged(bool b);
+	void lightSourceChanged(int source);
+	//! The satellite map changed (downloaded, or its download failed), or its download progressed
+	void satelliteDataChanged();
 	//! The towns of the location database changed (another location, or switched on or off)
 	void databaseTownsChanged();
 
@@ -170,8 +194,21 @@ private:
 	//! Find the towns of the location database around the current location
 	void updateDatabaseTowns();
 	static std::shared_ptr<Kernel> computeKernel(const AtmosphereKey& key);
-	//! names: of the sources, for the labels (empty: no label)
-	static std::shared_ptr<Result> computeMap(std::shared_ptr<Kernel> kernel, const std::vector<Source>& sources, const std::vector<QString>& names, double lumensPerInhabitant);
+	//! What the computation in the background needs
+	struct JobInput
+	{
+		std::vector<Source> sources;
+		std::vector<QString> names;   //!< of the sources, for the labels (empty: no label)
+		double lumensPerInhabitant = 1000.;
+		bool satellite = false;       //!< add the light of the satellite map
+		NightLightsMap::Snapshot snapshot;
+		double latitude = 0., longitude = 0.;
+		int satelliteLamp = LampMixed;
+		std::vector<DatabaseTown> towns;  //!< for the labels with the satellite map
+	};
+	static std::shared_ptr<Result> computeMap(std::shared_ptr<Kernel> kernel, const JobInput& in);
+	//! The light of the satellite map, into the map of the result (and the labels of the towns)
+	static void addSatelliteLight(const Kernel& kernel, const JobInput& in, Result& res);
 
 	bool flagEnabled = false;
 	std::vector<Source> sources;
@@ -179,6 +216,9 @@ private:
 	bool flagDatabaseTowns = false;
 	int databaseTownLamp = LampMixed;
 	bool flagTownLabels = false;
+	int lightSource = SourcePopulation;
+	NightLightsMap* nightLights = nullptr;
+	QString satelliteMessage;
 	std::vector<DatabaseTown> databaseTowns;
 	int databaseDistricts = 0;
 	//! The location the database towns were found for

@@ -60,10 +60,14 @@ private slots:
 	void applyLightDomeTable();
 	//! Show the towns found in the location database
 	void updateDatabaseTownWidgets();
+	//! Show the state of the satellite data
+	void updateSatelliteWidgets();
 
 private:
 	//! Fill a list with the kinds of street lamps (LightDomes::Lamp as data)
 	static void fillLampComboBox(QComboBox* box);
+	//! Fill the list of the sources of the light of the towns
+	void fillSourceComboBox();
 	Ui_PhotographicModeDialogForm *ui;
 	//! The tooltip of the noise list for a digital sensor (with a film the list sets the grain)
 	QString sensorNoiseToolTip;
