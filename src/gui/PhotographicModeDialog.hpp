@@ -52,6 +52,10 @@ private slots:
 	void updateStarWidgets();
 	//! Show the focal length of the lens for the current field of view
 	void updateFocalLength();
+	//! Show the towns of the light domes in the table, and the light at the zenith
+	void updateLightDomeWidgets();
+	//! The towns of the table to the light domes
+	void applyLightDomeTable();
 
 private:
 	Ui_PhotographicModeDialogForm *ui;

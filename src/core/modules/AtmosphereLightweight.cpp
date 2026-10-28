@@ -23,6 +23,8 @@
 #include "StelSRGB.hpp"
 #include "StelCore.hpp"
 #include "StelSkyDrawer.hpp"
+#include "LightDomes.hpp"
+#include "StelModuleMgr.hpp"
 #include "StelPainter.hpp"
 #include "StelFileMgr.hpp"
 #include "StelMainView.hpp"
@@ -370,7 +372,7 @@ void main()
 	color_xyY.z *= color_xyY.z;
 	vec3 color_RGB = xyYToRGB(color_xyY.x, color_xyY.y, color_xyY.z * colorScale);
 	// Photographic mode: the airglow (in the pass of the Sun only, see draw())
-	color_RGB += linearColorToFramebuffer(photoAirglowLight(viewDir.z));
+	color_RGB += linearColorToFramebuffer(photoAirglowLight(viewDir.z) + photoLightDomeLight(viewDir));
 	FRAG_COLOR = vec4(color_RGB, 1);
 }
 )";
@@ -794,6 +796,11 @@ void AtmosphereLightweight::draw(StelCore*const core)
 	renderShaderProgram_->setUniformValue(renderUniformLocations_.projectionMatrixInverse,
 	                                      prj->getProjectionMatrix().toQMatrix().inverted());
 
+	// Photographic mode: the light domes of towns (texture unit 3), once (in the pass of the Sun)
+	static LightDomes* lightDomes = GETSTELMODULE(LightDomes);
+	const bool domes = lightDomes && lightDomes->bindMap(3);
+	renderShaderProgram_->setUniformValue("photoLightDomeMap", 3);
+
 	GL(gl.glEnable(GL_BLEND));
 	GL(gl.glBlendFunc(GL_ONE, GL_ONE));
 	bindVAO(VAO_RENDER);
@@ -812,6 +819,7 @@ void AtmosphereLightweight::draw(StelCore*const core)
 		// Photographic mode: the airglow, once (in the pass of the Sun)
 		const Vec3f airglow = i == DRAW_PARAM_SUN ? core->getSkyDrawer()->getPhotoAirglow() : Vec3f(0.f);
 		renderShaderProgram_->setUniformValue("photoAirglow", airglow[0], airglow[1], airglow[2]);
+		renderShaderProgram_->setUniformValue("photoLightDomes", domes && i == DRAW_PARAM_SUN);
 
 		GL(gl.glDrawArrays(GL_TRIANGLE_STRIP, 0, 4));
 	}

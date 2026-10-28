@@ -31,6 +31,8 @@
 #include "StelTextureMgr.hpp"
 #include "StelCore.hpp"
 #include "StelSkyDrawer.hpp"
+#include "LightDomes.hpp"
+#include "StelModuleMgr.hpp"
 #include "StelPainter.hpp"
 #include "StelTranslator.hpp"
 #include "TextureAverageComputer.hpp"
@@ -256,6 +258,7 @@ vec3 xyYToRGB(float x, float y, float Y);
 vec3 photoFilmSkyRGB(highp vec4 XYZW);
 uniform bool photoFilmSky;
 vec3 photoAirglowLight(float sinElev);
+vec3 photoLightDomeLight(vec3 viewDir);
 vec3 linearColorToFramebuffer(vec3 c);
 
 void main()
@@ -271,7 +274,7 @@ void main()
 		vec4 winPos = projectionMatrixInverse * vec4(ndcXY, 0., 1.);
 		bool ok = false;
 		vec3 viewDir = normalize(unProject(winPos.x, winPos.y, ok).xyz);
-		srgb += linearColorToFramebuffer(photoAirglowLight(viewDir.z));
+		srgb += linearColorToFramebuffer(photoAirglowLight(viewDir.z) + photoLightDomeLight(viewDir));
 	}
 	color=vec4(srgb,1);
 }
@@ -759,8 +762,12 @@ void AtmosphereShowMySky::computeColor(StelCore* core, const double JD, const Pl
 
 		// Photographic mode with the airglow: the light pollution setting is the whole night sky, of which the
 		// airglow is the natural part (see StelSkyDrawer::getPhotoAirglowZenithLuminance())
+		// With the light domes of towns (LightDomes), what they give at the zenith is part of it too: the rest is
+		// spread evenly (local lights)
+		static LightDomes* lightDomes = GETSTELMODULE(LightDomes);
 		const float naturalLuminance = static_cast<float>(core->getSkyDrawer()->getPhotoAirglowZenithLuminance());
-		const float artificialLuminance = std::max(0.f, lightPollutionLuminance - naturalLuminance);
+		const float domeLuminance = lightDomes ? static_cast<float>(lightDomes->getZenithLuminance()) : 0.f;
+		const float artificialLuminance = std::max(0.f, lightPollutionLuminance - naturalLuminance - domeLuminance);
 		const auto lightPollutionRelativeBrightness = fader.getInterstate() * artificialLuminance / lightPollutionUnitLuminance_;
 		const auto airglowRelativeBrightness = 1.f;
 		const auto sunRelativeBrightness = noScatter ? 0.f : 1.f;
@@ -824,6 +831,11 @@ void AtmosphereShowMySky::draw(StelCore* core)
 		const Vec3f k = skyDrawer->getPhotoAirglowExtinction();
 		GL(luminanceToScreenProgram_->setUniformValue("photoAirglow", airglow[0], airglow[1], airglow[2]));
 		GL(luminanceToScreenProgram_->setUniformValue("photoAirglowExtinction", k[0], k[1], k[2]));
+		// The light domes of towns (texture unit 3)
+		static LightDomes* lightDomes = GETSTELMODULE(LightDomes);
+		const bool domes = lightDomes && lightDomes->bindMap(3);
+		GL(luminanceToScreenProgram_->setUniformValue("photoLightDomes", domes));
+		GL(luminanceToScreenProgram_->setUniformValue("photoLightDomeMap", 3));
 		skyDrawer->setPhotoFilmSkyUniforms(*luminanceToScreenProgram_);
 		const auto prj = core->getProjection(StelCore::FrameAltAz, StelCore::RefractionOff);
 		prj->setUnProjectUniforms(*luminanceToScreenProgram_);

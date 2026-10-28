@@ -25,6 +25,8 @@
 #include "StelSkyDrawer.hpp"
 #include "StelMovementMgr.hpp"
 #include "StelTranslator.hpp"
+#include "StelModuleMgr.hpp"
+#include "LightDomes.hpp"
 
 #include <QComboBox>
 #include <QSpinBox>
@@ -32,6 +34,8 @@
 #include <QSignalBlocker>
 #include <QSlider>
 #include <QPushButton>
+#include <QTableWidget>
+#include <QHeaderView>
 #include <cmath>
 
 namespace
@@ -91,6 +95,9 @@ void PhotographicModeDialog::retranslate()
 		fillComboBoxes();
 		updateCameraWidgets();
 		updateStarWidgets();
+		// the lamp lists are made again in the new language
+		ui->lightDomesTableWidget->setRowCount(0);
+		updateLightDomeWidgets();
 	}
 }
 
@@ -517,8 +524,133 @@ void PhotographicModeDialog::createDialogContent()
 
 	connect(ui->resetPushButton, &QPushButton::clicked, drawer, &StelSkyDrawer::resetPhotographicSettings);
 
+	// Light domes of towns
+	LightDomes* domes = GETSTELMODULE(LightDomes);
+	if (domes)
+	{
+		connectBoolProperty(ui->lightDomesCheckBox, "LightDomes.flagEnabled");
+		connectDoubleProperty(ui->lightDomesLumensDoubleSpinBox, "LightDomes.lumensPerInhabitant");
+		ui->lightDomesTableWidget->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+		ui->lightDomesTableWidget->verticalHeader()->setVisible(false);
+		connect(ui->lightDomesTableWidget, &QTableWidget::cellChanged, this, &PhotographicModeDialog::applyLightDomeTable);
+		connect(ui->lightDomesAddPushButton, &QPushButton::clicked, this, [this, domes]()
+		{
+			QString s = domes->getSources();
+			if (!s.isEmpty())
+				s += ';';
+			domes->setSources(s + "0,20,50000,0");
+		});
+		connect(ui->lightDomesRemovePushButton, &QPushButton::clicked, this, [this]()
+		{
+			QTableWidget* t = ui->lightDomesTableWidget;
+			QList<int> rows;
+			for (const auto* item : t->selectedItems())
+				if (!rows.contains(item->row()))
+					rows << item->row();
+			if (rows.isEmpty() && t->currentRow() >= 0)
+				rows << t->currentRow();
+			std::sort(rows.begin(), rows.end(), std::greater<int>());
+			{
+				const QSignalBlocker blocker(t);
+				for (const int r : rows)
+					t->removeRow(r);
+			}
+			applyLightDomeTable();
+		});
+		connect(domes, &LightDomes::sourcesChanged, this, &PhotographicModeDialog::updateLightDomeWidgets);
+		connect(domes, &LightDomes::mapChanged, this, &PhotographicModeDialog::updateLightDomeWidgets);
+		connect(domes, &LightDomes::flagEnabledChanged, this, &PhotographicModeDialog::updateLightDomeWidgets);
+		connect(drawer, &StelSkyDrawer::flagPhotographicModeChanged, this, &PhotographicModeDialog::updateLightDomeWidgets);
+	}
+	else
+		ui->lightDomesGroupBox->hide();
+
 	updateCameraWidgets();
 	updateStarWidgets();
+	updateLightDomeWidgets();
+}
+
+void PhotographicModeDialog::updateLightDomeWidgets()
+{
+	const LightDomes* domes = GETSTELMODULE(LightDomes);
+	if (!dialog || !domes)
+		return;
+	QTableWidget* t = ui->lightDomesTableWidget;
+	const QSignalBlocker blocker(t);
+	const QStringList towns = domes->getSources().split(';', Qt::SkipEmptyParts);
+	t->setRowCount(static_cast<int>(towns.size()));
+	for (int r=0; r<static_cast<int>(towns.size()); ++r)
+	{
+		const QStringList f = towns[r].split(',');
+		for (int c=0; c<3; ++c)
+		{
+			const double v = f.value(c).toDouble();
+			const QString text = c == 2 ? QString::number(qRound64(v)) : QLocale().toString(v, 'f', c == 0 ? 0 : 1);
+			QTableWidgetItem* item = t->item(r, c);
+			if (!item)
+				t->setItem(r, c, item = new QTableWidgetItem());
+			item->setText(text);
+			item->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
+		}
+		QComboBox* lamps = qobject_cast<QComboBox*>(t->cellWidget(r, 3));
+		if (!lamps)
+		{
+			lamps = new QComboBox();
+			lamps->addItem(q_("Mixed (sodium and LED)"), LightDomes::LampMixed);
+			lamps->addItem(q_("High pressure sodium"), LightDomes::LampHPS);
+			lamps->addItem(q_("Low pressure sodium"), LightDomes::LampLPS);
+			lamps->addItem(q_("LED 3000 K"), LightDomes::LampLED3000);
+			lamps->addItem(q_("LED 4000 K"), LightDomes::LampLED4000);
+			connect(lamps, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &PhotographicModeDialog::applyLightDomeTable);
+			t->setCellWidget(r, 3, lamps);
+		}
+		const QSignalBlocker lampBlocker(lamps);
+		lamps->setCurrentIndex(qMax(0, lamps->findData(f.value(3).toInt())));
+	}
+	// The light at the zenith (artificial)
+	const double L = domes->getZenithLuminance();
+	if (!domes->getFlagEnabled() || towns.isEmpty())
+		ui->lightDomesZenithLabel->setText(QStringLiteral("-"));
+	else if (!domes->isActive())
+		ui->lightDomesZenithLabel->setText(q_("Only in the photographic mode, with the atmosphere shown"));
+	else if (L > 0.)
+		ui->lightDomesZenithLabel->setText(q_("At the zenith: %1 mag/arcsec² (%2 mcd/m², artificial)")
+		                                   .arg(-2.5*std::log10(L/10.8e4), 0, 'f', 2).arg(QLocale().toString(L*1000., 'g', 3)));
+	else
+		ui->lightDomesZenithLabel->setText(QStringLiteral("-"));
+}
+
+void PhotographicModeDialog::applyLightDomeTable()
+{
+	LightDomes* domes = GETSTELMODULE(LightDomes);
+	if (!domes)
+		return;
+	QTableWidget* t = ui->lightDomesTableWidget;
+	QStringList towns;
+	for (int r=0; r<t->rowCount(); ++r)
+	{
+		double v[3] = {0., 20., 50000.};
+		for (int c=0; c<3; ++c)
+		{
+			const QTableWidgetItem* item = t->item(r, c);
+			if (!item)
+				continue;
+			bool ok = false;
+			const double x = QLocale().toDouble(item->text(), &ok);
+			if (ok)
+				v[c] = x;
+			else
+			{
+				const double y = item->text().toDouble(&ok);  // with a decimal point
+				if (ok)
+					v[c] = y;
+			}
+		}
+		const QComboBox* lamps = qobject_cast<QComboBox*>(t->cellWidget(r, 3));
+		const int lamp = lamps ? lamps->currentData().toInt() : 0;
+		towns << QString("%1,%2,%3,%4").arg(v[0], 0, 'f', 1).arg(v[1], 0, 'f', 2).arg(v[2], 0, 'f', 0).arg(lamp);
+	}
+	domes->setSources(towns.join(';'));
 }
 
 void PhotographicModeDialog::updateCameraWidgets()

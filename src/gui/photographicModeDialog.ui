@@ -889,6 +889,121 @@
         </widget>
        </item>
        <item>
+        <widget class="QGroupBox" name="lightDomesGroupBox">
+         <property name="title">
+          <string>Light pollution: the light domes of towns</string>
+         </property>
+         <layout class="QGridLayout" name="lightDomesGridLayout">
+          <item row="0" column="0" colspan="2">
+           <widget class="QCheckBox" name="lightDomesCheckBox">
+            <property name="toolTip">
+             <string>Towns light the sky over the horizon in their direction: the light of their street lamps, scattered by the air and the haze (model of Garstang 1986/1991, with the curvature of the Earth). The dome grows the closer the town is, and white LEDs give a larger, bluer dome than sodium lamps, since the air scatters blue light more. The haze follows the extinction coefficient of the atmosphere settings. Only in the photographic mode. The light pollution setting of the sky is then the whole sky at the zenith: what the domes do not give there is spread evenly (local lights).</string>
+            </property>
+            <property name="text">
+             <string>Light domes of towns</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="0" colspan="2">
+           <widget class="QTableWidget" name="lightDomesTableWidget">
+            <property name="toolTip">
+             <string>The towns: their direction (azimuth from north towards east), distance, number of inhabitants and kind of street lamps. Double-click a value to change it.</string>
+            </property>
+            <property name="minimumSize">
+             <size>
+              <width>0</width>
+              <height>120</height>
+             </size>
+            </property>
+            <property name="selectionBehavior">
+             <enum>QAbstractItemView::SelectRows</enum>
+            </property>
+            <column>
+             <property name="text">
+              <string>Azimuth (°)</string>
+             </property>
+            </column>
+            <column>
+             <property name="text">
+              <string>Distance (km)</string>
+             </property>
+            </column>
+            <column>
+             <property name="text">
+              <string>Inhabitants</string>
+             </property>
+            </column>
+            <column>
+             <property name="text">
+              <string>Street lamps</string>
+             </property>
+            </column>
+           </widget>
+          </item>
+          <item row="2" column="0" colspan="2">
+           <layout class="QHBoxLayout" name="lightDomesButtonLayout">
+            <item>
+             <widget class="QPushButton" name="lightDomesAddPushButton">
+              <property name="text">
+               <string>Add town</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QPushButton" name="lightDomesRemovePushButton">
+              <property name="text">
+               <string>Remove</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLabel" name="lightDomesLumensLabel">
+              <property name="text">
+               <string>Lumens per inhabitant:</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QDoubleSpinBox" name="lightDomesLumensDoubleSpinBox">
+              <property name="toolTip">
+               <string>The light of the street lamps per inhabitant. 1000 lumens reproduce Walker's law (the sky 45 degrees above the horizon towards a town brightens by 1% of the natural sky times the population, divided by the distance in km to the power 2.5). Towns with much lighting (or seen with old, unshielded lamps) more, towns with shielded lamps and lights switched off at night less.</string>
+              </property>
+              <property name="decimals">
+               <number>0</number>
+              </property>
+              <property name="minimum">
+               <double>50.000000000000000</double>
+              </property>
+              <property name="maximum">
+               <double>10000.000000000000000</double>
+              </property>
+              <property name="singleStep">
+               <double>50.000000000000000</double>
+              </property>
+              <property name="value">
+               <double>1000.000000000000000</double>
+              </property>
+              <property name="keyboardTracking">
+               <bool>false</bool>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+          <item row="3" column="0" colspan="2">
+           <widget class="QLabel" name="lightDomesZenithLabel">
+            <property name="toolTip">
+             <string>The light of the domes at the zenith (artificial only, without the natural sky)</string>
+            </property>
+            <property name="text">
+             <string notr="true">-</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
         <spacer name="rightColumnSpacer">
          <property name="orientation">
           <enum>Qt::Vertical</enum>

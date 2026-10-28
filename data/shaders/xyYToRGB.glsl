@@ -80,6 +80,22 @@ highp vec3 photoAirglowLight(highp float sinElev)
 	return photoAirglow * vanRhijn * exp(-0.921034 * photoAirglowExtinction * airmass) * brightnessScale;
 }
 
+// Photographic mode: the light domes of towns (see LightDomes): a map of the sky luminance (cd/m^2, linear sRGB) in
+// azimuth (from north towards east, 1 degree per texel) and altitude (rows at 90 degrees (row/(rows-1))^2), below
+// the horizon as above it
+uniform bool photoLightDomes;
+uniform sampler2D photoLightDomeMap;
+const highp float PHOTO_LIGHT_DOME_ROWS = 48.;
+highp vec3 photoLightDomeLight(highp vec3 viewDir)
+{
+	if (!photoMode || !photoLightDomes)
+		return vec3(0.);
+	highp float alt = asin(clamp(abs(viewDir.z), 0., 1.));
+	highp float az = atan(viewDir.y, -viewDir.x);  // the alt-azimuthal frame: north is -x, east +y
+	highp vec2 tc = vec2(az / 6.28318531, (sqrt(alt / 1.57079633) * (PHOTO_LIGHT_DOME_ROWS - 1.) + 0.5) / PHOTO_LIGHT_DOME_ROWS);
+	return texture2D(photoLightDomeMap, tc).rgb * photoScale * brightnessScale;
+}
+
 float applyTMAndGamma(highp float Y)
 {
 	if (flagUseTmGamma)

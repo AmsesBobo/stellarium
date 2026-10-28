@@ -34,6 +34,7 @@
 #include "HipsMgr.hpp"
 #include "NebulaMgr.hpp"
 #include "LandscapeMgr.hpp"
+#include "LightDomes.hpp"
 #include "CustomObjectMgr.hpp"
 #include "HighlightMgr.hpp"
 #include "GridLinesMgr.hpp"
@@ -649,6 +650,10 @@ void StelApp::init(QSettings* conf)
 	LandscapeMgr* landscape = new LandscapeMgr();
 	landscape->init();
 	getModuleMgr().registerModule(landscape);
+	// Photographic mode: the light domes of towns over the sky
+	LightDomes* lightDomes = new LightDomes();
+	lightDomes->init();
+	getModuleMgr().registerModule(lightDomes);
 	// Only now we can switch to auto-landscape. (GH:#3550)
 	if (landscape->getFlagLandscapeAutoSelection() && (confSettings->value("init_location/location", "auto").toString() == "auto"))
 	{

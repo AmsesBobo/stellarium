@@ -21,6 +21,7 @@
  */
 
 #include "LandscapeMgr.hpp"
+#include "LightDomes.hpp"
 #include "Landscape.hpp"
 #include "AtmospherePreetham.hpp"
 #include "AtmosphereLightweight.hpp"
@@ -709,6 +710,13 @@ void LandscapeMgr::update(double deltaTime)
 			// blue sky light by day (blue shadows), neutral at night
 			const Vec3d skyTint = sunPos[2] > -0.1 ? Vec3d(0.86, 1.0, 1.26) : Vec3d(1.);
 			light += skyTint * skyLight;
+		}
+		// the light domes of towns (LightDomes): their glow lights the ground from the side of the towns
+		static LightDomes* lightDomes = GETSTELMODULE(LightDomes);
+		if (lightDomes)
+		{
+			const Vec3f E = lightDomes->getIlluminance();
+			light += Vec3d(static_cast<double>(E[0]), static_cast<double>(E[1]), static_cast<double>(E[2]));
 		}
 		// The values for the shaders: they take sRGB-encoded brightness (colorToShader() decodes it)
 		auto encode = [](double x) {
