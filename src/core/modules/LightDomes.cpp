@@ -22,9 +22,13 @@
 #include "StelCore.hpp"
 #include "StelSkyDrawer.hpp"
 #include "StelLocation.hpp"
+#include "StelLocationMgr.hpp"
 #include "StelModuleMgr.hpp"
 #include "LandscapeMgr.hpp"
 #include "StelFileMgr.hpp"
+#include "StelPainter.hpp"
+#include "StelProjector.hpp"
+#include "StelUtils.hpp"
 
 #include <QSettings>
 #include <QDir>
@@ -34,9 +38,12 @@
 #include <QtConcurrent>
 #include <QOpenGLContext>
 #include <QOpenGLFunctions>
+#include <QGuiApplication>
+#include <QFontMetrics>
 #include <cmath>
 #include <array>
 #include <numeric>
+#include <algorithm>
 
 #ifndef GL_RGB32F
 #define GL_RGB32F 0x8815
@@ -187,6 +194,13 @@ struct LightDomes::Result
 	std::vector<float> map;   // [row][azimuth][rgb], cd/m^2
 	double zenith = 0.;       // luminance at the zenith
 	Vec3f illuminance = Vec3f(0.f);
+	struct Label
+	{
+		QString text;
+		double azimuth;           // degrees
+		double glow;              // luminance of the dome 5 degrees above the horizon (cd/m^2)
+	};
+	std::vector<Label> labels;  // the brightest domes first
 };
 
 LightDomes::LightDomes()
@@ -209,6 +223,9 @@ void LightDomes::init()
 	flagEnabled = conf->value("viewing/flag_photographic_light_domes", false).toBool();
 	lumensPerInhabitant = qBound(10., conf->value("viewing/photographic_light_dome_lumens", 1000.).toDouble(), 100000.);
 	setSources(conf->value("viewing/photographic_light_domes", "").toString());
+	flagDatabaseTowns = conf->value("viewing/flag_photographic_light_domes_database", false).toBool();
+	databaseTownLamp = qBound(0, conf->value("viewing/photographic_light_dome_database_lamp", 0).toInt(), static_cast<int>(LampLED4000));
+	flagTownLabels = conf->value("viewing/flag_photographic_light_dome_labels", false).toBool();
 	dirty = true;
 }
 
@@ -260,6 +277,150 @@ void LightDomes::setLumensPerInhabitant(double lm)
 	StelApp::immediateSave("viewing/photographic_light_dome_lumens", lm);
 	dirty = true;
 	emit lumensPerInhabitantChanged(lm);
+}
+
+void LightDomes::setFlagDatabaseTowns(bool b)
+{
+	if (b == flagDatabaseTowns)
+		return;
+	flagDatabaseTowns = b;
+	StelApp::immediateSave("viewing/flag_photographic_light_domes_database", b);
+	databasePlanet.clear();  // found again (or cleared) in update()
+	if (!b)
+	{
+		databaseTowns.clear();
+		databaseDistricts = 0;
+		emit databaseTownsChanged();
+	}
+	dirty = true;
+	emit flagDatabaseTownsChanged(b);
+}
+
+void LightDomes::setDatabaseTownLamp(int lamp)
+{
+	lamp = qBound(0, lamp, static_cast<int>(LampLED4000));
+	if (lamp == databaseTownLamp)
+		return;
+	databaseTownLamp = lamp;
+	StelApp::immediateSave("viewing/photographic_light_dome_database_lamp", lamp);
+	dirty = true;
+	emit databaseTownLampChanged(lamp);
+}
+
+void LightDomes::setFlagTownLabels(bool b)
+{
+	if (b == flagTownLabels)
+		return;
+	flagTownLabels = b;
+	StelApp::immediateSave("viewing/flag_photographic_light_dome_labels", b);
+	emit flagTownLabelsChanged(b);
+}
+
+void LightDomes::recompute()
+{
+	if (flagDatabaseTowns && flagEnabled)
+		updateDatabaseTowns();
+	else
+		databasePlanet.clear();
+	dirty = true;
+}
+
+double LightDomes::maxDistance()
+{
+	return KERNEL_MAX_DISTANCE;
+}
+
+namespace
+{
+// The radius of the disk of a town (km): about 0.5 km sqrt(P/1000), 5 km for 100000 inhabitants
+inline double townRadius(double population)
+{
+	return qMax(0.2, 0.5*std::sqrt(population/1000.));
+}
+}
+
+void LightDomes::updateDatabaseTowns()
+{
+	const StelLocation& here = StelApp::getInstance().getCore()->getCurrentLocation();
+	databasePlanet = here.planetName;
+	databaseLatitude = static_cast<double>(here.getLatitude());
+	databaseLongitude = static_cast<double>(here.getLongitude());
+	databaseTowns.clear();
+	databaseDistricts = 0;
+	if (here.planetName != QStringLiteral("Earth"))
+	{
+		emit databaseTownsChanged();
+		dirty = true;
+		return;
+	}
+	const auto unitVector = [](double latDeg, double lonDeg) {
+		const double la = latDeg*M_PI/180., lo = lonDeg*M_PI/180.;
+		return Vec3d(std::cos(la)*std::cos(lo), std::cos(la)*std::sin(lo), std::sin(la));
+	};
+	const Vec3d O = unitVector(databaseLatitude, databaseLongitude);
+	const Vec3d north(-std::sin(databaseLatitude*M_PI/180.)*std::cos(databaseLongitude*M_PI/180.),
+	                  -std::sin(databaseLatitude*M_PI/180.)*std::sin(databaseLongitude*M_PI/180.),
+	                   std::cos(databaseLatitude*M_PI/180.));
+	const Vec3d east(-std::sin(databaseLongitude*M_PI/180.), std::cos(databaseLongitude*M_PI/180.), 0.);
+	// The towns of the base list (not the own locations of the user: they may be copies of them) on the Earth,
+	// with inhabitants (not observatories, landing sites and the like), within the reach of the table
+	struct Candidate { QString name; Vec3d p; double distance, population; };
+	std::vector<Candidate> candidates;
+	const double cosMax = std::cos(KERNEL_MAX_DISTANCE/EARTH_RADIUS_KM);
+	const LocationMap all = StelApp::getInstance().getLocationMgr().getAllMap();
+	for (auto it = all.cbegin(); it != all.cend(); ++it)
+	{
+		const StelLocation& loc = it.value();
+		if (loc.isUserLocation || loc.population <= 0 || loc.planetName != QStringLiteral("Earth"))
+			continue;
+		const QChar role = loc.role.toUpper();
+		if (role == 'O' || role == 'L' || role == 'A' || role == 'I' || role == 'H')
+			continue;
+		const Vec3d p = unitVector(static_cast<double>(loc.getLatitude(true)), static_cast<double>(loc.getLongitude(true)));
+		const double c = p*O;
+		if (c < cosMax)
+			continue;
+		candidates.push_back({loc.name, p, std::acos(qMin(1., c))*EARTH_RADIUS_KM, static_cast<double>(loc.population)});
+	}
+	// The largest first: a place inside the disk of a larger town is a district of it (or the same place twice)
+	std::sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) {
+		return a.population > b.population || (a.population == b.population && a.name < b.name);
+	});
+	std::vector<const Candidate*> kept;
+	std::vector<double> keptCosRadius;
+	for (const auto& c : candidates)
+	{
+		bool district = false;
+		for (size_t i=0; i<kept.size() && !district; ++i)
+		{
+			if (c.p*kept[i]->p > keptCosRadius[i])  // closer than the radius of the larger town
+			{
+				district = true;
+				++databaseTowns[i].districts;
+			}
+		}
+		if (district)
+		{
+			++databaseDistricts;
+			continue;
+		}
+		kept.push_back(&c);
+		keptCosRadius.push_back(std::cos(townRadius(c.population)/EARTH_RADIUS_KM));
+		DatabaseTown t;
+		t.name = c.name;
+		t.distance = c.distance;
+		t.population = c.population;
+		const Vec3d toward = c.p - O*(c.p*O);  // in the plane of the horizon
+		t.azimuth = toward.normSquared() > 0. ? std::fmod(std::atan2(toward*east, toward*north)*180./M_PI + 360., 360.) : 0.;
+		databaseTowns.push_back(t);
+	}
+	// for the list: the largest contribution first (Walker's law: the population over the distance^2.5)
+	std::stable_sort(databaseTowns.begin(), databaseTowns.end(), [](const DatabaseTown& a, const DatabaseTown& b) {
+		const auto w = [](const DatabaseTown& t) {return t.population*std::pow(qMax(t.distance, townRadius(t.population)), -2.5);};
+		return w(a) > w(b);
+	});
+	dirty = true;
+	emit databaseTownsChanged();
 }
 
 Vec3f LightDomes::lampColor(int lamp)
@@ -347,18 +508,29 @@ std::shared_ptr<LightDomes::Kernel> LightDomes::computeKernel(const AtmosphereKe
 	return kern;
 }
 
-std::shared_ptr<LightDomes::Result> LightDomes::computeMap(std::shared_ptr<Kernel> kern, const std::vector<Source>& sources, double lumensPerInhabitant)
+std::shared_ptr<LightDomes::Result> LightDomes::computeMap(std::shared_ptr<Kernel> kern, const std::vector<Source>& sources, const std::vector<QString>& names, double lumensPerInhabitant)
 {
 	auto res = std::make_shared<Result>();
 	res->map.assign(static_cast<size_t>(MAP_ALTITUDES)*MAP_AZIMUTHS*3, 0.f);
-	for (const auto& s : sources)
+	// the row 5 degrees above the horizon, for the labels
+	const int labelRow = qRound((MAP_ALTITUDES - 1)*std::sqrt(5./90.));
+	for (size_t i=0; i<sources.size(); ++i)
 	{
+		const Source& s = sources[i];
 		const double flux = s.population*lumensPerInhabitant;
 		if (!(flux > 0.))
 			continue;
 		const Vec3f color = lampColor(s.lamp);
+		// A label for a town of the database that is not around the observer
+		if (i < names.size() && !names[i].isEmpty() && s.distance > townRadius(s.population))
+		{
+			const double glow = flux*static_cast<double>(0.2126f*color[0]*kern->at(0, s.distance, labelRow, 0.)
+			                                       + 0.7152f*color[1]*kern->at(1, s.distance, labelRow, 0.)
+			                                       + 0.0722f*color[2]*kern->at(2, s.distance, labelRow, 0.));
+			res->labels.push_back({QString("%1 (%2 km)").arg(names[i]).arg(qRound(s.distance)), s.azimuth, glow});
+		}
 		// A town is not a point: a disk of about 0.5 km sqrt(P/1000) (5 km for 100000 inhabitants), as seven points
-		const double radius = qMax(0.2, 0.5*std::sqrt(s.population/1000.));
+		const double radius = townRadius(s.population);
 		const double az = s.azimuth*M_PI/180.;
 		const double cx = s.distance*std::sin(az), cy = s.distance*std::cos(az);  // east, north (km)
 		for (int p=0; p<7; ++p)
@@ -417,6 +589,7 @@ std::shared_ptr<LightDomes::Result> LightDomes::computeMap(std::shared_ptr<Kerne
 		}
 	}
 	res->zenith = zenith;
+	std::stable_sort(res->labels.begin(), res->labels.end(), [](const Result::Label& a, const Result::Label& b) {return a.glow > b.glow;});
 	res->illuminance.set(static_cast<float>(E[0]), static_cast<float>(E[1]), static_cast<float>(E[2]));
 	return res;
 }
@@ -425,13 +598,27 @@ void LightDomes::startComputation()
 {
 	const AtmosphereKey key = currentAtmosphere();
 	const std::shared_ptr<Kernel> known = (kernel && kernel->key == key) ? kernel : nullptr;
-	const std::vector<Source> src = sources;
+	std::vector<Source> src = sources;
+	std::vector<QString> names(src.size());
+	if (flagDatabaseTowns)
+	{
+		for (const auto& t : databaseTowns)
+		{
+			names.push_back(t.name);
+			Source s;
+			s.azimuth = t.azimuth;
+			s.distance = qMax(0.1, t.distance);
+			s.population = t.population;
+			s.lamp = databaseTownLamp;
+			src.push_back(s);
+		}
+	}
 	const double lm = lumensPerInhabitant;
 	jobAtmosphere = key;
-	job = QtConcurrent::run([known, key, src, lm]()
+	job = QtConcurrent::run([known, key, src, names, lm]()
 	{
 		const std::shared_ptr<Kernel> k = known ? known : computeKernel(key);
-		return std::make_pair(k, computeMap(k, src, lm));
+		return std::make_pair(k, computeMap(k, src, names, lm));
 	});
 	jobRunning = true;
 	dirty = false;
@@ -449,11 +636,96 @@ void LightDomes::update(double deltaTime)
 		textureStale = true;
 		emit mapChanged();
 	}
-	if (!flagEnabled || jobRunning)
+	if (!flagEnabled)
+		return;
+	// the towns of the location database: found again when the observer moved (by more than about 100 m)
+	if (flagDatabaseTowns)
+	{
+		const StelLocation& here = StelApp::getInstance().getCore()->getCurrentLocation();
+		if (here.planetName != databasePlanet
+		    || std::fabs(static_cast<double>(here.getLatitude()) - databaseLatitude) > 1e-3
+		    || std::fabs(static_cast<double>(here.getLongitude()) - databaseLongitude) > 1e-3)
+			updateDatabaseTowns();
+	}
+	if (jobRunning)
 		return;
 	// compute again when the towns, the lumens or the atmosphere (extinction, altitude) changed
 	if (dirty || !kernel || !(currentAtmosphere() == kernel->key))
 		startComputation();
+}
+
+double LightDomes::getCallOrder(StelModuleActionName actionName) const
+{
+	// the labels over the landscape, like its gazetteer
+	if (actionName == StelModule::ActionDraw)
+		return StelApp::getInstance().getModuleMgr().getModule("LandscapeMgr")->getCallOrder(actionName) + 1.;
+	return 0.;
+}
+
+void LightDomes::draw(StelCore* core)
+{
+	if (!flagTownLabels || !flagDatabaseTowns || !isActive() || result->labels.empty())
+		return;
+	// The domes that show: 5 degrees above the horizon at least 2 % of a dark natural sky there (about 4e-4
+	// cd/m^2), the 25 brightest
+	constexpr double MIN_GLOW = 8e-6;
+	constexpr size_t MAX_LABELS = 25;
+	static LandscapeMgr* lmgr = GETSTELMODULE(LandscapeMgr);
+	const StelProjectorP prj = core->getProjection(StelCore::FrameAltAz, StelCore::RefractionOff);
+	StelPainter painter(prj);
+	const float ppx = static_cast<float>(core->getCurrentStelProjectorParams().devicePixelsPerPixel);
+	const int fontSize = lmgr ? lmgr->getLabelFontSize() : 12;
+	const int angle = lmgr ? lmgr->getLabelAngle() : 45;
+	QFont font = QGuiApplication::font();
+	font.setPixelSize(fontSize);
+	painter.setFont(font);
+	const QFontMetrics fm(font);
+	painter.setColor(lmgr ? lmgr->getLabelColor() : Vec3f(0.f, 1.f, 0.f), 1.f);
+	painter.setBlending(true);
+	painter.setLineSmooth(true);
+	// The brightest first; a fainter one that would overlap a name already written is left out (the tilted
+	// names are parallel: they need about one line height between them)
+	const bool tilted = angle > 0 && !prj->getFlagGravityLabels();
+	const double lineHeight = 1.3*fontSize*static_cast<double>(ppx);
+	std::vector<std::pair<double, double>> placed;  // screen x of the foot, width of the name
+	size_t shown = 0;
+	for (size_t i=0; i<result->labels.size() && shown<MAX_LABELS; ++i)
+	{
+		const Result::Label& label = result->labels[i];
+		if (label.glow < MIN_GLOW)
+			break;
+		// as in the gazetteer of a landscape: a line from the horizon up to the name
+		Vec3d foot, top, win;
+		const double az = (180. - label.azimuth)*M_PI/180.;
+		StelUtils::spheToRect(az, 0., foot);
+		StelUtils::spheToRect(az, 1.5*M_PI/180., top);
+		if (!prj->project(foot, win))
+			continue;
+		const int textWidth = qRound(ppx*fm.boundingRect(label.text).width());
+		bool overlaps = false;
+		for (const auto& p : placed)
+		{
+			const double need = tilted ? lineHeight/std::sin(angle*M_PI/180.) : 0.5*(p.second + textWidth) + 4.*ppx;
+			if (std::fabs(win[0] - p.first) < need)
+			{
+				overlaps = true;
+				break;
+			}
+		}
+		if (overlaps)
+			continue;
+		placed.emplace_back(win[0], textWidth);
+		++shown;
+		if (prj->getFlagGravityLabels())
+			painter.drawText(top, label.text, 0, 0, 0, false);
+		else if (angle > 0)
+			painter.drawText(top, label.text, angle, 0.5f*fontSize*std::sin(angle*M_PI_180f), -0.5f*fontSize*std::sin(angle*M_PI_180f), true);
+		else
+			painter.drawText(top, label.text, 0, -textWidth/2, 2, true);
+		painter.drawGreatCircleArc(foot, top, nullptr);
+	}
+	painter.setLineSmooth(false);
+	painter.setBlending(false);
 }
 
 bool LightDomes::isActive() const

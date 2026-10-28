@@ -24,6 +24,8 @@
 
 #include <QVector>
 
+class QComboBox;
+
 class Ui_PhotographicModeDialogForm;
 class QComboBox;
 
@@ -56,8 +58,12 @@ private slots:
 	void updateLightDomeWidgets();
 	//! The towns of the table to the light domes
 	void applyLightDomeTable();
+	//! Show the towns found in the location database
+	void updateDatabaseTownWidgets();
 
 private:
+	//! Fill a list with the kinds of street lamps (LightDomes::Lamp as data)
+	static void fillLampComboBox(QComboBox* box);
 	Ui_PhotographicModeDialogForm *ui;
 	//! The tooltip of the noise list for a digital sensor (with a film the list sets the grain)
 	QString sensorNoiseToolTip;

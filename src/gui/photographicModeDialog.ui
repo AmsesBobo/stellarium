@@ -905,6 +905,140 @@
            </widget>
           </item>
           <item row="1" column="0" colspan="2">
+           <layout class="QHBoxLayout" name="lightDomesDatabaseLayout">
+            <item>
+             <widget class="QCheckBox" name="lightDomesDatabaseCheckBox">
+              <property name="toolTip">
+               <string>Take the towns within 400 km from the location database of Stellarium, with their population (places of about 15000 inhabitants and more; the smaller ones are part of the even light pollution). The database lists the districts of large cities as places of their own, while the city has the population of the whole: places inside the area of a larger town are counted in it. Found again when the location changes. The towns of the table below are added to them.</string>
+              </property>
+              <property name="text">
+               <string>Towns from the location database</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <spacer name="lightDomesDatabaseSpacer">
+              <property name="orientation">
+               <enum>Qt::Horizontal</enum>
+              </property>
+              <property name="sizeHint" stdset="0">
+               <size>
+                <width>10</width>
+                <height>10</height>
+               </size>
+              </property>
+             </spacer>
+            </item>
+            <item>
+             <widget class="QLabel" name="lightDomesDatabaseLampLabel">
+              <property name="text">
+               <string>Street lamps:</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QComboBox" name="lightDomesDatabaseLampComboBox">
+              <property name="toolTip">
+               <string>The kind of street lamps of the towns from the location database</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+          <item row="2" column="0" colspan="2">
+           <widget class="QTableWidget" name="lightDomesDatabaseTableWidget">
+            <property name="toolTip">
+             <string>The towns from the location database, the brightest domes first (population divided by the distance to the power 2.5). A town missing here (or a bright industrial area) can be added in your own towns below.</string>
+            </property>
+            <property name="minimumSize">
+             <size>
+              <width>0</width>
+              <height>120</height>
+             </size>
+            </property>
+            <property name="editTriggers">
+             <set>QAbstractItemView::NoEditTriggers</set>
+            </property>
+            <property name="selectionBehavior">
+             <enum>QAbstractItemView::SelectRows</enum>
+            </property>
+            <column>
+             <property name="text">
+              <string>Town</string>
+             </property>
+            </column>
+            <column>
+             <property name="text">
+              <string>Azimuth (°)</string>
+             </property>
+            </column>
+            <column>
+             <property name="text">
+              <string>Distance (km)</string>
+             </property>
+            </column>
+            <column>
+             <property name="text">
+              <string>Inhabitants</string>
+             </property>
+            </column>
+           </widget>
+          </item>
+          <item row="3" column="0" colspan="2">
+           <widget class="QLabel" name="lightDomesDatabaseInfoLabel">
+            <property name="text">
+             <string notr="true">-</string>
+            </property>
+            <property name="wordWrap">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item row="4" column="0" colspan="2">
+           <layout class="QHBoxLayout" name="lightDomesDatabaseButtonLayout">
+            <item>
+             <widget class="QCheckBox" name="lightDomesLabelsCheckBox">
+              <property name="toolTip">
+               <string>Write the names of the towns whose domes show (5 degrees above the horizon at least 2% of a dark natural sky) at the horizon, like the gazetteer of a landscape and in its colors (font size and angle of the landscape labels). The brightest domes first: a name that would overlap a brighter one is left out.</string>
+              </property>
+              <property name="text">
+               <string>Names of the towns at the horizon</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <spacer name="lightDomesDatabaseButtonSpacer">
+              <property name="orientation">
+               <enum>Qt::Horizontal</enum>
+              </property>
+              <property name="sizeHint" stdset="0">
+               <size>
+                <width>10</width>
+                <height>10</height>
+               </size>
+              </property>
+             </spacer>
+            </item>
+            <item>
+             <widget class="QPushButton" name="lightDomesRecomputePushButton">
+              <property name="toolTip">
+               <string>Find the towns around the current location again and compute the domes anew</string>
+              </property>
+              <property name="text">
+               <string>Recompute</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+          <item row="5" column="0" colspan="2">
+           <widget class="QLabel" name="lightDomesOwnLabel">
+            <property name="text">
+             <string>Your own towns:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="6" column="0" colspan="2">
            <widget class="QTableWidget" name="lightDomesTableWidget">
             <property name="toolTip">
              <string>The towns: their direction (azimuth from north towards east), distance, number of inhabitants and kind of street lamps. Double-click a value to change it.</string>
@@ -940,7 +1074,7 @@
             </column>
            </widget>
           </item>
-          <item row="2" column="0" colspan="2">
+          <item row="7" column="0" colspan="2">
            <layout class="QHBoxLayout" name="lightDomesButtonLayout">
             <item>
              <widget class="QPushButton" name="lightDomesAddPushButton">
@@ -990,7 +1124,7 @@
             </item>
            </layout>
           </item>
-          <item row="3" column="0" colspan="2">
+          <item row="8" column="0" colspan="2">
            <widget class="QLabel" name="lightDomesZenithLabel">
             <property name="toolTip">
              <string>The light of the domes at the zenith (artificial only, without the natural sky)</string>

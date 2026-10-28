@@ -561,6 +561,23 @@ void PhotographicModeDialog::createDialogContent()
 		connect(domes, &LightDomes::mapChanged, this, &PhotographicModeDialog::updateLightDomeWidgets);
 		connect(domes, &LightDomes::flagEnabledChanged, this, &PhotographicModeDialog::updateLightDomeWidgets);
 		connect(drawer, &StelSkyDrawer::flagPhotographicModeChanged, this, &PhotographicModeDialog::updateLightDomeWidgets);
+
+		// the towns of the location database
+		connectBoolProperty(ui->lightDomesDatabaseCheckBox, "LightDomes.flagDatabaseTowns");
+		connectBoolProperty(ui->lightDomesLabelsCheckBox, "LightDomes.flagTownLabels");
+		connect(ui->lightDomesRecomputePushButton, &QPushButton::clicked, domes, &LightDomes::recompute);
+		fillLampComboBox(ui->lightDomesDatabaseLampComboBox);
+		ui->lightDomesDatabaseTableWidget->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+		ui->lightDomesDatabaseTableWidget->verticalHeader()->setVisible(false);
+		connect(ui->lightDomesDatabaseLampComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this, domes]()
+		{
+			domes->setDatabaseTownLamp(ui->lightDomesDatabaseLampComboBox->currentData().toInt());
+		});
+		connect(domes, &LightDomes::databaseTownLampChanged, this, &PhotographicModeDialog::updateDatabaseTownWidgets);
+		connect(domes, &LightDomes::databaseTownsChanged, this, &PhotographicModeDialog::updateDatabaseTownWidgets);
+		connect(domes, &LightDomes::flagDatabaseTownsChanged, this, &PhotographicModeDialog::updateDatabaseTownWidgets);
+		connect(domes, &LightDomes::flagDatabaseTownsChanged, this, &PhotographicModeDialog::updateLightDomeWidgets);
+		connect(domes, &LightDomes::flagEnabledChanged, this, &PhotographicModeDialog::updateDatabaseTownWidgets);
 	}
 	else
 		ui->lightDomesGroupBox->hide();
@@ -568,6 +585,73 @@ void PhotographicModeDialog::createDialogContent()
 	updateCameraWidgets();
 	updateStarWidgets();
 	updateLightDomeWidgets();
+	updateDatabaseTownWidgets();
+}
+
+void PhotographicModeDialog::fillLampComboBox(QComboBox* box)
+{
+	const int current = box->count() > 0 ? box->currentData().toInt() : -1;
+	box->clear();
+	box->addItem(q_("Mixed (sodium and LED)"), LightDomes::LampMixed);
+	box->addItem(q_("High pressure sodium"), LightDomes::LampHPS);
+	box->addItem(q_("Low pressure sodium"), LightDomes::LampLPS);
+	box->addItem(q_("LED 3000 K"), LightDomes::LampLED3000);
+	box->addItem(q_("LED 4000 K"), LightDomes::LampLED4000);
+	if (current >= 0)
+		box->setCurrentIndex(qMax(0, box->findData(current)));
+}
+
+void PhotographicModeDialog::updateDatabaseTownWidgets()
+{
+	const LightDomes* domes = GETSTELMODULE(LightDomes);
+	if (!dialog || !domes)
+		return;
+	{
+		const QSignalBlocker blocker(ui->lightDomesDatabaseLampComboBox);
+		ui->lightDomesDatabaseLampComboBox->setCurrentIndex(qMax(0, ui->lightDomesDatabaseLampComboBox->findData(domes->getDatabaseTownLamp())));
+	}
+	const bool on = domes->getFlagDatabaseTowns();
+	ui->lightDomesDatabaseLampComboBox->setEnabled(on);
+	ui->lightDomesDatabaseTableWidget->setEnabled(on);
+	ui->lightDomesLabelsCheckBox->setEnabled(on);
+	ui->lightDomesRecomputePushButton->setEnabled(on && domes->getFlagEnabled());
+	const auto& towns = domes->getDatabaseTowns();
+	QTableWidget* t = ui->lightDomesDatabaseTableWidget;
+	t->setRowCount(static_cast<int>(towns.size()));
+	for (int r=0; r<static_cast<int>(towns.size()); ++r)
+	{
+		const LightDomes::DatabaseTown& town = towns[static_cast<size_t>(r)];
+		const QString texts[4] = {
+			town.name,
+			QLocale().toString(town.azimuth, 'f', 0),
+			QLocale().toString(town.distance, 'f', 1),
+			QLocale().toString(qRound64(town.population))
+		};
+		for (int c=0; c<4; ++c)
+		{
+			QTableWidgetItem* item = t->item(r, c);
+			if (!item)
+				t->setItem(r, c, item = new QTableWidgetItem());
+			item->setText(texts[c]);
+			item->setTextAlignment(c == 0 ? (Qt::AlignLeft | Qt::AlignVCenter) : (Qt::AlignRight | Qt::AlignVCenter));
+			item->setToolTip(c == 0 && town.districts > 0
+			                 ? q_("%1 smaller places of the database inside it are counted in its population").arg(town.districts)
+			                 : QString());
+		}
+	}
+	if (!on)
+		ui->lightDomesDatabaseInfoLabel->setText(QStringLiteral("-"));
+	else if (!domes->getFlagEnabled())
+		ui->lightDomesDatabaseInfoLabel->setText(q_("Switch on the light domes to find the towns"));
+	else
+	{
+		double people = 0.;
+		for (const auto& town : towns)
+			people += town.population;
+		ui->lightDomesDatabaseInfoLabel->setText(q_("%1 towns within %2 km, %3 inhabitants (%4 districts counted in larger towns)")
+		                                         .arg(towns.size()).arg(qRound(LightDomes::maxDistance()))
+		                                         .arg(QLocale().toString(qRound64(people))).arg(domes->getDatabaseDistricts()));
+	}
 }
 
 void PhotographicModeDialog::updateLightDomeWidgets()
@@ -596,11 +680,7 @@ void PhotographicModeDialog::updateLightDomeWidgets()
 		if (!lamps)
 		{
 			lamps = new QComboBox();
-			lamps->addItem(q_("Mixed (sodium and LED)"), LightDomes::LampMixed);
-			lamps->addItem(q_("High pressure sodium"), LightDomes::LampHPS);
-			lamps->addItem(q_("Low pressure sodium"), LightDomes::LampLPS);
-			lamps->addItem(q_("LED 3000 K"), LightDomes::LampLED3000);
-			lamps->addItem(q_("LED 4000 K"), LightDomes::LampLED4000);
+			fillLampComboBox(lamps);
 			connect(lamps, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &PhotographicModeDialog::applyLightDomeTable);
 			t->setCellWidget(r, 3, lamps);
 		}
@@ -609,7 +689,7 @@ void PhotographicModeDialog::updateLightDomeWidgets()
 	}
 	// The light at the zenith (artificial)
 	const double L = domes->getZenithLuminance();
-	if (!domes->getFlagEnabled() || towns.isEmpty())
+	if (!domes->getFlagEnabled() || (towns.isEmpty() && domes->getDatabaseTowns().empty()))
 		ui->lightDomesZenithLabel->setText(QStringLiteral("-"));
 	else if (!domes->isActive())
 		ui->lightDomesZenithLabel->setText(q_("Only in the photographic mode, with the atmosphere shown"));
