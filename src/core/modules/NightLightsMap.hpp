@@ -25,6 +25,7 @@
 #include <QByteArray>
 #include <QList>
 #include <QPoint>
+#include <QImage>
 #include <memory>
 #include <vector>
 
@@ -84,6 +85,11 @@ public:
 	bool isDownloading() const {return !pending.isEmpty() || headerReply;}
 	//! Whether a whole copy of the map is used
 	bool hasFullFile() const {return !fullFile.isEmpty() && index;}
+	//! Whether the reduced image of the whole world (5400 pixels wide, 0.36 MB) is there
+	bool hasOverview() const;
+	//! The world map of the location dialog (equirectangular, 90 N to 90 S) at night: darkened, with the lights of
+	//! the reduced image (a null image when it is not there)
+	QImage composeNightMap(const QImage& dayMap) const;
 
 	Snapshot snapshot() const;
 	//! The lit pixels within radiusKm of the place (in any thread: it only reads files)
@@ -92,25 +98,40 @@ public:
 public slots:
 	//! Download what is missing within radiusKm of the place
 	void download(double lat, double lon, double radiusKm);
+	//! Download the reduced image of the whole world
+	void downloadOverview();
 	void cancel();
 
 signals:
 	void downloadProgress(int done, int total);
 	//! The download ended (ok, or the reason it failed)
 	void downloadFinished(bool ok, const QString& message);
+	//! The download of the reduced image ended (well or not: see hasOverview())
+	void overviewChanged();
 
 private:
-	static std::shared_ptr<Index> parseIndex(const QByteArray& header, qint64* needed, QString* error);
+	enum Job {JobNone, JobRegion, JobOverview};
+	//! The full image and the overview of the size of the world map, from the beginning of the file (needed: the
+	//! bytes to read first when they are not all there)
+	static bool parseLevels(const QByteArray& header, std::shared_ptr<Index>& full, std::shared_ptr<Index>& overview, qint64* needed, QString* error);
+	static std::shared_ptr<Index> parseIfd(const QByteArray& header, qint64 ifd, const Index* base, qint64* needed, QString* error, qint64* nextIfd);
 	static QList<QPoint> tilesFor(const Index& idx, double lat, double lon, double radiusKm);
-	static QString tileFile(const QString& dir, int tx, int ty);
-	static QByteArray tileBytes(const Snapshot& snap, int tx, int ty);
+	static QString tileFile(const QString& dir, int tx, int ty, const QString& prefix = QString());
+	static QByteArray tileBytes(const Index& idx, const QString& fullFile, const QString& tileDir, const QString& prefix, int tx, int ty);
+	//! Decompress a tile into values (tileWidth x tileHeight)
+	static bool decodeTile(const Index& idx, const QByteArray& bytes, std::vector<qint16>& values);
 	void requestHeader(qint64 size);
 	void headerReceived();
-	void requestTiles();
-	void tilesReceived(QNetworkReply* reply, int ty, int tx0, int tx1);
+	void startJob();
+	void finishJob();
+	void requestTiles(std::shared_ptr<const Index> idx, const QList<QPoint>& tiles, const QString& prefix);
+	void tilesReceived(QNetworkReply* reply, const Index& idx, const QString& prefix, int ty, int tx0, int tx1);
 	void fail(const QString& message);
 
 	std::shared_ptr<const Index> index;
+	std::shared_ptr<const Index> overviewIndex;
+	Job job = JobNone;
+	qint64 headerNeeded = 0;  //!< bytes of the index still missing for the overview
 	QString cacheDir;     //!< lightdomes/viirs-2024
 	QString fullFile;
 	// the download in progress

@@ -43,7 +43,10 @@ const QString FILE_NAME = QStringLiteral("nightlights.average_viirs.v21_m_500m_s
 // metadata of the file says 10 the other way round)
 constexpr float VALUE_TO_RADIANCE = 0.1f;
 constexpr double EARTH_RADIUS_KM = 6371.;
-constexpr qint64 FIRST_HEADER_REQUEST = 131072;   // the index of this map is about 100 kB
+constexpr qint64 FIRST_HEADER_REQUEST = 196608;   // the index of this map (all its images) is about 130 kB
+// The reduced image for the world map of the location dialog (5400 x 2700 pixels): its tiles are kept as ov_t*.bin
+constexpr int OVERVIEW_WIDTH = 5400;
+const QString OVERVIEW_PREFIX = QStringLiteral("ov_");
 
 // Reading TIFF values of either byte order
 struct TiffBytes
@@ -106,10 +109,11 @@ NightLightsMap::NightLightsMap(QObject* parent)
 			const QByteArray header = f.read(size);
 			qint64 needed = 0;
 			QString error;
-			auto idx = parseIndex(header, &needed, &error);
-			if (idx)
+			std::shared_ptr<Index> idx, ov;
+			if (parseLevels(header, idx, ov, &needed, &error) && (needed <= size || needed > f.size() || attempt == 2))
 			{
 				index = idx;
+				overviewIndex = ov;
 				fullFile = path;
 				qInfo() << "Night lights (VIIRS): using the whole map" << QDir::toNativeSeparators(path);
 				return;
@@ -128,8 +132,14 @@ NightLightsMap::NightLightsMap(QObject* parent)
 	{
 		qint64 needed = 0;
 		QString error;
-		index = parseIndex(f.readAll(), &needed, &error);
-		if (!index)
+		std::shared_ptr<Index> idx, ov;
+		if (parseLevels(f.readAll(), idx, ov, &needed, &error))
+		{
+			index = idx;
+			overviewIndex = ov;
+			headerNeeded = needed;  // an older, shorter index: read again for the overview
+		}
+		else
 			qWarning() << "Night lights (VIIRS): the saved index is not usable:" << error;
 	}
 }
@@ -152,27 +162,53 @@ QString NightLightsMap::attribution()
 	return q_("VIIRS night lights 2024 (VNL V2): Earth Observation Group, Payne Institute for Public Policy, Colorado School of Mines (Elvidge et al. 2021); via OpenGeoHub (Hengl 2025), CC BY 4.0");
 }
 
-std::shared_ptr<NightLightsMap::Index> NightLightsMap::parseIndex(const QByteArray& header, qint64* needed, QString* error)
+bool NightLightsMap::parseLevels(const QByteArray& header, std::shared_ptr<Index>& full, std::shared_ptr<Index>& overview, qint64* needed, QString* error)
 {
 	*needed = 0;
+	full.reset();
+	overview.reset();
 	if (header.size() < 8)
 	{
 		*needed = 8;
-		return nullptr;
+		return false;
 	}
 	const bool big = header.startsWith("MM");
 	if (!big && !header.startsWith("II"))
 	{
 		*error = "not a TIFF file";
-		return nullptr;
+		return false;
 	}
 	const TiffBytes b{header, big};
 	if (b.u16(2) != 42)
 	{
 		*error = "not a classic TIFF file (BigTIFF is not supported)";
-		return nullptr;
+		return false;
 	}
-	const qint64 ifd = b.u32(4);
+	qint64 next = b.u32(4);
+	full = parseIfd(header, next, nullptr, needed, error, &next);
+	if (!full)
+		return false;
+	// the reduced images (overviews) that follow: the one of the size of the world map of the location dialog
+	while (next > 0)
+	{
+		auto level = parseIfd(header, next, full.get(), needed, error, &next);
+		if (!level)
+		{
+			// not usable, or more to read (needed): no overview yet, but the full image is there
+			error->clear();
+			return true;
+		}
+		if (level->width >= OVERVIEW_WIDTH && (!overview || level->width < overview->width))
+			overview = level;
+	}
+	return true;
+}
+
+std::shared_ptr<NightLightsMap::Index> NightLightsMap::parseIfd(const QByteArray& header, qint64 ifd, const Index* base, qint64* needed, QString* error, qint64* nextIfd)
+{
+	*nextIfd = 0;
+	const bool big = header.startsWith("MM");
+	const TiffBytes b{header, big};
 	if (ifd + 2 > header.size())
 	{
 		*needed = ifd + 2 + 12*64 + 4;
@@ -184,6 +220,7 @@ std::shared_ptr<NightLightsMap::Index> NightLightsMap::parseIndex(const QByteArr
 		*needed = ifd + 2 + 12*entries + 4;
 		return nullptr;
 	}
+	*nextIfd = b.u32(ifd + 2 + 12*entries);
 	auto idx = std::make_shared<Index>();
 	int compression = 1, bits = 0, sampleFormat = 1, samples = 1, planar = 1;
 	std::vector<double> pixelScale, tiePoint;
@@ -253,6 +290,12 @@ std::shared_ptr<NightLightsMap::Index> NightLightsMap::parseIndex(const QByteArr
 		*error = QString("unexpected image format (bits %1, sample format %2, compression %3)").arg(bits).arg(sampleFormat).arg(compression);
 		return nullptr;
 	}
+	if (base)
+	{
+		// an overview: the same area as the full image
+		pixelScale = {base->dLon*base->width/qMax(1, idx->width), base->dLat*base->height/qMax(1, idx->height)};
+		tiePoint = {0., 0., 0., base->lon0, base->lat0, 0.};
+	}
 	if (idx->width <= 0 || idx->height <= 0 || idx->tileWidth <= 0 || idx->tileHeight <= 0 || pixelScale.size() < 2 || tiePoint.size() < 6)
 	{
 		*error = "no tiles or no georeference";
@@ -307,9 +350,9 @@ QList<QPoint> NightLightsMap::tilesFor(const Index& idx, double lat, double lon,
 	return tiles;
 }
 
-QString NightLightsMap::tileFile(const QString& dir, int tx, int ty)
+QString NightLightsMap::tileFile(const QString& dir, int tx, int ty, const QString& prefix)
 {
-	return QString("%1/t%2_%3.bin").arg(dir).arg(ty).arg(tx);
+	return QString("%1/%2t%3_%4.bin").arg(dir, prefix).arg(ty).arg(tx);
 }
 
 bool NightLightsMap::hasRegion(double lat, double lon, double radiusKm) const
@@ -345,23 +388,110 @@ NightLightsMap::Snapshot NightLightsMap::snapshot() const
 	return Snapshot{index, cacheDir, fullFile};
 }
 
-QByteArray NightLightsMap::tileBytes(const Snapshot& snap, int tx, int ty)
+QByteArray NightLightsMap::tileBytes(const Index& idx, const QString& fullFile, const QString& tileDir, const QString& prefix, int tx, int ty)
 {
-	const size_t i = static_cast<size_t>(snap.index->tileIndex(tx, ty));
-	const qint64 count = static_cast<qint64>(snap.index->counts[i]);
+	const size_t i = static_cast<size_t>(idx.tileIndex(tx, ty));
+	const qint64 count = static_cast<qint64>(idx.counts[i]);
 	if (count <= 0)
 		return QByteArray();
-	if (!snap.fullFile.isEmpty())
+	if (!fullFile.isEmpty())
 	{
-		QFile f(snap.fullFile);
-		if (!f.open(QIODevice::ReadOnly) || !f.seek(static_cast<qint64>(snap.index->offsets[i])))
+		QFile f(fullFile);
+		if (!f.open(QIODevice::ReadOnly) || !f.seek(static_cast<qint64>(idx.offsets[i])))
 			return QByteArray();
 		return f.read(count);
 	}
-	QFile f(tileFile(snap.tileDir, tx, ty));
+	QFile f(tileFile(tileDir, tx, ty, prefix));
 	if (!f.open(QIODevice::ReadOnly))
 		return QByteArray();
 	return f.readAll();
+}
+
+bool NightLightsMap::decodeTile(const Index& idx, const QByteArray& bytes, std::vector<qint16>& values)
+{
+	const size_t tileSize = static_cast<size_t>(idx.tileWidth)*idx.tileHeight;
+	values.resize(tileSize);
+	if (idx.compressed)
+	{
+		uLongf length = static_cast<uLongf>(tileSize*sizeof(qint16));
+		if (uncompress(reinterpret_cast<Bytef*>(values.data()), &length, reinterpret_cast<const Bytef*>(bytes.constData()), static_cast<uLong>(bytes.size())) != Z_OK
+		    || length != tileSize*sizeof(qint16))
+			return false;
+	}
+	else
+	{
+		if (static_cast<size_t>(bytes.size()) != tileSize*sizeof(qint16))
+			return false;
+		memcpy(values.data(), bytes.constData(), tileSize*sizeof(qint16));
+	}
+	if (idx.bigEndian != (Q_BYTE_ORDER == Q_BIG_ENDIAN))
+		for (auto& v : values)
+			v = static_cast<qint16>(qbswap(static_cast<quint16>(v)));
+	return true;
+}
+
+bool NightLightsMap::hasOverview() const
+{
+	if (!overviewIndex)
+		return false;
+	if (!fullFile.isEmpty())
+		return true;
+	for (int ty=0; ty<overviewIndex->tilesDown; ++ty)
+		for (int tx=0; tx<overviewIndex->tilesAcross; ++tx)
+			if (overviewIndex->counts[static_cast<size_t>(overviewIndex->tileIndex(tx, ty))] > 0
+			    && !QFileInfo::exists(tileFile(cacheDir, tx, ty, OVERVIEW_PREFIX)))
+				return false;
+	return true;
+}
+
+QImage NightLightsMap::composeNightMap(const QImage& dayMap) const
+{
+	if (!hasOverview() || dayMap.isNull())
+		return QImage();
+	const Index& ov = *overviewIndex;
+	// the reduced image of the lights (radiance times 10)
+	std::vector<qint16> lights(static_cast<size_t>(ov.width)*ov.height, 0);
+	std::vector<qint16> values;
+	for (int ty=0; ty<ov.tilesDown; ++ty)
+		for (int tx=0; tx<ov.tilesAcross; ++tx)
+		{
+			const QByteArray bytes = tileBytes(ov, fullFile, cacheDir, OVERVIEW_PREFIX, tx, ty);
+			if (bytes.isEmpty() || !decodeTile(ov, bytes, values))
+				continue;
+			for (int r=0; r<ov.tileHeight && ty*ov.tileHeight + r < ov.height; ++r)
+				for (int c=0; c<ov.tileWidth && tx*ov.tileWidth + c < ov.width; ++c)
+					lights[static_cast<size_t>(ty*ov.tileHeight + r)*ov.width + tx*ov.tileWidth + c] = values[static_cast<size_t>(r)*ov.tileWidth + c];
+		}
+	// Night: the day map darkened, the lights on a logarithmic scale from 0.15 to 40 nW/cm^2/sr (the reduced image
+	// averages the pixels: towns are fainter in it than in the full image), from dark orange to yellow and white
+	QImage night = dayMap.convertToFormat(QImage::Format_RGB32);
+	const int W = night.width(), H = night.height();
+	const double logLow = std::log10(0.15), logRange = std::log10(40.) - logLow;
+	for (int y=0; y<H; ++y)
+	{
+		const double lat = 90. - (y + 0.5)*180./H;
+		const int row = static_cast<int>(std::floor((ov.lat0 - lat)/ov.dLat));
+		QRgb* line = reinterpret_cast<QRgb*>(night.scanLine(y));
+		for (int x=0; x<W; ++x)
+		{
+			double v = 0.;
+			if (row >= 0 && row < ov.height)
+			{
+				const double lon = -180. + (x + 0.5)*360./W;
+				int col = static_cast<int>(std::floor((lon - ov.lon0)/ov.dLon));
+				col = ((col % ov.width) + ov.width) % ov.width;
+				const int raw = lights[static_cast<size_t>(row)*ov.width + col];
+				if (raw > 0)
+					v = qBound(0., (std::log10(raw*static_cast<double>(VALUE_TO_RADIANCE)) - logLow)/logRange, 1.);
+			}
+			const double glow = std::sqrt(v);
+			const double red = qMin(1., 1.5*v), green = qBound(0., 1.2*v - 0.05, 1.), blue = qBound(0., 1.4*v - 0.6, 1.);
+			const QRgb p = line[x];
+			const auto mix = [&](int base, double light) {return qBound(0, qRound(0.35*base + 255.*light*glow), 255);};
+			line[x] = qRgb(mix(qRed(p), red), mix(qGreen(p), green), mix(qBlue(p), blue));
+		}
+	}
+	return night;
 }
 
 std::vector<NightLightsMap::Pixel> NightLightsMap::readRegion(const Snapshot& snap, double lat, double lon, double radiusKm, float* pixelSizeDeg)
@@ -374,32 +504,17 @@ std::vector<NightLightsMap::Pixel> NightLightsMap::readRegion(const Snapshot& sn
 		*pixelSizeDeg = static_cast<float>(idx.dLat);
 	const double cosMax = std::cos(radiusKm/EARTH_RADIUS_KM);
 	const double sinLat0 = std::sin(lat*M_PI/180.), cosLat0 = std::cos(lat*M_PI/180.);
-	const size_t tileSize = static_cast<size_t>(idx.tileWidth)*idx.tileHeight;
-	std::vector<qint16> values(tileSize);
+	std::vector<qint16> values;
 	for (const QPoint& t : tilesFor(idx, lat, lon, radiusKm))
 	{
-		const QByteArray bytes = tileBytes(snap, t.x(), t.y());
+		const QByteArray bytes = tileBytes(idx, snap.fullFile, snap.tileDir, QString(), t.x(), t.y());
 		if (bytes.isEmpty())
 			continue;
-		if (idx.compressed)
+		if (!decodeTile(idx, bytes, values))
 		{
-			uLongf length = static_cast<uLongf>(tileSize*sizeof(qint16));
-			if (uncompress(reinterpret_cast<Bytef*>(values.data()), &length, reinterpret_cast<const Bytef*>(bytes.constData()), static_cast<uLong>(bytes.size())) != Z_OK
-			    || length != tileSize*sizeof(qint16))
-			{
-				qWarning() << "Night lights (VIIRS): damaged tile" << t;
-				continue;
-			}
+			qWarning() << "Night lights (VIIRS): damaged tile" << t;
+			continue;
 		}
-		else
-		{
-			if (static_cast<size_t>(bytes.size()) != tileSize*sizeof(qint16))
-				continue;
-			memcpy(values.data(), bytes.constData(), tileSize*sizeof(qint16));
-		}
-		if (idx.bigEndian != (Q_BYTE_ORDER == Q_BIG_ENDIAN))
-			for (auto& v : values)
-				v = static_cast<qint16>(qbswap(static_cast<quint16>(v)));
 		const int row0 = t.y()*idx.tileHeight, col0 = t.x()*idx.tileWidth;
 		for (int r=0; r<idx.tileHeight && row0 + r < idx.height; ++r)
 		{
@@ -436,10 +551,46 @@ void NightLightsMap::download(double lat, double lon, double radiusKm)
 		emit downloadFinished(true, QString());
 		return;
 	}
+	job = JobRegion;
 	if (!index)
 		requestHeader(FIRST_HEADER_REQUEST);
 	else
-		requestTiles();
+		startJob();
+}
+
+void NightLightsMap::downloadOverview()
+{
+	if (isDownloading())
+		return;
+	if (hasOverview())
+	{
+		emit overviewChanged();
+		return;
+	}
+	job = JobOverview;
+	if (!index || (!overviewIndex && headerNeeded > 0))
+		requestHeader(qMax(FIRST_HEADER_REQUEST, headerNeeded));
+	else
+		startJob();
+}
+
+void NightLightsMap::startJob()
+{
+	if (job == JobOverview)
+	{
+		if (!overviewIndex)
+		{
+			fail(q_("The map has no reduced image of the whole world"));
+			return;
+		}
+		QList<QPoint> all;
+		for (int ty=0; ty<overviewIndex->tilesDown; ++ty)
+			for (int tx=0; tx<overviewIndex->tilesAcross; ++tx)
+				all << QPoint(tx, ty);
+		requestTiles(overviewIndex, all, OVERVIEW_PREFIX);
+	}
+	else
+		requestTiles(index, tilesFor(*index, wantLat, wantLon, wantRadius), QString());
 }
 
 namespace
@@ -496,8 +647,14 @@ void NightLightsMap::headerReceived()
 	const QByteArray data = reply->readAll();
 	qint64 needed = 0;
 	QString error;
-	auto idx = parseIndex(data, &needed, &error);
-	if (!idx)
+	std::shared_ptr<Index> idx, ov;
+	const bool parsed = parseLevels(data, idx, ov, &needed, &error);
+	if (parsed && !ov && job == JobOverview && needed > data.size() && needed < 16*1024*1024)
+	{
+		requestHeader(needed);
+		return;
+	}
+	if (!parsed)
 	{
 		if (needed > data.size() && needed > reply->property("requested").toLongLong() && needed < 16*1024*1024)
 		{
@@ -512,20 +669,22 @@ void NightLightsMap::headerReceived()
 	if (f.open(QIODevice::WriteOnly))
 		f.write(data);
 	index = idx;
-	requestTiles();
+	overviewIndex = ov;
+	headerNeeded = 0;
+	startJob();
 }
 
-void NightLightsMap::requestTiles()
+void NightLightsMap::requestTiles(std::shared_ptr<const Index> idx, const QList<QPoint>& tiles, const QString& prefix)
 {
 	QList<QPoint> missing;
-	for (const QPoint& t : tilesFor(*index, wantLat, wantLon, wantRadius))
-		if (index->counts[static_cast<size_t>(index->tileIndex(t.x(), t.y()))] > 0 && !QFileInfo::exists(tileFile(cacheDir, t.x(), t.y())))
+	for (const QPoint& t : tiles)
+		if (idx->counts[static_cast<size_t>(idx->tileIndex(t.x(), t.y()))] > 0 && !QFileInfo::exists(tileFile(cacheDir, t.x(), t.y(), prefix)))
 			missing << t;
 	tilesTotal = static_cast<int>(missing.size());
 	tilesDone = 0;
 	if (missing.isEmpty())
 	{
-		emit downloadFinished(true, QString());
+		finishJob();
 		return;
 	}
 	QDir().mkpath(cacheDir);
@@ -538,24 +697,24 @@ void NightLightsMap::requestTiles()
 		while (j + 1 < missing.size() && missing[j + 1].y() == missing[i].y() && missing[j + 1].x() == missing[j].x() + 1)
 			++j;
 		const int ty = missing[i].y(), tx0 = missing[i].x(), tx1 = missing[j].x();
-		const size_t first = static_cast<size_t>(index->tileIndex(tx0, ty)), last = static_cast<size_t>(index->tileIndex(tx1, ty));
-		qint64 start = static_cast<qint64>(index->offsets[first]), end = 0;
+		const size_t first = static_cast<size_t>(idx->tileIndex(tx0, ty)), last = static_cast<size_t>(idx->tileIndex(tx1, ty));
+		qint64 start = static_cast<qint64>(idx->offsets[first]), end = 0;
 		for (size_t k=first; k<=last; ++k)
 		{
-			start = qMin(start, static_cast<qint64>(index->offsets[k]));
-			end = qMax(end, static_cast<qint64>(index->offsets[k] + index->counts[k]));
+			start = qMin(start, static_cast<qint64>(idx->offsets[k]));
+			end = qMax(end, static_cast<qint64>(idx->offsets[k] + idx->counts[k]));
 		}
 		QNetworkReply* reply = StelApp::getInstance().getNetworkAccessManager()->get(rangeRequest(start, end - 1));
 		guardRange(reply);
 		reply->setProperty("start", start);
 		pending << reply;
-		connect(reply, &QNetworkReply::finished, this, [this, reply, ty, tx0, tx1]() {tilesReceived(reply, ty, tx0, tx1);});
+		connect(reply, &QNetworkReply::finished, this, [this, reply, idx, prefix, ty, tx0, tx1]() {tilesReceived(reply, *idx, prefix, ty, tx0, tx1);});
 		i = j + 1;
 	}
 	emit downloadProgress(0, tilesTotal);
 }
 
-void NightLightsMap::tilesReceived(QNetworkReply* reply, int ty, int tx0, int tx1)
+void NightLightsMap::tilesReceived(QNetworkReply* reply, const Index& idx, const QString& prefix, int ty, int tx0, int tx1)
 {
 	reply->deleteLater();
 	if (!pending.removeOne(reply))
@@ -574,15 +733,15 @@ void NightLightsMap::tilesReceived(QNetworkReply* reply, int ty, int tx0, int tx
 	const qint64 start = reply->property("start").toLongLong();
 	for (int tx=tx0; tx<=tx1; ++tx)
 	{
-		const size_t k = static_cast<size_t>(index->tileIndex(tx, ty));
-		const qint64 pos = static_cast<qint64>(index->offsets[k]) - start;
-		const qint64 count = static_cast<qint64>(index->counts[k]);
+		const size_t k = static_cast<size_t>(idx.tileIndex(tx, ty));
+		const qint64 pos = static_cast<qint64>(idx.offsets[k]) - start;
+		const qint64 count = static_cast<qint64>(idx.counts[k]);
 		if (pos < 0 || pos + count > data.size())
 		{
 			fail(q_("The server sent less than asked for"));
 			return;
 		}
-		QFile f(tileFile(cacheDir, tx, ty));
+		QFile f(tileFile(cacheDir, tx, ty, prefix));
 		if (!f.open(QIODevice::WriteOnly) || f.write(data.constData() + pos, count) != count)
 		{
 			f.remove();
@@ -593,7 +752,16 @@ void NightLightsMap::tilesReceived(QNetworkReply* reply, int ty, int tx0, int tx
 	tilesDone += tx1 - tx0 + 1;
 	emit downloadProgress(tilesDone, tilesTotal);
 	if (pending.isEmpty())
-		emit downloadFinished(true, QString());
+		finishJob();
+}
+
+void NightLightsMap::finishJob()
+{
+	const Job done = job;
+	job = JobNone;
+	emit downloadFinished(true, QString());
+	if (done == JobOverview)
+		emit overviewChanged();
 }
 
 void NightLightsMap::fail(const QString& message)
@@ -609,7 +777,11 @@ void NightLightsMap::fail(const QString& message)
 		r->abort();
 	}
 	qWarning() << "Night lights (VIIRS): download failed:" << message;
+	const Job failed = job;
+	job = JobNone;
 	emit downloadFinished(false, message);
+	if (failed == JobOverview)
+		emit overviewChanged();
 }
 
 void NightLightsMap::cancel()

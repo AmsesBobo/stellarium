@@ -34,6 +34,8 @@
 #include "StelFileMgr.hpp"
 #include "StelGui.hpp"
 #include "StelSkyCultureMgr.hpp"
+#include "LightDomes.hpp"
+#include "NightLightsMap.hpp"
 
 #include <QSettings>
 #include <QDebug>
@@ -190,6 +192,22 @@ void LocationDialog::createDialogContent()
 	connect(core, &StelCore::currentTimeZoneChanged, this, &LocationDialog::setTimezone);
 	connectBoolProperty(ui->autoEnableEnvironmentCheckBox, "LandscapeMgr.flagEnvironmentAutoEnabling");
 	connectBoolProperty(ui->autoChangeLandscapesCheckBox,  "LandscapeMgr.flagLandscapeAutoSelection");
+
+	// The world map at night, with the lights seen by the VIIRS satellite
+	{
+		LightDomes* domes = GETSTELMODULE(LightDomes);
+		NightLightsMap* lights = domes ? domes->getNightLights() : nullptr;
+		if (lights)
+		{
+			connect(lights, &NightLightsMap::overviewChanged, this, &LocationDialog::nightLightsReady);
+			ui->nightLightsCheckBox->setChecked(conf->value("gui/flag_location_map_night_lights", false).toBool());
+			connect(ui->nightLightsCheckBox, &QCheckBox::toggled, this, &LocationDialog::setNightLights);
+			if (ui->nightLightsCheckBox->isChecked())
+				setNightLights(true);  // the map was made before: make it again (or download first)
+		}
+		else
+			ui->nightLightsCheckBox->hide();
+	}
 
 	connectEditSignals();
 
@@ -408,6 +426,16 @@ void LocationDialog::setMapForLocation(const StelLocation& loc)
 		{
 			// Special case for earth, we don't want to see the clouds
 			pixmap = QPixmap(":/graphicGui/miscWorldMap.jpg");
+			// at night, with the lights seen by the VIIRS satellite
+			LightDomes* domes = GETSTELMODULE(LightDomes);
+			NightLightsMap* lights = domes ? domes->getNightLights() : nullptr;
+			if (ui->nightLightsCheckBox->isChecked() && lights && lights->hasOverview())
+			{
+				if (nightMap.isNull())
+					nightMap = QPixmap::fromImage(lights->composeNightMap(pixmap.toImage()));
+				if (!nightMap.isNull())
+					pixmap = nightMap;
+			}
 		}
 		else
 		{
@@ -1016,4 +1044,52 @@ void LocationDialog::filterSitesByRegion()
 	proxyModel->sort(0, Qt::AscendingOrder);
 	ui->citySearchLineEdit->setText(""); // https://wiki.qt.io/Technical_FAQ#Why_does_the_memory_keep_increasing_when_repeatedly_pasting_text_and_calling_clear.28.29_in_a_QLineEdit.3F
 	ui->citySearchLineEdit->setFocus();
+}
+
+void LocationDialog::setNightLights(bool on)
+{
+	StelApp::getInstance().getSettings()->setValue("gui/flag_location_map_night_lights", on);
+	LightDomes* domes = GETSTELMODULE(LightDomes);
+	NightLightsMap* lights = domes ? domes->getNightLights() : nullptr;
+	if (on && lights && !lights->hasOverview())
+	{
+		ui->nightLightsCheckBox->setText(q_("Night lights (VIIRS): downloading..."));
+		if (lights->isDownloading())
+		{
+			// another download first (the satellite data of a place)
+			if (!nightLightsWait)
+				nightLightsWait = connect(lights, &NightLightsMap::downloadFinished, this, [this, lights]() {
+					disconnect(nightLightsWait);
+					nightLightsWait = QMetaObject::Connection();
+					if (ui->nightLightsCheckBox->isChecked())
+						lights->downloadOverview();
+				});
+		}
+		else
+			lights->downloadOverview();
+		return;
+	}
+	lastPlanet.clear();
+	setMapForLocation(StelApp::getInstance().getCore()->getCurrentLocation());
+}
+
+void LocationDialog::nightLightsReady()
+{
+	if (!dialog)
+		return;
+	LightDomes* domes = GETSTELMODULE(LightDomes);
+	NightLightsMap* lights = domes ? domes->getNightLights() : nullptr;
+	if (!lights || lights->isDownloading())
+		return;
+	ui->nightLightsCheckBox->setText(q_("Night lights (VIIRS)"));
+	if (!lights->hasOverview() && ui->nightLightsCheckBox->isChecked())
+	{
+		const QSignalBlocker blocker(ui->nightLightsCheckBox);
+		ui->nightLightsCheckBox->setChecked(false);
+		StelApp::getInstance().getSettings()->setValue("gui/flag_location_map_night_lights", false);
+		ui->nightLightsCheckBox->setText(q_("Night lights (VIIRS): the download failed"));
+	}
+	nightMap = QPixmap();
+	lastPlanet.clear();
+	setMapForLocation(StelApp::getInstance().getCore()->getCurrentLocation());
 }

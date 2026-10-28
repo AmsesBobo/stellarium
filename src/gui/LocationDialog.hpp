@@ -22,6 +22,7 @@
 
 #include <QObject>
 #include "StelDialog.hpp"
+#include <QPixmap>
 
 class Ui_locationDialogForm;
 class QModelIndex;
@@ -88,6 +89,11 @@ private:
 	void populateTooltips();
 	
 private slots:
+	//! Show the world map at night with the VIIRS lights (downloading the reduced map first)
+	void setNightLights(bool on);
+	//! The reduced map of the night lights was downloaded (or its download failed)
+	void nightLightsReady();
+
 	//! Called whenever the StelLocationMgr is updated
 	void reloadLocations();
 
@@ -163,6 +169,8 @@ private slots:
 
 private:
 	QString lastPlanet; // for caching when switching map
+	QPixmap nightMap;   // the world map at night with the VIIRS lights (made once)
+	QMetaObject::Connection nightLightsWait;  // waiting for another download to end
 	QString customTimeZone;  // for caching when switching around timezones.
 	QStringListModel* allModel;
 	QStringListModel* pickedModel;
