@@ -49,6 +49,8 @@ SET(stellarium_lib_SRCS
      core/StelPhotoBloom.cpp
      core/StelPhotoMeter.hpp
      core/StelPhotoMeter.cpp
+     core/StelEyeAdaptation.hpp
+     core/StelEyeAdaptation.cpp
      core/StelPhotoLensFlare.hpp
      core/StelPhotoLensFlare.cpp
      core/StelAtmosphereTransmission.hpp
@@ -407,6 +409,8 @@ IF(STELLARIUM_GUI_MODE STREQUAL "Standard")
           gui/StelDialogSeparate.cpp
           gui/TonemappingDialog.hpp
           gui/TonemappingDialog.cpp
+          gui/NakedEyeDialog.hpp
+          gui/NakedEyeDialog.cpp
           gui/PhotographicModeDialog.hpp
           gui/PhotographicModeDialog.cpp
           gui/SkylightDialog.hpp
@@ -442,6 +446,7 @@ IF(STELLARIUM_GUI_MODE STREQUAL "Standard")
           gui/dsoColorsDialog.ui
           gui/orbitColorsDialog.ui
           gui/tonemappingDialog.ui
+          gui/nakedEyeDialog.ui
           gui/photographicModeDialog.ui
           gui/skylightDialog.ui
      )

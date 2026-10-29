@@ -25,6 +25,7 @@
 #include "StelTextureTypes.hpp"
 #include "VecMath.hpp"
 #include "StelPhotoMeter.hpp"
+#include "StelEyeAdaptation.hpp"
 #include "StelAtmosphereTransmission.hpp"
 #include "StelProjectorType.hpp"
 
@@ -92,6 +93,8 @@ class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 	//! Naked eye rendering mode: the scene of the photographic mode, seen by the eye instead of a camera. Only active
 	//! in high graphics mode (OpenGL 3+). It excludes the photographic mode (switching one on switches the other off).
 	Q_PROPERTY(bool flagNakedEyeMode READ getFlagNakedEyeMode WRITE setFlagNakedEyeMode NOTIFY flagNakedEyeModeChanged)
+	//! Naked eye mode: the eye is always adapted to what it sees (no time for the light and dark adaptation)
+	Q_PROPERTY(bool flagEyeInstantAdaptation READ getFlagEyeInstantAdaptation WRITE setFlagEyeInstantAdaptation NOTIFY flagEyeInstantAdaptationChanged)
 	//! Exposure correction of the photographic mode, in photographic stops (EV). 0 is the neutral exposure.
 	Q_PROPERTY(double photoExposureEV READ getPhotoExposureEV WRITE setPhotoExposureEV NOTIFY photoExposureEVChanged)
 	//! Exposure time of the virtual camera in the photographic mode, in seconds.
@@ -227,8 +230,11 @@ public:
 	static constexpr double PHOTO_AUTO_MAX_TIME = 30.;
 	//! Time constant of the smooth adaptation of the automatic exposure (seconds)
 	static constexpr double PHOTO_AUTO_TIME_CONSTANT = 0.3;
-	//! Naked eye mode: the luminance the eye is adapted to (cd/m^2), from the mean luminance of the view
-	double getEyeAdaptationLuminance() const {return eyeAdaptationLuminance;}
+	//! Naked eye mode: the luminance the eye is adapted to (cd/m^2): the effective adaptation luminance of the
+	//! adaptation over time (see StelEyeAdaptation) to the mean luminance of the view
+	double getEyeAdaptationLuminance() const {return eyeAdaptation.getAdaptationLuminance();}
+	//! Naked eye mode: the state of the adaptation of the eye
+	const StelEyeAdaptation& getEyeAdaptation() const {return eyeAdaptation;}
 	//! Naked eye mode: the time the eye integrates the light over (seconds). It takes the place of the exposure
 	//! time (the motion of a body during it, for example).
 	static constexpr double EYE_INTEGRATION_TIME = 0.1;
@@ -237,8 +243,6 @@ public:
 	static double eyeAdaptationDisplayValue(double luminance);
 	static constexpr double EYE_TONE_HALF_LUMINANCE = 1.;   //!< L0 (cd/m^2)
 	static constexpr double EYE_TONE_POWER = 0.25;          //!< p
-	//! Naked eye mode: the time constant of the adaptation (seconds), until the model of the adaptation takes over
-	static constexpr double EYE_ADAPTATION_TIME_CONSTANT = 0.5;
 	//! Program mode: the program line of a camera with automatic ISO, from bright to dark. In daylight the base
 	//! ISO and a medium aperture (stopped down further when 1/8000 s is not short enough); then the aperture opens
 	//! at a time that is safe by hand; then the time grows up to where the stars still stay points on a fixed
@@ -919,6 +923,14 @@ public slots:
 	void toggleFlagNakedEyeMode() {setFlagNakedEyeMode(!flagNakedEyeMode);}
 	//! Whether the naked eye mode is switched on AND can work (high graphics mode)
 	bool getFlagNakedEyeModeActive() const;
+	//! Naked eye mode: whether the eye is always adapted to what it sees. Otherwise it needs time: a fraction
+	//! of a second for brighter light, up to half an hour in the dark after daylight (see StelEyeAdaptation).
+	//! The adaptation follows the time of the program when it runs faster than the clock (a jump of the date
+	//! counts as the time that passed).
+	void setFlagEyeInstantAdaptation(bool b);
+	bool getFlagEyeInstantAdaptation() const {return flagEyeInstantAdaptation;}
+	//! Naked eye mode: adapt the eye at once to the current view
+	void resetEyeAdaptation() {eyeAdaptationFresh = true;}
 
 	//! Set the exposure time of the virtual camera, in seconds (limited to 1/8000 s ... 3600 s).
 	void setPhotoExposureTime(double seconds);
@@ -1283,6 +1295,7 @@ signals:
 	void flagPhotographicModeChanged(bool b);
 	//! Emitted when the naked eye rendering mode is switched on or off
 	void flagNakedEyeModeChanged(bool b);
+	void flagEyeInstantAdaptationChanged(bool b);
 	//! Emitted when the exposure correction of the photographic mode is changed
 	void photoExposureEVChanged(double ev);
 	//! Emitted when the exposure time of the virtual camera is changed
@@ -1672,9 +1685,12 @@ private:
 	bool flagPhotographicMode = false;
 	//! Render the scene of the photographic mode as the eye sees it?
 	bool flagNakedEyeMode = false;
-	//! Naked eye mode: the adaptation luminance (cd/m^2), and whether the next reading of the meter sets it at once
-	double eyeAdaptationLuminance = 1e-3;
+	//! Naked eye mode: the adaptation of the eye, whether the next reading of the meter sets it at once, and the
+	//! time of the program at the last reading (JD)
+	StelEyeAdaptation eyeAdaptation;
 	bool eyeAdaptationFresh = true;
+	double eyeAdaptationLastJD = 0.;
+	bool flagEyeInstantAdaptation = false;
 	//! The halo of the stars in the picture (the camera's, none for the eye)
 	float getPhotoHaloFractionActive() const {return getFlagPhotoCameraActive() ? photoHaloFraction : 0.f;}
 	//! Exposure correction of the photographic mode, in stops (EV)

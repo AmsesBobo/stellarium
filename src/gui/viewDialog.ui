@@ -879,6 +879,21 @@
                   </widget>
                  </item>
                  <item>
+                  <widget class="QToolButton" name="nakedEyeModePushButton">
+                   <property name="toolTip">
+                    <string>Settings of the eye in the naked eye mode</string>
+                   </property>
+                   <property name="text">
+                    <string notr="true"/>
+                   </property>
+                   <property name="icon">
+                    <iconset resource="../../data/gui/guiRes.qrc">
+                     <normaloff>:/graphicGui/uibtSettings.png</normaloff>
+                     <disabledoff>:/graphicGui/uibtSettings-disabled.png</disabledoff>:/graphicGui/uibtSettings.png</iconset>
+                   </property>
+                  </widget>
+                 </item>
+                 <item>
                   <spacer name="horizontalSpacerPhotographicMode">
                    <property name="orientation">
                     <enum>Qt::Horizontal</enum>

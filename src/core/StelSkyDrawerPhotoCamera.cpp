@@ -47,6 +47,15 @@ void StelSkyDrawer::setFlagPhotographicMode(bool b)
 		qWarning() << "Photographic mode needs high graphics mode (OpenGL 3 or later). It will have no effect.";
 }
 
+void StelSkyDrawer::setFlagEyeInstantAdaptation(bool b)
+{
+	if (b == flagEyeInstantAdaptation)
+		return;
+	flagEyeInstantAdaptation = b;
+	StelApp::immediateSave("viewing/flag_naked_eye_instant_adaptation", b);
+	emit flagEyeInstantAdaptationChanged(b);
+}
+
 void StelSkyDrawer::setFlagNakedEyeMode(bool b)
 {
 	if (b==flagNakedEyeMode)
@@ -729,6 +738,7 @@ void StelSkyDrawer::savePhotoSettings(QSettings* conf) const
 	Q_ASSERT(conf);
 	conf->setValue("viewing/flag_photographic_mode", getFlagPhotographicMode());
 	conf->setValue("viewing/flag_naked_eye_mode", getFlagNakedEyeMode());
+	conf->setValue("viewing/flag_naked_eye_instant_adaptation", getFlagEyeInstantAdaptation());
 	conf->setValue("viewing/photographic_exposure_ev", getPhotoExposureEV());
 	conf->setValue("viewing/photographic_exposure_time", getPhotoExposureTime());
 	conf->setValue("viewing/photographic_aperture", photoProgramRunning ? photoUserAperture : photoAperture);

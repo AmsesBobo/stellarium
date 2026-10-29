@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>NakedEyeDialogForm</class>
+ <widget class="QWidget" name="NakedEyeDialogForm">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>420</width>
+    <height>260</height>
+   </rect>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <property name="spacing">
+    <number>0</number>
+   </property>
+   <property name="leftMargin">
+    <number>0</number>
+   </property>
+   <property name="topMargin">
+    <number>0</number>
+   </property>
+   <property name="rightMargin">
+    <number>0</number>
+   </property>
+   <property name="bottomMargin">
+    <number>0</number>
+   </property>
+   <item>
+    <widget class="TitleBar" name="titleBar">
+     <property name="title">
+      <string>Naked Eye</string>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="modeGroupBox">
+     <property name="title">
+      <string>Naked eye mode</string>
+     </property>
+     <layout class="QVBoxLayout" name="modeLayout">
+      <item>
+       <widget class="QCheckBox" name="nakedEyeModeCheckBox">
+        <property name="toolTip">
+         <string>Render the scene of the photographic mode as the eye sees it, without the effects of a camera. Needs OpenGL 3 or later.</string>
+        </property>
+        <property name="text">
+         <string>Naked eye mode</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QCheckBox" name="infoLineCheckBox">
+        <property name="toolTip">
+         <string>Show the state of the eye and the sky quality at the top of the screen</string>
+        </property>
+        <property name="text">
+         <string>Show the information line</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="adaptationGroupBox">
+     <property name="title">
+      <string>Adaptation</string>
+     </property>
+     <layout class="QVBoxLayout" name="adaptationLayout">
+      <item>
+       <widget class="QCheckBox" name="instantAdaptationCheckBox">
+        <property name="toolTip">
+         <string>The eye is always adapted to what it sees. Otherwise it needs time: a fraction of a second for brighter light, up to half an hour in the dark after daylight (the rods take over from the cones after about 10 minutes). The adaptation follows the time of the program when it runs faster than the clock.</string>
+        </property>
+        <property name="text">
+         <string>Always adapted (no adaptation time)</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <layout class="QHBoxLayout" name="adaptNowLayout">
+        <item>
+         <widget class="QPushButton" name="adaptNowPushButton">
+          <property name="toolTip">
+           <string>Adapt the eye at once to the current view, as if it had been looking at it for a long time</string>
+          </property>
+          <property name="text">
+           <string>Adapt now</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <spacer name="adaptNowSpacer">
+          <property name="orientation">
+           <enum>Qt::Horizontal</enum>
+          </property>
+          <property name="sizeHint" stdset="0">
+           <size>
+            <width>40</width>
+            <height>20</height>
+           </size>
+          </property>
+         </spacer>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <widget class="QLabel" name="adaptationInfoLabel">
+        <property name="text">
+         <string notr="true"/>
+        </property>
+        <property name="wordWrap">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <spacer name="verticalSpacer">
+        <property name="orientation">
+         <enum>Qt::Vertical</enum>
+        </property>
+        <property name="sizeHint" stdset="0">
+         <size>
+          <width>20</width>
+          <height>10</height>
+         </size>
+        </property>
+       </spacer>
+      </item>
+     </layout>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>TitleBar</class>
+   <extends>QFrame</extends>
+   <header>Dialog.hpp</header>
+   <container>1</container>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections/>
+</ui>

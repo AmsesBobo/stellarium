@@ -29,6 +29,7 @@
 #include "AtmosphereDialog.hpp"
 #include "SkylightDialog.hpp"
 #include "TonemappingDialog.hpp"
+#include "NakedEyeDialog.hpp"
 #include "GreatRedSpotDialog.hpp"
 #include "ConfigureDSOColorsDialog.hpp"
 #include "ConfigureOrbitColorsDialog.hpp"
@@ -131,6 +132,8 @@ ViewDialog::~ViewDialog()
 	skylightDialog = nullptr;
 	delete tonemappingDialog;
 	tonemappingDialog = nullptr;
+	delete nakedEyeDialog;
+	nakedEyeDialog = nullptr;
 	delete greatRedSpotDialog;
 	greatRedSpotDialog = nullptr;
 	delete configureDSOColorsDialog;
@@ -248,6 +251,7 @@ void ViewDialog::createDialogContent()
 	connectBoolProperty(ui->spikyStarsCheckBox, "StelSkyDrawer.flagStarSpiky");
 	connectBoolProperty(ui->photographicModeCheckBox, "StelSkyDrawer.flagPhotographicMode");
 	connectBoolProperty(ui->nakedEyeModeCheckBox, "StelSkyDrawer.flagNakedEyeMode");
+	connect(ui->nakedEyeModePushButton, &QToolButton::clicked, this, &ViewDialog::showNakedEyeDialog);
 	connect(ui->photographicModePushButton, &QToolButton::clicked, this, &ViewDialog::showPhotographicModeDialog);
 	connectCheckBox(ui->starLabelCheckBox, "actionShow_Stars_Labels");
 	connectDoubleProperty(ui->starsLabelsHorizontalSlider,"StarMgr.labelsAmount",0.0,10.0);
@@ -1991,6 +1995,13 @@ void ViewDialog::showPhotographicModeDialog()
 	StelAction* action = StelApp::getInstance().getStelActionManager()->findAction("actionShow_PhotographicMode_Window_Global");
 	if (action)
 		action->setChecked(true);
+}
+
+void ViewDialog::showNakedEyeDialog()
+{
+	if (nakedEyeDialog == nullptr)
+		nakedEyeDialog = new NakedEyeDialog();
+	nakedEyeDialog->setVisible(true);
 }
 
 void ViewDialog::showTonemappingDialog()

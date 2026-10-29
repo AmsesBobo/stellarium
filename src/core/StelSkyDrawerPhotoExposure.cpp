@@ -56,7 +56,7 @@ float StelSkyDrawer::getPhotoSceneScale() const
 	// The eye: the adaptation luminance is shown at its display value (see eyeAdaptationDisplayValue())
 	if (getFlagNakedEyeModeActive())
 	{
-		const double L = qMax(1e-7, eyeAdaptationLuminance);
+		const double L = qMax(1e-7, eyeAdaptation.getAdaptationLuminance());
 		return static_cast<float>(eyeAdaptationDisplayValue(L)/L);
 	}
 	// Reflected-light meter calibration constant K (ISO 2720), and middle grey
@@ -390,17 +390,20 @@ void StelSkyDrawer::applyPhotoMeterReading(const StelPhotoMeter::Reading& readin
 		stopPhotoProgram();
 		if (!(reading.sceneScale > 0.))
 			return;
-		const double wanted = qMax(1e-7, reading.centerWeighted / reading.sceneScale); // cd/m^2
-		if (eyeAdaptationFresh || !(eyeAdaptationLuminance > 0.))
+		const double luminance = qMax(1e-8, reading.centerWeighted / reading.sceneScale); // cd/m^2
+		const double jd = core->getJD();
+		if (eyeAdaptationFresh || flagEyeInstantAdaptation)
 		{
-			eyeAdaptationLuminance = wanted;
+			eyeAdaptation.reset(luminance);
 			eyeAdaptationFresh = false;
 		}
 		else
 		{
-			const double f = 1. - std::exp(-qBound(0., deltaTime, 1.)/EYE_ADAPTATION_TIME_CONSTANT);
-			eyeAdaptationLuminance = std::exp(std::log(eyeAdaptationLuminance) + f*(std::log(wanted) - std::log(eyeAdaptationLuminance)));
+			// The time that passed: on the clock, or in the program when it runs faster (or jumps)
+			const double dt = qMax(qMax(0., deltaTime), std::fabs(jd - eyeAdaptationLastJD)*86400.);
+			eyeAdaptation.update(luminance, dt);
 		}
+		eyeAdaptationLastJD = jd;
 		return;
 	}
 	eyeAdaptationFresh = true;
@@ -564,14 +567,21 @@ void StelSkyDrawer::drawPhotoInfoLine(StelCore* core) const
 	QStringList parts;
 	if (getFlagNakedEyeModeActive())
 	{
-		// The eye: the mode, and the luminance it is adapted to
+		// The eye: the mode, the luminance it is adapted to and the system it sees with, and how far it still is
+		// from being adapted in the dark
 		parts << q_("Naked eye");
-		const double L = eyeAdaptationLuminance;
+		const double L = eyeAdaptation.getAdaptationLuminance();
 		const int decimals = qBound(0, 2 - static_cast<int>(std::floor(std::log10(qMax(1e-9, L)))), 9);
 		QLocale locale;
 		locale.setNumberOptions(QLocale::OmitGroupSeparator);
 		const QString value = (L >= 1e-3) ? locale.toString(L, 'f', decimals) : locale.toString(L, 'e', 1);
-		parts << QString("%1 %2 cd/m%3").arg(qc_("adapted to", "eye: adaptation luminance"), value, QChar(0x00B2));
+		parts << QString("%1 %2 cd/m%3 (%4)").arg(qc_("adapted to", "eye: adaptation luminance"), value, QChar(0x00B2),
+		                                          eyeAdaptation.getLimitingSystem() == StelEyeAdaptation::Rods ? qc_("rods", "eye: rod vision")
+		                                                                                                    : qc_("cones", "eye: cone vision"));
+		const double elevation = 2.5*eyeAdaptation.getThresholdElevation();
+		if (elevation >= 0.05)
+			parts << QString("%1 +%2 mag").arg(qc_("dark adaptation", "eye: how much brighter the faintest visible star is than when adapted"),
+			                                    locale.toString(elevation, 'f', 1));
 		if (std::fabs(photoExposureEV) > 0.01)
 			parts << QString("%1 EV").arg(QString::asprintf("%+.1f", photoExposureEV));
 	}
