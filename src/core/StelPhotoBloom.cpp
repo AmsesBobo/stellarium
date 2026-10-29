@@ -84,6 +84,24 @@ void main()
 }
 )";
 
+// The light that gets an aureole: the scene above its smooth background (a coarse level of the pyramid), times the
+// share of its light that the haze scatters forwards
+const char* aureoleSourceSource = R"(
+VARYING vec2 texcoord;
+uniform sampler2D scene;
+uniform sampler2D background;
+uniform vec2 backgroundScale; // scene texture coordinates -> those of the background level
+uniform sampler2D share;
+highp float sane(highp float x) { return (x >= 0.) ? min(x, 1e30) : 0.; }
+void main()
+{
+	highp vec3 c = texture2D(scene, texcoord).rgb;
+	c = vec3(sane(c.r), sane(c.g), sane(c.b));
+	highp vec3 b = texture2D(background, texcoord * backgroundScale).rgb;
+	FRAG_COLOR = vec4(max(c - b, vec3(0.)) * texture2D(share, texcoord).r, 1.);
+}
+)";
+
 // Accumulation from the coarsest level up: weight x this level + the (bilinearly upsampled) sum of the coarser ones.
 // A texel of the coarser level covers exactly 2x2 texels of this one (its size is rounded up).
 const char* combineSource = R"(
@@ -225,7 +243,8 @@ void StelPhotoBloom::initShaders()
 	combineProgram = makeProgram(combineSource, "photographic bloom: combination");
 	spikeProgram = makeProgram(makeSpikeSource(), "photographic bloom: diffraction spikes");
 	halationProgram = makeProgram(halationSource, "photographic bloom: halation of the film");
-	shadersOk = downProgram && blurProgram && combineProgram && spikeProgram && halationProgram;
+	aureoleSourceProgram = makeProgram(aureoleSourceSource, "photographic bloom: aureole of the haze");
+	shadersOk = downProgram && blurProgram && combineProgram && spikeProgram && halationProgram && aureoleSourceProgram;
 	if (!shadersOk)
 		qWarning() << "Photographic mode: the bloom shaders could not be built, bloom is off";
 }
@@ -256,7 +275,9 @@ void StelPhotoBloom::resize(int w, int h)
 	spikeFBO = makeFBO(gl, w, h);
 	halationFBO.reset();
 	halationLevel = -1;
+	aureoleSourceFBO.reset();
 	weightsAlpha = -1.f; // recompute the weights for the new number of levels
+	aureoleWeightsCore = -1.f;
 }
 
 // Width (sigma, scene pixels) of the effective Gaussian of level k: the 2x2 box downsamplings
@@ -315,6 +336,48 @@ void StelPhotoBloom::computeWeights(float alpha, float beta)
 	weightsAlpha = alpha;
 	weightsBeta = beta;
 	weightsLevels = n;
+}
+
+// The aureole 1/(r^2 + c^2) (the forward peak of the scattering by aerosols, as in the phase function of the aerosols
+// of the default ShowMySky model) is a mixture of Gaussians too: 1/(r^2 + c^2) = integral of exp(-s (r^2 + c^2)) ds,
+// which gives the weight exp(-c^2/(2 sigma^2)) per unit of ln(sigma) to the normalized Gaussian of width sigma. It is cut
+// off softly at the extent e (the weight times exp(-sigma^2/(2 e^2))).
+void StelPhotoBloom::computeAureoleWeights(float core, float extent)
+{
+	const int n = static_cast<int>(levels.size());
+	aureoleWeights.assign(static_cast<size_t>(n), 0.f);
+	std::vector<double> lnSigma(static_cast<size_t>(n));
+	for (int k=0; k<n; ++k)
+		lnSigma[static_cast<size_t>(k)] = std::log(levelSigma(k));
+	const double identityLimit = 0.5*levelSigma(0);
+	const double c = static_cast<double>(core), e = static_cast<double>(extent);
+	std::vector<double> w(static_cast<size_t>(n), 0.);
+	double wId = 0., total = 0.;
+	constexpr double du = 0.01;
+	for (double u=std::log(0.01); u<std::log(10.*e); u+=du)
+	{
+		const double sigma = std::exp(u);
+		const double mass = std::exp(-0.5*c*c/(sigma*sigma))*std::exp(-0.5*sigma*sigma/(e*e))*du;
+		total += mass;
+		if (sigma < identityLimit)
+		{
+			wId += mass;
+			continue;
+		}
+		int best = 0;
+		for (int k=1; k<n; ++k)
+			if (std::fabs(u - lnSigma[static_cast<size_t>(k)]) < std::fabs(u - lnSigma[static_cast<size_t>(best)]))
+				best = k;
+		w[static_cast<size_t>(best)] += mass;
+	}
+	if (total <= 0.)
+		total = 1.;
+	w[0] += wId;  // what is narrower than a pixel: in the finest level (the aureole is far wider anyway)
+	for (int k=0; k<n; ++k)
+		aureoleWeights[static_cast<size_t>(k)] = static_cast<float>(w[static_cast<size_t>(k)]/total);
+	aureoleWeightsCore = core;
+	aureoleWeightsExtent = extent;
+	aureoleWeightsLevels = n;
 }
 
 // Halation: light that has passed the emulsion is scattered (diffuse, about Lambertian), crosses the film base
@@ -388,22 +451,28 @@ void StelPhotoBloom::computeHalationWeights(float density)
 
 bool StelPhotoBloom::process(GLuint sceneTexture, int w, int h, float haloAlpha, float haloBeta,
                              int spikeLines, float spikeAngle, float spikeLength, QOpenGLVertexArrayObject* vao,
-                             float halationRadius, float halationDensity)
+                             float halationRadius, float halationDensity, float aureoleCore, float aureoleExtent, GLuint aureoleShare)
 {
 	spikesDone = false;
 	halationDone = false;
+	aureoleDone = false;
 	if (!shadersTried)
 	{
 		shadersTried = true;
 		initShaders();
 	}
-	if (!shadersOk || !vao || w < 8 || h < 8 || !(haloAlpha > 0.f) || !(haloBeta > 1.f))
+	const bool halo = haloAlpha > 0.f && haloBeta > 1.f;
+	const bool aureole = aureoleExtent > 0.f && aureoleCore > 0.f && aureoleShare != 0;
+	if (!shadersOk || !vao || w < 8 || h < 8 || !(halo || aureole))
 		return false;
 	if (w != sceneW || h != sceneH || levels.empty())
 		resize(w, h);
 	const int n = static_cast<int>(levels.size());
-	if (std::fabs(haloAlpha-weightsAlpha) > 1e-3f*haloAlpha || haloBeta != weightsBeta || n != weightsLevels)
+	if (halo && (std::fabs(haloAlpha-weightsAlpha) > 1e-3f*haloAlpha || haloBeta != weightsBeta || n != weightsLevels))
 		computeWeights(haloAlpha, haloBeta);
+	if (aureole && (std::fabs(aureoleCore-aureoleWeightsCore) > 1e-3f*aureoleCore || std::fabs(aureoleExtent-aureoleWeightsExtent) > 1e-3f*aureoleExtent
+	                || n != aureoleWeightsLevels))
+		computeAureoleWeights(aureoleCore, aureoleExtent);
 
 	auto& gl = *QOpenGLContext::currentContext()->functions();
 	GLint savedViewport[4];
@@ -563,7 +632,7 @@ bool StelPhotoBloom::process(GLuint sceneTexture, int w, int h, float haloAlpha,
 	combineProgram->bind();
 	combineProgram->setUniformValue("blurTex", 0);
 	combineProgram->setUniformValue("coarserTex", 1);
-	for (int k=n-1; k>=0; --k)
+	for (int k=n-1; k>=0 && halo; --k)
 	{
 		Level& level = levels[static_cast<size_t>(k)];
 		const bool hasCoarser = (k < n-1);
@@ -580,6 +649,91 @@ bool StelPhotoBloom::process(GLuint sceneTexture, int w, int h, float haloAlpha,
 		}
 		combineProgram->setUniformValue("weight", weights[static_cast<size_t>(k)]);
 		drawQuad(k==0 ? level.temp.get() : level.down.get(), level.w, level.h);
+	}
+	// 5. The aureole: its source (the scene above a background of about 4 core radii, times the share), its own
+	//    pyramid, and the weighted sum into the "aureole" buffers
+	if (aureole)
+	{
+		const int L = std::clamp(static_cast<int>(std::lround(std::log2(4.*static_cast<double>(aureoleCore)/levelSigma(0)))), 1, n-1);
+		const Level& bg = levels[static_cast<size_t>(L)];
+		if (!aureoleSourceFBO)
+			aureoleSourceFBO = makeFBO(gl, w, h);
+		aureoleSourceProgram->bind();
+		gl.glActiveTexture(GL_TEXTURE2);
+		gl.glBindTexture(GL_TEXTURE_2D, aureoleShare);
+		gl.glActiveTexture(GL_TEXTURE1);
+		gl.glBindTexture(GL_TEXTURE_2D, bg.blur->texture());
+		gl.glActiveTexture(GL_TEXTURE0);
+		gl.glBindTexture(GL_TEXTURE_2D, sceneTexture);
+		aureoleSourceProgram->setUniformValue("scene", 0);
+		aureoleSourceProgram->setUniformValue("background", 1);
+		aureoleSourceProgram->setUniformValue("share", 2);
+		const float f = static_cast<float>(1 << L);
+		aureoleSourceProgram->setUniformValue("backgroundScale", static_cast<float>(w)/(f*static_cast<float>(bg.w)), static_cast<float>(h)/(f*static_cast<float>(bg.h)));
+		drawQuad(aureoleSourceFBO.get(), w, h);
+		gl.glActiveTexture(GL_TEXTURE2);
+		gl.glBindTexture(GL_TEXTURE_2D, 0);
+		gl.glActiveTexture(GL_TEXTURE0);
+
+		for (int k=0; k<n; ++k)
+		{
+			Level& level = levels[static_cast<size_t>(k)];
+			if (k > 0 && !level.auDown)
+				level.auDown = makeFBO(gl, level.w, level.h);
+			if (!level.auTemp)
+				level.auTemp = makeFBO(gl, level.w, level.h);
+			if (!level.auBlur)
+				level.auBlur = makeFBO(gl, level.w, level.h);
+			if (!level.aureole)
+				level.aureole = makeFBO(gl, level.w, level.h);
+		}
+		auto auSource = [this](int k) -> GLuint
+		{
+			return k==0 ? aureoleSourceFBO->texture() : levels[static_cast<size_t>(k)].auDown->texture();
+		};
+		downProgram->bind();
+		downProgram->setUniformValue("src", 0);
+		for (int k=1; k<n; ++k)
+		{
+			gl.glBindTexture(GL_TEXTURE_2D, auSource(k-1));
+			gl.glUniform2i(downProgram->uniformLocation("srcSize"), levels[static_cast<size_t>(k-1)].w, levels[static_cast<size_t>(k-1)].h);
+			drawQuad(levels[static_cast<size_t>(k)].auDown.get(), levels[static_cast<size_t>(k)].w, levels[static_cast<size_t>(k)].h);
+		}
+		blurProgram->bind();
+		blurProgram->setUniformValue("src", 0);
+		blurProgram->setUniformValueArray("weights", taps, 5, 1);
+		for (int k=0; k<n; ++k)
+		{
+			Level& level = levels[static_cast<size_t>(k)];
+			gl.glBindTexture(GL_TEXTURE_2D, auSource(k));
+			blurProgram->setUniformValue("stepUV", 1.f/static_cast<float>(level.w), 0.f);
+			drawQuad(level.auTemp.get(), level.w, level.h);
+			gl.glBindTexture(GL_TEXTURE_2D, level.auTemp->texture());
+			blurProgram->setUniformValue("stepUV", 0.f, 1.f/static_cast<float>(level.h));
+			drawQuad(level.auBlur.get(), level.w, level.h);
+		}
+		combineProgram->bind();
+		combineProgram->setUniformValue("blurTex", 0);
+		combineProgram->setUniformValue("coarserTex", 1);
+		for (int k=n-1; k>=0; --k)
+		{
+			Level& level = levels[static_cast<size_t>(k)];
+			const bool hasCoarser = (k < n-1);
+			gl.glActiveTexture(GL_TEXTURE1);
+			gl.glBindTexture(GL_TEXTURE_2D, hasCoarser ? levels[static_cast<size_t>(k+1)].aureole->texture() : 0);
+			gl.glActiveTexture(GL_TEXTURE0);
+			gl.glBindTexture(GL_TEXTURE_2D, level.auBlur->texture());
+			combineProgram->setUniformValue("hasCoarser", hasCoarser);
+			if (hasCoarser)
+			{
+				const Level& coarser = levels[static_cast<size_t>(k+1)];
+				combineProgram->setUniformValue("coarserScale", static_cast<float>(level.w)/(2.f*static_cast<float>(coarser.w)),
+				                                                  static_cast<float>(level.h)/(2.f*static_cast<float>(coarser.h)));
+			}
+			combineProgram->setUniformValue("weight", aureoleWeights[static_cast<size_t>(k)]);
+			drawQuad(level.aureole.get(), level.w, level.h);
+		}
+		aureoleDone = true;
 	}
 	combineProgram->release();
 	vao->release();
@@ -613,6 +767,11 @@ QVector2D StelPhotoBloom::halationScale() const
 	const Level& lv = levels[static_cast<size_t>(halationLevel)];
 	const float f = static_cast<float>(1 << halationLevel);
 	return QVector2D(static_cast<float>(sceneW)/(f*static_cast<float>(lv.w)), static_cast<float>(sceneH)/(f*static_cast<float>(lv.h)));
+}
+
+GLuint StelPhotoBloom::aureoleTexture() const
+{
+	return (aureoleDone && !levels.empty() && levels.front().aureole) ? levels.front().aureole->texture() : 0;
 }
 
 GLuint StelPhotoBloom::haloTexture() const

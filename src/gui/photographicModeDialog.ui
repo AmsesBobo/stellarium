@@ -328,32 +328,46 @@
            </widget>
           </item>
           <item row="13" column="1">
-           <widget class="QSpinBox" name="humiditySpinBox">
-            <property name="toolTip">
-             <string>The relative humidity of the air near the ground. The particles of the haze take up water and grow when the air is humid (above about 80% much more): the sky scatters more light, whiter and more forwards, the stars and the Moon are dimmed more but less reddened near the horizon, and the light domes of towns and the light pollution of the sky become brighter and larger. The extinction coefficient and the light pollution (Bortle) settings are those of a normal humidity of 60%: at 60% nothing changes. Mist and fog are not modelled.</string>
-            </property>
-            <property name="alignment">
-             <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
-            </property>
-            <property name="keyboardTracking">
-             <bool>false</bool>
-            </property>
-            <property name="suffix">
-             <string> %</string>
-            </property>
-            <property name="minimum">
-             <number>20</number>
-            </property>
-            <property name="maximum">
-             <number>98</number>
-            </property>
-            <property name="singleStep">
-             <number>5</number>
-            </property>
-            <property name="value">
-             <number>60</number>
-            </property>
-           </widget>
+           <layout class="QHBoxLayout" name="humidityLayout" stretch="1,0">
+            <item>
+             <widget class="QSpinBox" name="humiditySpinBox">
+              <property name="toolTip">
+               <string>The relative humidity of the air near the ground. The particles of the haze take up water and grow when the air is humid (above about 80% much more): the sky scatters more light, whiter and more forwards, the stars and the Moon are dimmed more but less reddened near the horizon, and the light domes of towns and the light pollution of the sky become brighter and larger. The extinction coefficient and the light pollution (Bortle) settings are those of a normal humidity of 60%: at 60% they are as set (the aureoles come from all the haze). Mist and fog are not modelled.</string>
+              </property>
+              <property name="alignment">
+               <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+              </property>
+              <property name="keyboardTracking">
+               <bool>false</bool>
+              </property>
+              <property name="suffix">
+               <string> %</string>
+              </property>
+              <property name="minimum">
+               <number>20</number>
+              </property>
+              <property name="maximum">
+               <number>98</number>
+              </property>
+              <property name="singleStep">
+               <number>5</number>
+              </property>
+              <property name="value">
+               <number>60</number>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QCheckBox" name="aureoleCheckBox">
+              <property name="toolTip">
+               <string>The aureole of the haze: the light that the aerosols scatter forwards makes a glow of some degrees around the Moon, the planets and the bright stars (and the Sun). It is stronger in a hazier and more humid air and near the horizon, where the light passes through more air. Its profile is that of the aerosols of the default atmosphere model.</string>
+              </property>
+              <property name="text">
+               <string>Aureoles</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
           </item>
           <item row="14" column="0" colspan="2">
            <widget class="QCheckBox" name="infoLineCheckBox">

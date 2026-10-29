@@ -60,9 +60,20 @@ public:
 	//! @param spikeLength length scale l of the spike profile, pixels
 	//! @param halationRadius film only: radius of the halation ring (total reflection in the film base), pixels; 0: none
 	//! @param halationDensity film only: optical density of the antihalation layer (one pass, at normal incidence)
+	//! @param aureoleCore, aureoleExtent the atmospheric aureole (see aureoleTexture()): the radius of its core and its
+	//! extent, pixels; 0: none
+	//! @param aureoleShare a texture over the scene (red): the share of the light of each point that goes into its
+	//! aureole (it depends on the airmass; 0 for the ground)
+	//! The halo is left out when haloAlpha is 0 (only the aureole).
 	bool process(GLuint sceneTexture, int w, int h, float haloAlpha, float haloBeta,
 	             int spikeLines, float spikeAngle, float spikeLength, QOpenGLVertexArrayObject* vao,
-	             float halationRadius = 0.f, float halationDensity = 0.f);
+	             float halationRadius = 0.f, float halationDensity = 0.f,
+	             float aureoleCore = 0.f, float aureoleExtent = 0.f, GLuint aureoleShare = 0);
+	//! The aureole of the haze (full resolution), or 0: the light scattered forwards by the aerosols around every bright
+	//! point (stars, planets, the Moon: the scene above its smooth background, so that the sky does not get an aureole
+	//! of its own), each point times its share (aureoleShare), spread with the profile 1/(r^2 + core^2) out to about the
+	//! extent (unit integral). Add it to the scene.
+	GLuint aureoleTexture() const;
 	//! The halation image (unit integral of its profile), or 0. Its texture coordinates are those of the scene
 	//! times halationScale().
 	GLuint halationTexture() const;
@@ -89,7 +100,11 @@ private:
 		std::unique_ptr<QOpenGLFramebufferObject> down; //!< downsampled scene (later: accumulated halo)
 		std::unique_ptr<QOpenGLFramebufferObject> temp; //!< after the horizontal blur
 		std::unique_ptr<QOpenGLFramebufferObject> blur; //!< after both blurs
+		std::unique_ptr<QOpenGLFramebufferObject> aureole; //!< accumulated aureole (made when needed)
+		std::unique_ptr<QOpenGLFramebufferObject> auDown, auTemp, auBlur; //!< the pyramid of the aureole's source
 	};
+	std::unique_ptr<QOpenGLFramebufferObject> aureoleSourceFBO;  //!< the light that gets an aureole (full resolution)
+	std::unique_ptr<QOpenGLShaderProgram> aureoleSourceProgram;
 	std::vector<Level> levels;
 	int sceneW = 0, sceneH = 0;
 
@@ -124,6 +139,12 @@ private:
 	void initShaders();
 	void resize(int w, int h);
 	void computeWeights(float alpha, float beta);
+	//! The aureole: weights of the levels for its profile
+	std::vector<float> aureoleWeights;
+	float aureoleWeightsCore = -1.f, aureoleWeightsExtent = -1.f;
+	int aureoleWeightsLevels = 0;
+	bool aureoleDone = false;
+	void computeAureoleWeights(float core, float extent);
 	static double levelSigma(int k);
 };
 

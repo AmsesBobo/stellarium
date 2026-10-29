@@ -138,6 +138,7 @@ StelSkyDrawer::StelSkyDrawer(StelCore* acore) :
 	flagPhotoAirglow = conf->value("viewing/flag_photographic_airglow", true).toBool();
 	photoAirglowStrength = qBound(0.25f, conf->value("viewing/photographic_airglow_strength", 1.0).toFloat(), 2.f);
 	photoHumidity = qBound(20., conf->value("viewing/photographic_humidity", PHOTO_NORMAL_HUMIDITY).toDouble(), 98.);
+	flagPhotoAureole = conf->value("viewing/flag_photographic_aureole", true).toBool();
 	photoWhiteBalance = qBound(0, conf->value("viewing/photographic_white_balance", static_cast<int>(PhotoWBDaylight)).toInt(), 8);
 	photoWhiteBalanceKelvin = qBound(2000., conf->value("viewing/photographic_white_balance_kelvin", 5200.).toDouble(), 12000.);
 	flagPhotoVignetting = conf->value("viewing/flag_photographic_vignetting", true).toBool();

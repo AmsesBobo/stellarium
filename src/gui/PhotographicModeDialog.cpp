@@ -346,6 +346,7 @@ void PhotographicModeDialog::createDialogContent()
 		drawer->setPhotoHumidity(percent);
 	});
 	connect(drawer, &StelSkyDrawer::photoHumidityChanged,             this, &PhotographicModeDialog::updateCameraWidgets);
+	connectBoolProperty(ui->aureoleCheckBox,          "StelSkyDrawer.flagPhotoAureole");
 	connect(drawer, &StelSkyDrawer::extinctionCoefficientChanged,     this, &PhotographicModeDialog::updateCameraWidgets);
 	connectBoolProperty(ui->vignettingCheckBox,       "StelSkyDrawer.flagPhotoVignetting");
 	connectBoolProperty(ui->halphaModifiedCheckBox,   "StelSkyDrawer.flagPhotoHalphaModified");

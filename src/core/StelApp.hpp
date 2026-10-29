@@ -580,6 +580,8 @@ private:
 	qint64 photoMeterLastMs = -1;
 	//! The sky quality meter of the information line (StelSkyDrawer::applyPhotoSqmReading())
 	std::unique_ptr<class StelPhotoMeter> photoSqmMeter;
+	//! The share of the aureole of the haze over the screen (StelSkyDrawer::getPhotoAureoleMap())
+	GLuint photoAureoleMapTex = 0;
 	qint64 photoSqmLastMs = -1;
 	//! Photographic mode: the luminance at a point (see requestPhotoLuminance())
 	std::unique_ptr<class StelPhotoProbe> photoProbe;
@@ -605,6 +607,7 @@ private:
 		int bloomTex;
 		int bloomAmount;
 		int bloomIdentity;
+		int aureoleEnabled, aureoleTex, aureoleScale;
 		int spikeEnabled;
 		int spikeTex;
 		int spikeAmount;

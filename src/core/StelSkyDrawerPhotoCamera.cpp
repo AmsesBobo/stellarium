@@ -728,6 +728,7 @@ void StelSkyDrawer::savePhotoSettings(QSettings* conf) const
 	conf->setValue("astro/flag_photographic_film_spectral_sky", getFlagPhotoFilmSpectralSky());
 	conf->setValue("viewing/photographic_airglow_strength", getPhotoAirglowStrength());
 	conf->setValue("viewing/photographic_humidity", getPhotoHumidity());
+	conf->setValue("viewing/flag_photographic_aureole", getFlagPhotoAureole());
 	conf->setValue("viewing/photographic_tone_curve", getPhotoToneCurve());
 	conf->setValue("viewing/photographic_psf_min_fwhm", getPhotoPsfMinFwhm());
 	conf->setValue("viewing/photographic_seeing", getPhotoSeeing());

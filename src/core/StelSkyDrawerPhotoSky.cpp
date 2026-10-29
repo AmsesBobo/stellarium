@@ -396,6 +396,64 @@ void StelSkyDrawer::updatePhotoHumidity()
 	                                                      normal.depth, normal.angstrom, normal.asymmetry, normal.albedo, altitude);
 }
 
+void StelSkyDrawer::setFlagPhotoAureole(bool b)
+{
+	if (b == flagPhotoAureole)
+		return;
+	flagPhotoAureole = b;
+	StelApp::immediateSave("viewing/flag_photographic_aureole", b);
+	emit flagPhotoAureoleChanged(b);
+}
+
+namespace
+{
+// The aureole of the haze: the forward peak of the scattering by aerosols. Its shape is that of the phase function of
+// the aerosols of the default ShowMySky model, 1/(theta^2 + c^2) with c = 0.74 degrees (1/((1 - cos theta) 600 +
+// 0.05)), out to about 15 degrees. In the delta-M approximation (see LightDomes) the fraction g^2 of the scattered light
+// is this peak: the haze takes the optical depth tau albedo g^2 out of the beam into the aureole, which then goes on
+// almost like the direct light. Against the direct light the aureole is exp(tau albedo g^2 X) - 1 for the airmass X of
+// the aerosols (a layer of 1.2 km over a spherical Earth).
+constexpr double AUREOLE_CORE = 0.74*M_PI/180.;
+constexpr double AUREOLE_EXTENT = 15.*M_PI/180.;
+constexpr float AUREOLE_MAX = 3.f;  // near the horizon: the single scattering estimate no longer holds
+}
+
+bool StelSkyDrawer::getFlagPhotoAureoleActive() const
+{
+	if (!flagPhotoAureole || !getFlagPhotographicModeActive() || !getFlagHasAtmosphere()
+	    || core->getCurrentLocation().planetName != QStringLiteral("Earth"))
+		return false;
+	return photoAerosol.depth*photoAerosol.albedo*photoAerosol.asymmetry*photoAerosol.asymmetry > 0.002;
+}
+
+void StelSkyDrawer::getPhotoAureoleSize(const StelProjector& prj, float& coreSize, float& extent) const
+{
+	const double ppr = static_cast<double>(prj.getPixelPerRadAtCenter());
+	coreSize = static_cast<float>(AUREOLE_CORE*ppr);
+	extent = static_cast<float>(AUREOLE_EXTENT*ppr);
+}
+
+std::vector<float> StelSkyDrawer::getPhotoAureoleMap(int gw, int gh, int w, int h) const
+{
+	std::vector<float> map(static_cast<size_t>(gw)*gh, 0.f);
+	const double forward = photoAerosol.depth*photoAerosol.albedo*photoAerosol.asymmetry*photoAerosol.asymmetry;
+	const StelProjectorP prj = core->getProjection(StelCore::FrameAltAz, StelCore::RefractionOff);
+	constexpr double RH = 6371./1.2;
+	for (int j=0; j<gh; ++j)
+		for (int i=0; i<gw; ++i)
+		{
+			Vec3d v;
+			prj->unProject((i + 0.5)*w/gw, (j + 0.5)*h/gh, v);
+			v.normalize();
+			if (v[2] < 0.)
+				continue;  // the ground: no haze between it and the observer
+			const double s = v[2];
+			const double airmass = std::sqrt(RH*s*RH*s + 2.*RH + 1.) - RH*s;
+			map[static_cast<size_t>(j)*gw + i] = qMin(AUREOLE_MAX, static_cast<float>(std::expm1(forward*airmass)));
+		}
+	return map;
+}
+
 double StelSkyDrawer::getPhotoAirglowZenithLuminance() const
 {
 	if (!flagPhotoAirglow || !getFlagPhotographicModeActive() || !getFlagHasAtmosphere()

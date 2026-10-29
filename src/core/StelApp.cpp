@@ -1237,6 +1237,10 @@ uniform bool bloomEnabled;
 uniform sampler2D bloomTex;
 uniform highp float bloomAmount;   // halo fraction, relative to the light left in the image
 uniform highp float bloomIdentity; // part of the halo profile narrower than a pixel
+// Photographic mode: the aureole of the haze (see StelPhotoBloom), times its share over the screen
+uniform bool aureoleEnabled;
+uniform sampler2D aureoleTex;
+uniform highp float aureoleScale;  // the light left in the image -> all the light
 uniform bool spikeEnabled;
 uniform sampler2D spikeTex;
 uniform highp float spikeAmount;   // spike fraction, relative to the light left in the image
@@ -1254,6 +1258,8 @@ void main()
 		extra += bloomAmount * (texture2D(bloomTex, texcoord).rgb + bloomIdentity * rgba.rgb);
 	if (spikeEnabled)
 		extra += spikeAmount * texture2D(spikeTex, texcoord).rgb;
+	if (aureoleEnabled)
+		extra += aureoleScale * texture2D(aureoleTex, texcoord).rgb;
 	if (halationEnabled)
 		extra += halationAmount * texture2D(halationTex, texcoord * halationScale).rgb;
 	rgba.rgb += extra;
@@ -1271,6 +1277,9 @@ void main()
 	postProcessorUniformLocations.bloomTex      = postProcessorProgram->uniformLocation("bloomTex");
 	postProcessorUniformLocations.bloomAmount   = postProcessorProgram->uniformLocation("bloomAmount");
 	postProcessorUniformLocations.bloomIdentity = postProcessorProgram->uniformLocation("bloomIdentity");
+	postProcessorUniformLocations.aureoleEnabled = postProcessorProgram->uniformLocation("aureoleEnabled");
+	postProcessorUniformLocations.aureoleTex = postProcessorProgram->uniformLocation("aureoleTex");
+	postProcessorUniformLocations.aureoleScale = postProcessorProgram->uniformLocation("aureoleScale");
 	postProcessorUniformLocations.spikeEnabled  = postProcessorProgram->uniformLocation("spikeEnabled");
 	postProcessorUniformLocations.spikeTex      = postProcessorProgram->uniformLocation("spikeTex");
 	postProcessorUniformLocations.spikeAmount   = postProcessorProgram->uniformLocation("spikeAmount");
@@ -1430,7 +1439,9 @@ void StelApp::highGraphicsModeDraw()
 
 	// Photographic mode: the lens halo of the whole image (bloom)
 	bool bloomDone = false;
-	if (photoMode && skyDrawer->getFlagPhotoBloomActive())
+	const bool bloomActive = photoMode && skyDrawer->getFlagPhotoBloomActive();
+	const bool aureoleActive = photoMode && skyDrawer->getFlagPhotoAureoleActive();
+	if (bloomActive || aureoleActive)
 	{
 #if !QT_CONFIG(opengles2)
 		if (sceneMultisampledFBO)
@@ -1445,13 +1456,31 @@ void StelApp::highGraphicsModeDraw()
 #endif
 		if (!photoBloom)
 			photoBloom.reset(new StelPhotoBloom);
-		const bool spikes = skyDrawer->getPhotoSpikeFractionEffective() > 0.f;
+		const bool spikes = bloomActive && skyDrawer->getPhotoSpikeFractionEffective() > 0.f;
 		const StelSkyDrawer::PhotoHalationParams halation = skyDrawer->getPhotoHalationParams(*core->getProjection(StelCore::FrameJ2000));
+		float aureoleCore = 0.f, aureoleExtent = 0.f;
+		if (aureoleActive)
+		{
+			skyDrawer->getPhotoAureoleSize(*core->getProjection(StelCore::FrameAltAz), aureoleCore, aureoleExtent);
+			// the share of the light of each point that goes into its aureole (from its airmass)
+			constexpr int GW = 64, GH = 36;
+			const std::vector<float> share = skyDrawer->getPhotoAureoleMap(GW, GH, static_cast<int>(w), static_cast<int>(h));
+			if (!photoAureoleMapTex)
+				GL(gl->glGenTextures(1, &photoAureoleMapTex));
+			GL(gl->glBindTexture(GL_TEXTURE_2D, photoAureoleMapTex));
+			GL(gl->glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, GW, GH, 0, GL_RED, GL_FLOAT, share.data()));
+			GL(gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR));
+			GL(gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR));
+			GL(gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE));
+			GL(gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE));
+			GL(gl->glBindTexture(GL_TEXTURE_2D, 0));
+		}
 		bloomDone = photoBloom->process(sceneFBO->texture(), static_cast<int>(w), static_cast<int>(h),
-		                                skyDrawer->getPhotoHaloAlpha(), StelSkyDrawer::getPhotoHaloBeta(),
+		                                bloomActive ? skyDrawer->getPhotoHaloAlpha() : 0.f, StelSkyDrawer::getPhotoHaloBeta(),
 		                                spikes ? skyDrawer->getPhotoSpikeLines() : 0,
 		                                StelSkyDrawer::getPhotoSpikeAngle(), skyDrawer->getPhotoSpikeLength(),
-		                                postProcessorVAO.get(), halation.radius, halation.density);
+		                                postProcessorVAO.get(), bloomActive ? halation.radius : 0.f, halation.density,
+		                                aureoleCore, aureoleExtent, aureoleActive ? photoAureoleMapTex : 0);
 	}
 
 	// The meter and the luminance probe need a plain texture: the multisampled scene resolved into sceneFBO (once)
@@ -1597,7 +1626,19 @@ void StelApp::highGraphicsModeDraw()
 		postProcessorProgram->setUniformValue(postProcessorUniformLocations.photoExposure, photoExposure);
 		setPhotoToneUniforms(*postProcessorProgram, *skyDrawer, *core->getProjection(StelCore::FrameJ2000));
 
-		const bool haloOn = bloomDone && skyDrawer->getPhotoHaloStrength() > 0.;
+		const bool haloOn = bloomDone && bloomActive && skyDrawer->getPhotoHaloStrength() > 0.;
+		const bool aureoleOn = bloomDone && photoBloom->aureoleTexture() != 0;
+		postProcessorProgram->setUniformValue(postProcessorUniformLocations.aureoleEnabled, aureoleOn);
+		postProcessorProgram->setUniformValue(postProcessorUniformLocations.aureoleTex, 5);
+		if (aureoleOn)
+		{
+			GL(gl->glActiveTexture(GL_TEXTURE0 + 5));
+			GL(gl->glBindTexture(GL_TEXTURE_2D, photoBloom->aureoleTexture()));
+			GL(gl->glActiveTexture(GL_TEXTURE0));
+			// the stars are drawn with the share of their light that is not in the halo and spikes
+			const float coreFraction = bloomActive ? skyDrawer->getPhotoCoreFraction() : 1.f;
+			postProcessorProgram->setUniformValue(postProcessorUniformLocations.aureoleScale, coreFraction > 0.f ? 1.f/coreFraction : 0.f);
+		}
 		const bool spikesOn = bloomDone && photoBloom->spikeTexture() != 0;
 		postProcessorProgram->setUniformValue(postProcessorUniformLocations.bloomEnabled, haloOn);
 		postProcessorProgram->setUniformValue(postProcessorUniformLocations.spikeEnabled, spikesOn);

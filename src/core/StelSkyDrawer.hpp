@@ -144,6 +144,9 @@ class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 	//! the haze scatters more light, whiter and more forward. The extinction coefficient is the one at a normal
 	//! humidity (60%); see getPhotoAerosol().
 	Q_PROPERTY(double photoHumidity READ getPhotoHumidity WRITE setPhotoHumidity NOTIFY photoHumidityChanged)
+	//! Photographic mode: the aureole of the haze, the glow around the Moon, planets and bright stars from the light
+	//! that the aerosols scatter forwards (stronger near the horizon and in humid air)
+	Q_PROPERTY(bool flagPhotoAureole READ getFlagPhotoAureole WRITE setFlagPhotoAureole NOTIFY flagPhotoAureoleChanged)
 	//! White balance of the camera (see PhotoWhiteBalance): 0 = automatic, 1 = daylight, 2 = cloudy, 3 = shade,
 	//! 4 = tungsten, 5 = fluorescent, 6 = flash, 7 = custom color temperature, 8 = neutral (D65, the rendering as it is)
 	Q_PROPERTY(int photoWhiteBalance READ getPhotoWhiteBalance WRITE setPhotoWhiteBalance NOTIFY photoWhiteBalanceChanged)
@@ -414,6 +417,13 @@ public:
 	double getPhotoHazeLightFactor() const {return photoHazeLightFactor;}
 	//! The normal humidity: the extinction coefficient and the light pollution setting are for it
 	static constexpr double PHOTO_NORMAL_HUMIDITY = 60.;
+	//! Whether the aureole of the haze is drawn now (on, photographic mode, on the Earth with its atmosphere, some haze)
+	bool getFlagPhotoAureoleActive() const;
+	//! The aureole of the haze on the screen: the radius of its core and its extent (pixels, at the centre)
+	void getPhotoAureoleSize(const StelProjector& prj, float& core, float& extent) const;
+	//! The share of the light that the haze scatters into the aureole, against the light that comes straight through,
+	//! on a grid of gw x gh cells over the scene image (w x h pixels, from the lower left): it grows with the airmass
+	std::vector<float> getPhotoAureoleMap(int gw, int gh, int w, int h) const;
 	//! Optical vignetting: offset of the pupil image against the lens barrel in the corner of the frame,
 	//! in units of the barrel radius. 0.81 gives half the light in the corner when wide open.
 	static constexpr float PHOTO_VIGNETTING_SHIFT = 0.81f;
@@ -1163,6 +1173,8 @@ public slots:
 
 	void setPhotoHumidity(double percent);
 	double getPhotoHumidity() const {return photoHumidity;}
+	void setFlagPhotoAureole(bool b);
+	bool getFlagPhotoAureole() const {return flagPhotoAureole;}
 
 	//! Get the current valid extinction computation object.
 	const Extinction& getExtinction() const {return extinction;}
@@ -1253,6 +1265,7 @@ signals:
 	void flagPhotoAirglowChanged(bool b);
 	void photoAirglowStrengthChanged(double strength);
 	void photoHumidityChanged(double percent);
+	void flagPhotoAureoleChanged(bool b);
 	void photoWhiteBalanceChanged(int wb);
 	void photoWhiteBalanceKelvinChanged(double kelvin);
 	void flagPhotoVignettingChanged(bool b);
@@ -1661,6 +1674,7 @@ private:
 	float photoAirglowStrength = 1.f;
 	//! See photoHumidity
 	double photoHumidity = PHOTO_NORMAL_HUMIDITY;
+	bool flagPhotoAureole = true;
 	//! The extinction coefficient as set (the one in use, in extinction, follows the humidity)
 	float extinctionBase = 0.13f;
 	PhotoAerosol photoAerosol;
