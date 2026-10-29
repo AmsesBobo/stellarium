@@ -264,6 +264,18 @@ public:
 	double getEyeAcuityLimit() const;
 	//! Naked eye mode: pixels of the scene per degree for the eye of the viewer (see eyeScreenFov)
 	double getEyePixelsPerDegree(const StelProjector& prj) const;
+	//! Naked eye mode: the colors of bright objects in the dark. The cones see the color of an object when its own
+	//! luminance is high enough, whatever the adaptation of the eye: from EYE_COLOR_MIN_LUMINANCE (no color) to
+	//! EYE_COLOR_FULL_LUMINANCE (full color, cd/m^2 for an observer of the reference age), on a log scale. A point
+	//! source counts with its light above its surroundings as if it were concentrated in EYE_COLOR_PIXEL minutes of
+	//! arc (whatever the size of the pixels on the sky). So the Moon (thousands of cd/m^2) keeps its color, and so do
+	//! Mars and the brightest stars; faint stars and the sky do not.
+	static constexpr double EYE_COLOR_MIN_LUMINANCE = 0.05;
+	static constexpr double EYE_COLOR_FULL_LUMINANCE = 3.;
+	static constexpr double EYE_COLOR_PIXEL = 1.5;
+	//! Naked eye mode: the luminance (cd/m^2, reference) of a scene value after the exposure compensation, for the
+	//! colors of the cones
+	double getEyeLuminancePerSceneValue(const StelProjector& prj) const;
 	//! Naked eye mode: the glare of the eye, the point spread function of Spencer, Shirley, Zimmerman & Greenberg
 	//! (1995, "Physically-based glare effects for digital images", SIGGRAPH 95), in degrees for the eye:
 	//!   f0 = exp(-(theta/0.02)^2)       the core (it stays the image itself)

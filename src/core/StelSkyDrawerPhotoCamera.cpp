@@ -102,6 +102,13 @@ double StelSkyDrawer::getEyePixelsPerDegree(const StelProjector& prj) const
 	return static_cast<double>(prj.getPixelPerRadAtCenter())*(M_PI/180.)*viewFov/eyeScreenFov;
 }
 
+double StelSkyDrawer::getEyeLuminancePerSceneValue(const StelProjector& prj) const
+{
+	Q_UNUSED(prj)
+	// scene value = luminance x light factor x scene scale, times the exposure factor in the final stage
+	return eyeLightFactor/qMax(1e-30, static_cast<double>(getPhotoSceneScale())*static_cast<double>(getPhotoExposureFactor()));
+}
+
 StelSkyDrawer::EyeGlareParams StelSkyDrawer::getEyeGlareParams(const StelProjector& prj) const
 {
 	EyeGlareParams p;
@@ -989,11 +996,15 @@ void StelSkyDrawer::setPhotoToneCurve(int curve)
 Vec3f StelSkyDrawer::photoAnnotationCompensation(const Vec3f& linearColor) const
 {
 	const float invExposure = 1.f / getPhotoExposureFactor();
-	// The eye: no white balance, the inverse of the response of the retina
+	// The eye: no white balance, the inverse of the response of the retina to the luminance (the color is kept)
 	if (getFlagNakedEyeModeActive())
-		return Vec3f(photoToneCurveInverse(qBound(0.f, linearColor[0], 0.998f)) * invExposure,
-		             photoToneCurveInverse(qBound(0.f, linearColor[1], 0.998f)) * invExposure,
-		             photoToneCurveInverse(qBound(0.f, linearColor[2], 0.998f)) * invExposure);
+	{
+		const Vec3f c(qBound(0.f, linearColor[0], 0.998f), qBound(0.f, linearColor[1], 0.998f), qBound(0.f, linearColor[2], 0.998f));
+		const float lum = 0.2126f*c[0] + 0.7152f*c[1] + 0.0722f*c[2];
+		if (!(lum > 0.f))
+			return Vec3f(0.f);
+		return c * (photoToneCurveInverse(qMin(lum, 0.998f))/lum * invExposure);
+	}
 	// Undo the white balance as well (the camera stage applies it before the tone curve)
 	const auto unbalance = [this](const Vec3f& v) {
 		const float* m = photoWBInverse;

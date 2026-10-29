@@ -925,19 +925,42 @@ uniform highp float photoExposure;
 // The coverage of the lines and labels in the pixel (the alpha of the scene, see StelPainter::setAnnotationCoverage())
 highp float annotationCoverage = 0.;
 // Naked eye mode: the mesopic vision (CIE 191:2010). The input of the response of the retina is the mesopic
-// luminance for the share m of the cones, relative to that of the adapting field (eyeMesopicNorm), and the
-// colors fade as m goes to 0 (the rods do not see color). Lines and labels keep their colors.
+// luminance for the share m of the cones, relative to that of light of the spectrum of the adapting field (its
+// scotopic/photopic ratio eyeFieldRatio), and the colors fade as m goes to 0 (the rods do not see color). The share
+// of the cones is that of the adaptation (eyeMesopicM), but at least what the light of the point itself gives them:
+// a bright object (the Moon, Mars, the brightest stars) keeps its color in the dark. Its luminance (reference
+// cd/m^2, eyeLuminancePerValue) from eyeColorMin to eyeColorMax cd/m^2 (log scale) brings the share from 0 to 1. A
+// point source counts with the light it has above its surroundings (eyeBackground, the darkest of a few pixels
+// around it) as if it were concentrated in 1.5 minutes of arc (eyePointGain: the area of a pixel on the sky over
+// that), so that its color does not depend on the size of the pixels. Lines and labels keep their colors.
 uniform bool eyeMesopic;
 uniform highp float eyeMesopicM;
-uniform highp float eyeMesopicNorm;
+uniform highp float eyeFieldRatio;
 uniform highp vec3 eyeScotopicWeights;
 uniform highp float eyeMesopicV0;
+uniform highp float eyeLuminancePerValue;
+uniform highp float eyePointGain;
+uniform highp float eyeBackgroundRadius; // pixels
+highp float eyeBackground = -1.;         // the luminance around the pixel (scene value), -1: not known
+uniform highp float eyeColorMin;
+uniform highp float eyeColorMax;
 highp vec3 eyeMesopicVision(highp vec3 x)
 {
 	highp float lp = dot(x, vec3(0.2126, 0.7152, 0.0722));
 	highp float ls = max(0., dot(x, eyeScotopicWeights));
-	highp float m = eyeMesopicM;
-	highp float lmes = (m*lp + (1. - m)*ls*eyeMesopicV0) / (m + (1. - m)*eyeMesopicV0) * eyeMesopicNorm;
+	highp float lpOwn = lp;
+	if (eyeBackground >= 0.)
+	{
+		highp float bg = min(eyeBackground, lp);
+		lpOwn = max(bg, lp + (lp - bg)*(eyePointGain - 1.));
+	}
+	highp float own = clamp(log(max(lpOwn*eyeLuminancePerValue, 1e-30)/eyeColorMin) / log(eyeColorMax/eyeColorMin), 0., 1.);
+	highp float m = max(eyeMesopicM, own);
+	highp float v0 = eyeMesopicV0;
+	highp float lmes = (m*lp + (1. - m)*ls*v0) / (m + (1. - m)*v0);
+	// light of the spectrum of the field keeps its value, whatever the share of the cones
+	highp float field = (m + (1. - m)*eyeFieldRatio*v0) / (m + (1. - m)*v0);
+	lmes /= field;
 	highp vec3 color = lp > 0. ? x/lp : vec3(1.);
 	highp vec3 seen = lmes * mix(vec3(1.), color, m);
 	return mix(seen, x, annotationCoverage);
@@ -945,6 +968,7 @@ highp vec3 eyeMesopicVision(highp vec3 x)
 // Tone curve: 0 = linear with a soft shoulder; otherwise y = x^a / (x^(a*d)*b + c) up to the
 // clipping point (white above). photoTone = (a, a*d, b, c), see StelSkyDrawer::PhotoToneParams
 uniform int photoToneCurve;
+uniform bool photoToneLuminance; // the curve on the luminance, the color kept (naked eye mode)
 uniform highp vec4 photoTone;
 uniform highp float photoToneClip;
 // White balance: light of the chosen color temperature -> display white (linear sRGB)
@@ -1144,6 +1168,20 @@ highp vec3 cameraResponse(highp vec3 lin)
 		x = eyeMesopicVision(x);
 	if (photoRecip)
 		x = filmReciprocity(x);
+	if (photoToneCurve != 0 && photoToneLuminance)
+	{
+		// The eye (naked eye mode): the response to the luminance, the color kept. Only what would be brighter than
+		// white turns towards white (as little as needed): a bright orange star stays orange.
+		highp float lum = dot(x, vec3(0.2126, 0.7152, 0.0722));
+		highp float lc = min(lum, photoToneClip);
+		highp float d = pow(lc, photoTone.x) / (pow(lc, photoTone.y) * photoTone.z + photoTone.w);
+		d = (lum >= photoToneClip) ? 1. : min(d, 1.);
+		highp vec3 c = lum > 0. ? x * (d / lum) : vec3(0.);
+		highp float top = max(c.r, max(c.g, c.b));
+		if (top > 1.)
+			c = mix(c, vec3(d), (top - 1.) / max(top - d, 1e-6));
+		return c;
+	}
 	if (photoToneCurve != 0)
 	{
 		// Each channel separately, as in a camera: bright colored light turns white when it saturates
@@ -1187,10 +1225,17 @@ void setPhotoToneUniforms(QOpenGLShaderProgram& program, const StelSkyDrawer& dr
 		const double m = adaptation.getMesopicM();
 		const double k = adaptation.getScotopicRatio();
 		constexpr double v0 = StelEyeAdaptation::MESOPIC_V0;
-		// The adapting field (photopic luminance 1, scotopic k) keeps its value: the semi-saturation is set for it
-		const double field = StelEyeAdaptation::mesopicLuminance(1., k, m);
+		// Light of the spectrum of the adapting field (scotopic/photopic k) keeps its value: the semi-saturation is
+		// set for it
 		program.setUniformValue("eyeMesopicM", static_cast<float>(m));
-		program.setUniformValue("eyeMesopicNorm", static_cast<float>(field > 0. ? 1./field : 1.));
+		program.setUniformValue("eyeFieldRatio", static_cast<float>(k));
+		program.setUniformValue("eyeLuminancePerValue", static_cast<float>(drawer.getEyeLuminancePerSceneValue(prj)));
+		// the area of a pixel on the sky over (1.5')^2
+		const double pixelArcmin = (180.*60./M_PI)/qMax(1e-6, static_cast<double>(prj.getPixelPerRadAtCenter()));
+		program.setUniformValue("eyePointGain", static_cast<float>(std::pow(pixelArcmin/StelSkyDrawer::EYE_COLOR_PIXEL, 2.)));
+		program.setUniformValue("eyeBackgroundRadius", 6.f);
+		program.setUniformValue("eyeColorMin", static_cast<float>(StelSkyDrawer::EYE_COLOR_MIN_LUMINANCE));
+		program.setUniformValue("eyeColorMax", static_cast<float>(StelSkyDrawer::EYE_COLOR_FULL_LUMINANCE));
 		program.setUniformValue("eyeScotopicWeights", static_cast<float>(StelEyeAdaptation::SCOTOPIC_RED),
 		                        static_cast<float>(StelEyeAdaptation::SCOTOPIC_GREEN), static_cast<float>(StelEyeAdaptation::SCOTOPIC_BLUE));
 		program.setUniformValue("eyeMesopicV0", static_cast<float>(v0));
@@ -1198,6 +1243,7 @@ void setPhotoToneUniforms(QOpenGLShaderProgram& program, const StelSkyDrawer& dr
 	program.setUniformValue("photoFrame", QVector4D(frame[0], frame[1], frame[0] + frame[2], frame[1] + frame[3]));
 	const StelSkyDrawer::PhotoToneParams& p = drawer.getPhotoToneParams();
 	program.setUniformValue("photoToneCurve", drawer.getPhotoActiveToneCurve());
+	program.setUniformValue("photoToneLuminance", drawer.getFlagNakedEyeModeActive());
 	const Vec3f mono = drawer.getPhotoFilmMonoWeights();
 	program.setUniformValue("photoMonochrome", mono[0] + mono[1] + mono[2] > 0.f);
 	program.setUniformValue("photoMonoWeights", mono[0], mono[1], mono[2]);
@@ -1312,6 +1358,19 @@ void main()
 		extra += halationAmount * texture2D(halationTex, texcoord * halationScale).rgb;
 	rgba.rgb += extra;
 	annotationCoverage = photoMode ? clamp(rgba.a, 0., 1.) : 0.;
+	if (eyeMesopic)
+	{
+		// the darkest of 8 points around (for the colors of point sources)
+		highp vec2 texel = vec2(1.)/vec2(textureSize(tex, 0));
+		highp float bg = 1e30;
+		for (int i = 0; i < 8; ++i)
+		{
+			highp float angle = 0.7853982*float(i);
+			highp vec3 c = texture2D(tex, texcoord + eyeBackgroundRadius*vec2(cos(angle), sin(angle))*texel).rgb;
+			bg = min(bg, max(0., dot(c, vec3(0.2126, 0.7152, 0.0722))));
+		}
+		eyeBackground = bg*photoExposure;
+	}
 	FRAG_COLOR = vec4(dither(photoFrameMasked(linearToSRGB(cameraResponse(rgba.rgb)), gl_FragCoord.xy)), photoMode ? 1. : rgba.a);
 }
 )");
@@ -1361,6 +1420,20 @@ void main()
 		rgba += texelFetch(tex, ivec2(gl_FragCoord.xy), n);
 	rgba /= float(numMultiSamples);
 	annotationCoverage = photoMode ? clamp(rgba.a, 0., 1.) : 0.;
+	if (eyeMesopic)
+	{
+		// the darkest of 8 points around (for the colors of point sources), from the first sample
+		ivec2 size = textureSize(tex);
+		highp float bg = 1e30;
+		for (int i = 0; i < 8; ++i)
+		{
+			highp float angle = 0.7853982*float(i);
+			ivec2 p = clamp(ivec2(gl_FragCoord.xy + eyeBackgroundRadius*vec2(cos(angle), sin(angle))), ivec2(0), size - ivec2(1));
+			highp vec3 c = texelFetch(tex, p, 0).rgb;
+			bg = min(bg, max(0., dot(c, vec3(0.2126, 0.7152, 0.0722))));
+		}
+		eyeBackground = bg*photoExposure;
+	}
 	FRAG_COLOR = vec4(dither(photoFrameMasked(linearToSRGB(cameraResponse(rgba.rgb)), gl_FragCoord.xy)), photoMode ? 1. : rgba.a);
 }
 )");
