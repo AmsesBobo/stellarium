@@ -347,6 +347,8 @@ void PhotographicModeDialog::createDialogContent()
 	});
 	connect(drawer, &StelSkyDrawer::photoHumidityChanged,             this, &PhotographicModeDialog::updateCameraWidgets);
 	connectBoolProperty(ui->aureoleCheckBox,          "StelSkyDrawer.flagPhotoAureole");
+	connectBoolProperty(ui->humidityCheckBox,         "StelSkyDrawer.flagPhotoHumidity");
+	connect(drawer, &StelSkyDrawer::flagPhotoHumidityChanged,         this, &PhotographicModeDialog::updateCameraWidgets);
 	connect(drawer, &StelSkyDrawer::extinctionCoefficientChanged,     this, &PhotographicModeDialog::updateCameraWidgets);
 	connectBoolProperty(ui->vignettingCheckBox,       "StelSkyDrawer.flagPhotoVignetting");
 	connectBoolProperty(ui->halphaModifiedCheckBox,   "StelSkyDrawer.flagPhotoHalphaModified");
@@ -901,6 +903,8 @@ void PhotographicModeDialog::updateCameraWidgets()
 		ui->humiditySpinBox->setValue(qRound(drawer->getPhotoHumidity()));
 		// the extinction coefficient it gives (the one set is for 60%)
 		ui->humiditySpinBox->setSuffix(QString(" %   (k = %1)").arg(QLocale().toString(static_cast<double>(drawer->getExtinction().getExtinctionCoefficient()), 'f', 2)));
+		ui->humiditySpinBox->setEnabled(drawer->getFlagPhotoHumidity());
+		ui->aureoleCheckBox->setEnabled(drawer->getFlagPhotoHumidity());
 	}
 	{
 		const QSignalBlocker blocker(ui->detectionSnrSpinBox);

@@ -359,7 +359,8 @@ void StelSkyDrawer::setPhotoHumidity(double percent)
 
 void StelSkyDrawer::updatePhotoHumidity()
 {
-	const bool active = getFlagPhotographicModeActive() && core->getCurrentLocation().planetName == QStringLiteral("Earth");
+	// without the humidity model: the normal humidity (the extinction as set)
+	const bool active = flagPhotoHumidity && getFlagPhotographicModeActive() && core->getCurrentLocation().planetName == QStringLiteral("Earth");
 	const double humidity = active ? photoHumidity : PHOTO_NORMAL_HUMIDITY;
 	const double altitude = qMax(0., static_cast<double>(core->getCurrentLocation().altitude)/1000.);  // km
 	const double base = static_cast<double>(extinctionBase);
@@ -397,6 +398,16 @@ void StelSkyDrawer::updatePhotoHumidity()
 	                                                      normal.depth, normal.angstrom, normal.asymmetry, normal.albedo, altitude);
 }
 
+void StelSkyDrawer::setFlagPhotoHumidity(bool b)
+{
+	if (b == flagPhotoHumidity)
+		return;
+	flagPhotoHumidity = b;
+	StelApp::immediateSave("viewing/flag_photographic_humidity", b);
+	updatePhotoHumidity();
+	emit flagPhotoHumidityChanged(b);
+}
+
 void StelSkyDrawer::setFlagPhotoAureole(bool b)
 {
 	if (b == flagPhotoAureole)
@@ -421,7 +432,7 @@ constexpr float AUREOLE_MAX = 3.f;  // near the horizon: the single scattering e
 
 bool StelSkyDrawer::getFlagPhotoAureoleActive() const
 {
-	if (!flagPhotoAureole || !getFlagPhotographicModeActive() || !getFlagHasAtmosphere()
+	if (!flagPhotoHumidity || !flagPhotoAureole || !getFlagPhotographicModeActive() || !getFlagHasAtmosphere()
 	    || core->getCurrentLocation().planetName != QStringLiteral("Earth"))
 		return false;
 	return photoAerosol.depth*photoAerosol.albedo*photoAerosol.asymmetry*photoAerosol.asymmetry > 0.002;
@@ -457,7 +468,7 @@ std::vector<float> StelSkyDrawer::getPhotoAureoleMap(int gw, int gh, int w, int 
 
 void StelSkyDrawer::setPhotoHazeUniforms(QOpenGLShaderProgram& program, double meanSkyLuminance, bool addLight) const
 {
-	const bool active = getFlagPhotographicModeActive() && getFlagHasAtmosphere()
+	const bool active = flagPhotoHumidity && getFlagPhotographicModeActive() && getFlagHasAtmosphere()
 	                    && core->getCurrentLocation().planetName == QStringLiteral("Earth");
 	const double altitude = qMax(0., static_cast<double>(core->getCurrentLocation().altitude)/1000.);
 	// The aerosols of the ShowMySky models (atmosphere/default/params.atmo: 1.0333e8 m^-3 over 1.2 km, 0.042968 um^2):

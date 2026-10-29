@@ -144,6 +144,9 @@ class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 	//! the haze scatters more light, whiter and more forward. The extinction coefficient is the one at a normal
 	//! humidity (60%); see getPhotoAerosol().
 	Q_PROPERTY(double photoHumidity READ getPhotoHumidity WRITE setPhotoHumidity NOTIFY photoHumidityChanged)
+	//! Photographic mode: whether the humidity and the haze are modelled (the humidity, the haze layer over the sky and
+	//! the aureoles); off: the extinction and the sky as set, without them
+	Q_PROPERTY(bool flagPhotoHumidity READ getFlagPhotoHumidity WRITE setFlagPhotoHumidity NOTIFY flagPhotoHumidityChanged)
 	//! Photographic mode: the aureole of the haze, the glow around the Moon, planets and bright stars from the light
 	//! that the aerosols scatter forwards (stronger near the horizon and in humid air)
 	Q_PROPERTY(bool flagPhotoAureole READ getFlagPhotoAureole WRITE setFlagPhotoAureole NOTIFY flagPhotoAureoleChanged)
@@ -1179,6 +1182,8 @@ public slots:
 	double getPhotoHumidity() const {return photoHumidity;}
 	void setFlagPhotoAureole(bool b);
 	bool getFlagPhotoAureole() const {return flagPhotoAureole;}
+	void setFlagPhotoHumidity(bool b);
+	bool getFlagPhotoHumidity() const {return flagPhotoHumidity;}
 
 	//! Get the current valid extinction computation object.
 	const Extinction& getExtinction() const {return extinction;}
@@ -1270,6 +1275,7 @@ signals:
 	void photoAirglowStrengthChanged(double strength);
 	void photoHumidityChanged(double percent);
 	void flagPhotoAureoleChanged(bool b);
+	void flagPhotoHumidityChanged(bool b);
 	void photoWhiteBalanceChanged(int wb);
 	void photoWhiteBalanceKelvinChanged(double kelvin);
 	void flagPhotoVignettingChanged(bool b);
@@ -1679,6 +1685,7 @@ private:
 	//! See photoHumidity
 	double photoHumidity = PHOTO_NORMAL_HUMIDITY;
 	bool flagPhotoAureole = true;
+	bool flagPhotoHumidity = true;
 	//! The extinction coefficient as set (the one in use, in extinction, follows the humidity)
 	float extinctionBase = 0.13f;
 	PhotoAerosol photoAerosol;

@@ -321,7 +321,10 @@
            </layout>
           </item>
           <item row="13" column="0">
-           <widget class="QLabel" name="humidityLabel">
+           <widget class="QCheckBox" name="humidityCheckBox">
+            <property name="toolTip">
+             <string>Model the humidity and the haze: the haze grows with the humidity, it lies over the sky of the atmosphere model (which holds almost no aerosols) as a whitish veil and a glow around the Sun and the Moon, and gives aureoles. Off: the extinction and the sky as set, as without these.</string>
+            </property>
             <property name="text">
              <string>Humidity:</string>
             </property>
