@@ -66,6 +66,20 @@ void main()
 }
 )";
 
+// The source of the halo, the aureole and the spikes: the scene without the lines and labels (their coverage in alpha),
+// above the threshold
+const char* sourceSource = R"(
+uniform sampler2D scene;
+uniform highp float threshold;
+highp float sane(highp float x) { return (x >= 0.) ? min(x, 1e30) : 0.; }
+void main()
+{
+	highp vec4 t = texelFetch(scene, ivec2(gl_FragCoord.xy), 0);
+	highp vec3 c = vec3(sane(t.r), sane(t.g), sane(t.b)) * (1. - clamp(t.a, 0., 1.));
+	FRAG_COLOR = vec4(max(c - vec3(threshold), vec3(0.)), 1.);
+}
+)";
+
 // Separable Gaussian blur with 9 taps
 const char* blurSource = R"(
 VARYING vec2 texcoord;
@@ -244,7 +258,8 @@ void StelPhotoBloom::initShaders()
 	spikeProgram = makeProgram(makeSpikeSource(), "photographic bloom: diffraction spikes");
 	halationProgram = makeProgram(halationSource, "photographic bloom: halation of the film");
 	aureoleSourceProgram = makeProgram(aureoleSourceSource, "photographic bloom: aureole of the haze");
-	shadersOk = downProgram && blurProgram && combineProgram && spikeProgram && halationProgram && aureoleSourceProgram;
+	sourceProgram = makeProgram(sourceSource, "photographic bloom: source");
+	shadersOk = downProgram && blurProgram && combineProgram && spikeProgram && halationProgram && aureoleSourceProgram && sourceProgram;
 	if (!shadersOk)
 		qWarning() << "Photographic mode: the bloom shaders could not be built, bloom is off";
 }
@@ -276,7 +291,9 @@ void StelPhotoBloom::resize(int w, int h)
 	halationFBO.reset();
 	halationLevel = -1;
 	aureoleSourceFBO.reset();
+	sourceFBO = makeFBO(gl, w, h);
 	weightsAlpha = -1.f; // recompute the weights for the new number of levels
+	weightsMixtureVersion = -1;
 	aureoleWeightsCore = -1.f;
 }
 
@@ -336,6 +353,57 @@ void StelPhotoBloom::computeWeights(float alpha, float beta)
 	weightsAlpha = alpha;
 	weightsBeta = beta;
 	weightsLevels = n;
+}
+
+void StelPhotoBloom::setHaloMixture(std::vector<std::pair<double, double>> m)
+{
+	mixture = std::move(m);
+	++mixtureVersion;
+}
+
+void StelPhotoBloom::clearHaloMixture()
+{
+	if (mixture.empty())
+		return;
+	mixture.clear();
+	++mixtureVersion;
+}
+
+// Each Gaussian of the mixture goes to the level with the nearest width (in log scale), as for the Moffat profile
+void StelPhotoBloom::computeMixtureWeights()
+{
+	const int n = static_cast<int>(levels.size());
+	weights.assign(static_cast<size_t>(n), 0.f);
+	std::vector<double> lnSigma(static_cast<size_t>(n));
+	for (int k=0; k<n; ++k)
+		lnSigma[static_cast<size_t>(k)] = std::log(levelSigma(k));
+	const double identityLimit = 0.5*levelSigma(0);
+	std::vector<double> w(static_cast<size_t>(n), 0.);
+	double wId = 0., total = 0.;
+	for (const auto& g : mixture)
+	{
+		const double sigma = g.first, mass = std::max(0., g.second);
+		total += mass;
+		if (!(sigma >= identityLimit))
+		{
+			wId += mass;
+			continue;
+		}
+		const double ls = std::log(sigma);
+		int best = 0;
+		for (int k=1; k<n; ++k)
+			if (std::fabs(ls - lnSigma[static_cast<size_t>(k)]) < std::fabs(ls - lnSigma[static_cast<size_t>(best)]))
+				best = k;
+		w[static_cast<size_t>(best)] += mass;
+	}
+	if (total <= 0.)
+		total = 1.;
+	for (int k=0; k<n; ++k)
+		weights[static_cast<size_t>(k)] = static_cast<float>(w[static_cast<size_t>(k)]/total);
+	weightIdentity = static_cast<float>(wId/total);
+	weightsMixtureVersion = mixtureVersion;
+	weightsLevels = n;
+	weightsAlpha = -1.f;
 }
 
 // The aureole 1/(r^2 + c^2) (the forward peak of the scattering by aerosols, as in the phase function of the aerosols
@@ -461,14 +529,20 @@ bool StelPhotoBloom::process(GLuint sceneTexture, int w, int h, float haloAlpha,
 		shadersTried = true;
 		initShaders();
 	}
-	const bool halo = haloAlpha > 0.f && haloBeta > 1.f;
+	const bool useMixture = !mixture.empty();
+	const bool halo = useMixture || (haloAlpha > 0.f && haloBeta > 1.f);
 	const bool aureole = aureoleExtent > 0.f && aureoleCore > 0.f && aureoleShare != 0;
 	if (!shadersOk || !vao || w < 8 || h < 8 || !(halo || aureole))
 		return false;
 	if (w != sceneW || h != sceneH || levels.empty())
 		resize(w, h);
 	const int n = static_cast<int>(levels.size());
-	if (halo && (std::fabs(haloAlpha-weightsAlpha) > 1e-3f*haloAlpha || haloBeta != weightsBeta || n != weightsLevels))
+	if (useMixture)
+	{
+		if (mixtureVersion != weightsMixtureVersion || n != weightsLevels)
+			computeMixtureWeights();
+	}
+	else if (halo && (std::fabs(haloAlpha-weightsAlpha) > 1e-3f*haloAlpha || haloBeta != weightsBeta || n != weightsLevels))
 		computeWeights(haloAlpha, haloBeta);
 	if (aureole && (std::fabs(aureoleCore-aureoleWeightsCore) > 1e-3f*aureoleCore || std::fabs(aureoleExtent-aureoleWeightsExtent) > 1e-3f*aureoleExtent
 	                || n != aureoleWeightsLevels))
@@ -492,9 +566,15 @@ bool StelPhotoBloom::process(GLuint sceneTexture, int w, int h, float haloAlpha,
 		gl.glViewport(0, 0, tw, th);
 		gl.glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 	};
-	auto sourceTexture = [this, sceneTexture](int k) -> GLuint
+	// 0. The source: the scene without the annotations, above the threshold
+	sourceProgram->bind();
+	gl.glBindTexture(GL_TEXTURE_2D, sceneTexture);
+	sourceProgram->setUniformValue("scene", 0);
+	sourceProgram->setUniformValue("threshold", std::max(0.f, sourceThreshold));
+	drawQuad(sourceFBO.get(), w, h);
+	auto sourceTexture = [this](int k) -> GLuint
 	{
-		return k==0 ? sceneTexture : levels[static_cast<size_t>(k)].down->texture();
+		return k==0 ? sourceFBO->texture() : levels[static_cast<size_t>(k)].down->texture();
 	};
 
 	// 1. Downsampling chain
@@ -603,7 +683,36 @@ bool StelPhotoBloom::process(GLuint sceneTexture, int w, int h, float haloAlpha,
 	}
 
 	// 3b. Halation of a film, from the level where the critical radius is about 6 texels (after the blur of step 3, before step 4)
-	if (halationRadius > 0.5f)
+	if (halationRadius <= 0.5f && ringRadius > 0.5f && ringWidth > 0.f)
+	{
+		// The lenticular halo of the eye: one ring, on the level whose blur has about the width of the ring
+		int L = 0;
+		for (int k=1; k<n; ++k)
+			if (std::fabs(std::log(levelSigma(k)/ringWidth)) < std::fabs(std::log(levelSigma(L)/ringWidth)))
+				L = k;
+		const Level& lv = levels[static_cast<size_t>(L)];
+		if (!halationFBO || L != halationLevel || halationFBO->width() != lv.w || halationFBO->height() != lv.h)
+		{
+			halationFBO = makeFBO(gl, lv.w, lv.h);
+			halationLevel = L;
+		}
+		const GLfloat ringOffsets[12] = {1.f};
+		const GLfloat ringWeights[12] = {1.f};
+		halationProgram->bind();
+		gl.glActiveTexture(GL_TEXTURE0);
+		gl.glBindTexture(GL_TEXTURE_2D, lv.blur->texture());
+		halationProgram->setUniformValue("src", 0);
+		halationProgram->setUniformValue("texelUV", 1.f/static_cast<float>(lv.w), 1.f/static_cast<float>(lv.h));
+		halationProgram->setUniformValue("radius", ringRadius/static_cast<float>(1 << L));
+		halationProgram->setUniformValue("rings", 1);
+		halationProgram->setUniformValueArray("offsets", ringOffsets, 12, 1);
+		halationProgram->setUniformValueArray("weights", ringWeights, 12, 1);
+		drawQuad(halationFBO.get(), lv.w, lv.h);
+		halationDone = true;
+		// the film's weights are not in the buffer any more
+		halationWeightsDensity = -1.f;
+	}
+	else if (halationRadius > 0.5f)
 	{
 		if (halationDensity != halationWeightsDensity)
 			computeHalationWeights(halationDensity);
@@ -664,7 +773,7 @@ bool StelPhotoBloom::process(GLuint sceneTexture, int w, int h, float haloAlpha,
 		gl.glActiveTexture(GL_TEXTURE1);
 		gl.glBindTexture(GL_TEXTURE_2D, bg.blur->texture());
 		gl.glActiveTexture(GL_TEXTURE0);
-		gl.glBindTexture(GL_TEXTURE_2D, sceneTexture);
+		gl.glBindTexture(GL_TEXTURE_2D, sourceFBO->texture());
 		aureoleSourceProgram->setUniformValue("scene", 0);
 		aureoleSourceProgram->setUniformValue("background", 1);
 		aureoleSourceProgram->setUniformValue("share", 2);

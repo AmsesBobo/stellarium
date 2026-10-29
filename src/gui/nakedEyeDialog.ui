@@ -260,6 +260,16 @@
              </widget>
             </item>
             <item>
+             <widget class="QCheckBox" name="glareCheckBox">
+              <property name="toolTip">
+               <string>The light scattered in the eye around bright sources (Spencer et al. 1995): a halo that grows with the brightness, and at night the ring of the lenticular halo. It grows with the age (Vos 1984).</string>
+              </property>
+              <property name="text">
+               <string>Glare of bright light</string>
+              </property>
+             </widget>
+            </item>
+            <item>
              <widget class="QLabel" name="acuityInfoLabel">
               <property name="text">
                <string notr="true"/>

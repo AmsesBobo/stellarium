@@ -1277,6 +1277,8 @@ uniform bool bloomEnabled;
 uniform sampler2D bloomTex;
 uniform highp float bloomAmount;   // halo fraction, relative to the light left in the image
 uniform highp float bloomIdentity; // part of the halo profile narrower than a pixel
+uniform highp float bloomThreshold; // only the light above it makes a halo (the scene without the lines and labels)
+uniform highp float bloomTake;     // the share of that light that leaves the image for the halo (naked eye mode)
 // Photographic mode: the aureole of the haze (see StelPhotoBloom), times its share over the screen
 uniform bool aureoleEnabled;
 uniform sampler2D aureoleTex;
@@ -1294,8 +1296,14 @@ void main()
 {
 	vec4 rgba = texture2D(tex, texcoord);
 	highp vec3 extra = vec3(0);
+	// The light of the scene that makes the halo (not the lines and labels, see StelPainter::setAnnotationCoverage())
+	highp float sceneShare = photoMode ? 1. - clamp(rgba.a, 0., 1.) : 1.;
+	highp vec3 haloSource = max(sceneShare * rgba.rgb - vec3(bloomThreshold), vec3(0.));
 	if (bloomEnabled)
-		extra += bloomAmount * (texture2D(bloomTex, texcoord).rgb + bloomIdentity * rgba.rgb);
+	{
+		extra += bloomAmount * (texture2D(bloomTex, texcoord).rgb + bloomIdentity * haloSource);
+		rgba.rgb -= bloomTake * haloSource;
+	}
 	if (spikeEnabled)
 		extra += spikeAmount * texture2D(spikeTex, texcoord).rgb;
 	if (aureoleEnabled)
@@ -1497,7 +1505,10 @@ void StelApp::highGraphicsModeDraw()
 	bool bloomDone = false;
 	const bool bloomActive = photoMode && skyDrawer->getFlagPhotoBloomActive();
 	const bool aureoleActive = photoMode && skyDrawer->getFlagPhotoAureoleActive();
-	if (bloomActive || aureoleActive)
+	// Naked eye mode: the glare of the eye, with the same pyramid
+	const StelSkyDrawer::EyeGlareParams eyeGlare = photoMode ? skyDrawer->getEyeGlareParams(*core->getProjection(StelCore::FrameJ2000))
+	                                                         : StelSkyDrawer::EyeGlareParams();
+	if (bloomActive || aureoleActive || eyeGlare.active)
 	{
 #if !QT_CONFIG(opengles2)
 		if (sceneMultisampledFBO)
@@ -1512,6 +1523,18 @@ void StelApp::highGraphicsModeDraw()
 #endif
 		if (!photoBloom)
 			photoBloom.reset(new StelPhotoBloom);
+		if (eyeGlare.active)
+		{
+			photoBloom->setHaloMixture(eyeGlare.mixture);
+			photoBloom->setSourceThreshold(eyeGlare.threshold);
+			photoBloom->setLenticularRing(eyeGlare.ringShare > 0.f ? eyeGlare.ringRadius : 0.f, eyeGlare.ringWidth);
+		}
+		else
+		{
+			photoBloom->clearHaloMixture();
+			photoBloom->setSourceThreshold(0.f);
+			photoBloom->setLenticularRing(0.f, 0.f);
+		}
 		const bool spikes = bloomActive && skyDrawer->getPhotoSpikeFractionEffective() > 0.f;
 		const StelSkyDrawer::PhotoHalationParams halation = skyDrawer->getPhotoHalationParams(*core->getProjection(StelCore::FrameJ2000));
 		float aureoleCore = 0.f, aureoleExtent = 0.f;
@@ -1698,7 +1721,11 @@ void StelApp::highGraphicsModeDraw()
 		postProcessorProgram->setUniformValue(postProcessorUniformLocations.photoExposure, photoExposure);
 		setPhotoToneUniforms(*postProcessorProgram, *skyDrawer, *core->getProjection(StelCore::FrameJ2000));
 
-		const bool haloOn = bloomDone && bloomActive && skyDrawer->getPhotoHaloStrength() > 0.;
+		const bool haloOn = bloomDone && ((bloomActive && skyDrawer->getPhotoHaloStrength() > 0.) || eyeGlare.active);
+		// The eye: the light above the threshold leaves the image itself for the glare (the camera: the stars are
+		// drawn without the light of their halo)
+		postProcessorProgram->setUniformValue("bloomThreshold", eyeGlare.active ? eyeGlare.threshold : 0.f);
+		postProcessorProgram->setUniformValue("bloomTake", eyeGlare.active ? eyeGlare.haloShare + eyeGlare.ringShare : 0.f);
 		const bool aureoleOn = bloomDone && photoBloom->aureoleTexture() != 0;
 		postProcessorProgram->setUniformValue(postProcessorUniformLocations.aureoleEnabled, aureoleOn);
 		postProcessorProgram->setUniformValue(postProcessorUniformLocations.aureoleTex, 5);
@@ -1732,8 +1759,9 @@ void StelApp::highGraphicsModeDraw()
 			GL(gl->glBindTexture(GL_TEXTURE_2D, photoBloom->haloTexture()));
 			GL(gl->glActiveTexture(GL_TEXTURE0));
 			const float coreFraction = skyDrawer->getPhotoCoreFraction();
-			postProcessorProgram->setUniformValue(postProcessorUniformLocations.bloomAmount,
-			                                      coreFraction > 0.f ? static_cast<float>(skyDrawer->getPhotoHaloStrength())/coreFraction : 0.f);
+			const float amount = eyeGlare.active ? eyeGlare.haloShare
+			                                     : (coreFraction > 0.f ? static_cast<float>(skyDrawer->getPhotoHaloStrength())/coreFraction : 0.f);
+			postProcessorProgram->setUniformValue(postProcessorUniformLocations.bloomAmount, amount);
 			postProcessorProgram->setUniformValue(postProcessorUniformLocations.bloomIdentity, photoBloom->identityWeight());
 		}
 		postProcessorProgram->setUniformValue(postProcessorUniformLocations.bloomTex, bloomTexSampler);
@@ -1749,7 +1777,8 @@ void StelApp::highGraphicsModeDraw()
 			GL(gl->glActiveTexture(GL_TEXTURE0));
 			const StelSkyDrawer::PhotoHalationParams halation = skyDrawer->getPhotoHalationParams(*core->getProjection(StelCore::FrameJ2000));
 			const float coreFraction = skyDrawer->getPhotoCoreFraction();
-			const Vec3f a = coreFraction > 0.f ? halation.gain/coreFraction : Vec3f(0.f);
+			// the eye: the lenticular halo
+			const Vec3f a = eyeGlare.active ? Vec3f(eyeGlare.ringShare) : (coreFraction > 0.f ? halation.gain/coreFraction : Vec3f(0.f));
 			postProcessorProgram->setUniformValue("halationAmount", a[0], a[1], a[2]);
 			postProcessorProgram->setUniformValue("halationScale", photoBloom->halationScale());
 		}

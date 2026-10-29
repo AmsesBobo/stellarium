@@ -107,6 +107,8 @@ class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 	//! Naked eye mode: the loss of acuity in dim light, and the noise of the rods (see StelEyeVision)
 	Q_PROPERTY(bool flagEyeAcuity READ getFlagEyeAcuity WRITE setFlagEyeAcuity NOTIFY flagEyeAcuityChanged)
 	Q_PROPERTY(bool flagEyeNoise READ getFlagEyeNoise WRITE setFlagEyeNoise NOTIFY flagEyeNoiseChanged)
+	//! Naked eye mode: the glare of bright light, scattered in the eye (see getEyeGlareParams())
+	Q_PROPERTY(bool flagEyeGlare READ getFlagEyeGlare WRITE setFlagEyeGlare NOTIFY flagEyeGlareChanged)
 	//! Exposure correction of the photographic mode, in photographic stops (EV). 0 is the neutral exposure.
 	Q_PROPERTY(double photoExposureEV READ getPhotoExposureEV WRITE setPhotoExposureEV NOTIFY photoExposureEVChanged)
 	//! Exposure time of the virtual camera in the photographic mode, in seconds.
@@ -260,6 +262,32 @@ public:
 	StelEyeVision::Params getEyeVisionParams(const StelProjector& prj) const;
 	//! Naked eye mode: the highest spatial frequency the eye resolves now (cycles per degree, see StelEyeVision)
 	double getEyeAcuityLimit() const;
+	//! Naked eye mode: pixels of the scene per degree for the eye of the viewer (see eyeScreenFov)
+	double getEyePixelsPerDegree(const StelProjector& prj) const;
+	//! Naked eye mode: the glare of the eye, the point spread function of Spencer, Shirley, Zimmerman & Greenberg
+	//! (1995, "Physically-based glare effects for digital images", SIGGRAPH 95), in degrees for the eye:
+	//!   f0 = exp(-(theta/0.02)^2)       the core (it stays the image itself)
+	//!   f1 = 1/(theta + 0.02)^3          the near halo, a few minutes of arc
+	//!   f2 = 1/(theta + 0.02)^2          the far halo, the veiling glare over the whole field
+	//!   f3 = exp(-(theta - 3 lambda/568 nm)^2)   the lenticular halo, a ring of about 3 degrees
+	//! each normalized; their shares in daylight 0.384, 0.478, 0.138, 0, in mesopic vision 0.368, 0.478, 0.138, 0.016,
+	//! at night 0.383, 0.465, 0.138, 0.014 (Spencer et al.), between them after the share m of the cones (see
+	//! StelEyeAdaptation). The lenticular halo needs a pupil wider than 3 mm. The far halo grows with the age as
+	//! the veiling glare of the CIE (Vos 1984): 1 + (age/62.5)^4, relative to an observer of 25 years.
+	//! f1 is drawn as a Moffat profile of beta 1.5, f2 as 1/(theta^2 + c^2) out to about 20 degrees.
+	//! The display shows what is dimmer than the semi-saturation of the photoreceptors (scene value 1) as it is: the
+	//! viewer's own eye scatters its light. Only the light above it, which the screen cannot show, is spread with
+	//! the glare (see StelPhotoBloom::setSourceThreshold()); the bright stars, the planets and the Moon grow.
+	struct EyeGlareParams
+	{
+		bool active = false;
+		std::vector<std::pair<double, double>> mixture; //!< the halo f1 + f2, normalized (sigma in pixels, mass)
+		float haloShare = 0.f;   //!< the share of f1 + f2
+		float ringShare = 0.f;   //!< the share of f3
+		float ringRadius = 0.f, ringWidth = 0.f; //!< pixels
+		float threshold = 1.f;   //!< scene units
+	};
+	EyeGlareParams getEyeGlareParams(const StelProjector& prj) const;
 	static constexpr double EYE_MIN_AGE = 10.;
 	static constexpr double EYE_MAX_AGE = 90.;
 	static constexpr double EYE_DEFAULT_AGE = 30.;
@@ -992,6 +1020,8 @@ public slots:
 	bool getFlagEyeAcuity() const {return flagEyeAcuity;}
 	void setFlagEyeNoise(bool b);
 	bool getFlagEyeNoise() const {return flagEyeNoise;}
+	void setFlagEyeGlare(bool b);
+	bool getFlagEyeGlare() const {return flagEyeGlare;}
 
 	//! Set the exposure time of the virtual camera, in seconds (limited to 1/8000 s ... 3600 s).
 	void setPhotoExposureTime(double seconds);
@@ -1362,6 +1392,7 @@ signals:
 	void eyeScreenFovChanged(double degrees);
 	void flagEyeAcuityChanged(bool b);
 	void flagEyeNoiseChanged(bool b);
+	void flagEyeGlareChanged(bool b);
 	//! Emitted when the exposure correction of the photographic mode is changed
 	void photoExposureEVChanged(double ev);
 	//! Emitted when the exposure time of the virtual camera is changed
@@ -1765,6 +1796,7 @@ private:
 	double eyeScreenFov = EYE_DEFAULT_SCREEN_FOV;
 	bool flagEyeAcuity = true;
 	bool flagEyeNoise = true;
+	bool flagEyeGlare = true;
 	double eyeLightFactor = 1.;
 	//! The halo of the stars in the picture (the camera's, none for the eye)
 	float getPhotoHaloFractionActive() const {return getFlagPhotoCameraActive() ? photoHaloFraction : 0.f;}

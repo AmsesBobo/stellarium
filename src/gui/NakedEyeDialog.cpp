@@ -69,6 +69,7 @@ void NakedEyeDialog::createDialogContent()
 	connectDoubleProperty(ui->screenFovSpinBox, "StelSkyDrawer.eyeScreenFov");
 	connectBoolProperty(ui->acuityCheckBox, "StelSkyDrawer.flagEyeAcuity");
 	connectBoolProperty(ui->noiseCheckBox, "StelSkyDrawer.flagEyeNoise");
+	connectBoolProperty(ui->glareCheckBox, "StelSkyDrawer.flagEyeGlare");
 	StelSkyDrawer* drawer = StelApp::getInstance().getCore()->getSkyDrawer();
 	connect(ui->adaptNowPushButton, &QPushButton::clicked, drawer, &StelSkyDrawer::resetEyeAdaptation);
 

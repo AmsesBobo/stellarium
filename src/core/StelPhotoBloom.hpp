@@ -21,6 +21,7 @@
 #define STELPHOTOBLOOM_HPP
 
 #include <memory>
+#include <utility>
 #include <vector>
 #include <qopengl.h>
 #include <QVector2D>
@@ -40,6 +41,12 @@ class QOpenGLVertexArrayObject;
 //! built from a pyramid of Gaussian blurs: level k is the scene downsampled k times and blurred,
 //! which is a Gaussian of width about 1.6 * 2^k pixels. The levels are added up with weights that
 //! follow the Gaussian mixture of the Moffat profile. All in floating point, linear light.
+//!
+//! The source of all this is the scene without the lines and labels (their coverage is in its alpha channel, see
+//! StelPainter), and above a threshold (see setSourceThreshold(); 0 for the camera).
+//!
+//! The naked eye mode uses the same pyramid for the glare of the eye (see setHaloMixture() and
+//! setLenticularRing()).
 //!
 //! The diffraction spikes are done the same way: every pixel is smeared along the spike directions
 //! with the spike profile (a Lorentzian, 1/(1+x^2/l^2)). Near taps read the full image, far taps
@@ -93,6 +100,16 @@ public:
 	//! The spikes are smeared from the image up to this distance (pixels); the far part is drawn with the stars.
 	static constexpr float NEAR_SPIKE_LENGTH = 24.5f;
 
+	//! Only the light above this value (scene units, each color) makes a halo, an aureole and spikes (0: all)
+	void setSourceThreshold(float threshold) {sourceThreshold = threshold;}
+	//! A halo profile of any shape, as a mixture of normalized Gaussians: (sigma in pixels, mass). It replaces the
+	//! Moffat profile of process() (whose alpha may then be 0) until clearHaloMixture().
+	void setHaloMixture(std::vector<std::pair<double, double>> mixture);
+	void clearHaloMixture();
+	//! A ring of the radius (pixels) and the width (sigma, pixels) instead of the halation of a film, in the
+	//! halation texture (unit integral); 0: none
+	void setLenticularRing(float radius, float width) {ringRadius = radius; ringWidth = width;}
+
 private:
 	struct Level
 	{
@@ -145,6 +162,15 @@ private:
 	int aureoleWeightsLevels = 0;
 	bool aureoleDone = false;
 	void computeAureoleWeights(float core, float extent);
+	//! The source: the scene without the annotations, above the threshold
+	std::unique_ptr<QOpenGLShaderProgram> sourceProgram;
+	std::unique_ptr<QOpenGLFramebufferObject> sourceFBO;
+	float sourceThreshold = 0.f;
+	//! The halo as a mixture (see setHaloMixture())
+	std::vector<std::pair<double, double>> mixture;
+	int mixtureVersion = 0, weightsMixtureVersion = -1;
+	void computeMixtureWeights();
+	float ringRadius = 0.f, ringWidth = 0.f;
 	static double levelSigma(int k);
 };
 

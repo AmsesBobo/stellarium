@@ -117,6 +117,7 @@ StelSkyDrawer::StelSkyDrawer(StelCore* acore) :
 	eyeScreenFov = qBound(EYE_MIN_SCREEN_FOV, conf->value("viewing/naked_eye_screen_fov", EYE_DEFAULT_SCREEN_FOV).toDouble(), EYE_MAX_SCREEN_FOV);
 	flagEyeAcuity = conf->value("viewing/flag_naked_eye_acuity", true).toBool();
 	flagEyeNoise = conf->value("viewing/flag_naked_eye_noise", true).toBool();
+	flagEyeGlare = conf->value("viewing/flag_naked_eye_glare", true).toBool();
 	eyeDisplayLuminance = qBound(EYE_MIN_DISPLAY_LUMINANCE, conf->value("viewing/naked_eye_display_luminance", EYE_STANDARD_DISPLAY_LUMINANCE).toDouble(),
 	                             EYE_MAX_DISPLAY_LUMINANCE);
 	photoExposureEV = qBound(-12., conf->value("viewing/photographic_exposure_ev", 0.0).toDouble(), 12.);

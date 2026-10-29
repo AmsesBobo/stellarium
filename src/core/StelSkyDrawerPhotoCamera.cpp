@@ -85,6 +85,92 @@ void StelSkyDrawer::setFlagEyeNoise(bool b)
 	emit flagEyeNoiseChanged(b);
 }
 
+void StelSkyDrawer::setFlagEyeGlare(bool b)
+{
+	if (b == flagEyeGlare)
+		return;
+	flagEyeGlare = b;
+	StelApp::immediateSave("viewing/flag_naked_eye_glare", b);
+	emit flagEyeGlareChanged(b);
+}
+
+double StelSkyDrawer::getEyePixelsPerDegree(const StelProjector& prj) const
+{
+	// The field of view of the program fills the angle eyeScreenFov (narrower fields are magnified, as through an
+	// instrument)
+	const double viewFov = qMax(1e-6, static_cast<double>(prj.getFov()));
+	return static_cast<double>(prj.getPixelPerRadAtCenter())*(M_PI/180.)*viewFov/eyeScreenFov;
+}
+
+StelSkyDrawer::EyeGlareParams StelSkyDrawer::getEyeGlareParams(const StelProjector& prj) const
+{
+	EyeGlareParams p;
+	if (!getFlagNakedEyeModeActive() || !flagEyeGlare)
+		return p;
+	// The shares of Spencer et al. (f0, f1, f2, f3), from daylight (m = 1) over mesopic (m = 0.5) to night (m = 0)
+	static const double day[4] = {0.384, 0.478, 0.138, 0.};
+	static const double meso[4] = {0.368, 0.478, 0.138, 0.016};
+	static const double night[4] = {0.383, 0.465, 0.138, 0.014};
+	const double m = eyeAdaptation.getMesopicM();
+	double share[4];
+	for (int i=0; i<4; ++i)
+		share[i] = (m >= 0.5) ? meso[i] + (m - 0.5)*2.*(day[i] - meso[i]) : night[i] + m*2.*(meso[i] - night[i]);
+	// The lenticular halo: only with a pupil wider than 3 mm (fully from 4 mm)
+	share[3] *= qBound(0., eyePupil.getDiameter() - 3., 1.);
+	// The veiling glare grows with the age (CIE, Vos 1984)
+	const auto ageFactor = [](double age) {return 1. + std::pow(age/62.5, 4.);};
+	share[2] *= ageFactor(eyeAge)/ageFactor(25.);
+	const double f1 = share[1], f2 = share[2];
+	const double pixels = getEyePixelsPerDegree(prj);
+	// f1 = 1/(theta + a)^3 as a Moffat profile of beta 1.5 and alpha 0.025 degrees: a mixture of Gaussians of
+	// sigma^2 = alpha^2/(2t) with the weights t^(beta - 2) e^-t (see StelPhotoBloom::computeWeights())
+	std::vector<std::pair<double, double>> mix;
+	{
+		const double alpha = 0.025*pixels;
+		double total = 0.;
+		std::vector<std::pair<double, double>> part;
+		constexpr double du = 0.02;
+		for (double u = -25.; u < 8.; u += du)
+		{
+			const double t = std::exp(u);
+			const double mass = std::pow(t, -0.5)*std::exp(-t)*t*du;
+			part.emplace_back(alpha/std::sqrt(2.*t), mass);
+			total += mass;
+		}
+		for (const auto& g : part)
+			mix.emplace_back(g.first, f1*g.second/total);
+	}
+	// f2 = 1/(theta + a)^2 as 1/(theta^2 + c^2), c = 0.028 degrees, out to about 20 degrees: the weight
+	// exp(-c^2/(2 sigma^2)) exp(-sigma^2/(2 e^2)) per unit of ln(sigma) (see StelPhotoBloom::computeAureoleWeights())
+	{
+		const double c = 0.028*pixels, e = 20.*pixels;
+		double total = 0.;
+		std::vector<std::pair<double, double>> part;
+		constexpr double du = 0.02;
+		for (double u = std::log(0.01*c); u < std::log(4.*e); u += du)
+		{
+			const double sigma = std::exp(u);
+			const double mass = std::exp(-0.5*c*c/(sigma*sigma))*std::exp(-0.5*sigma*sigma/(e*e))*du;
+			part.emplace_back(sigma, mass);
+			total += mass;
+		}
+		for (const auto& g : part)
+			mix.emplace_back(g.first, f2*g.second/total);
+	}
+	for (auto& g : mix)
+		g.second /= (f1 + f2);
+	p.mixture = std::move(mix);
+	p.haloShare = static_cast<float>(f1 + f2);
+	p.ringShare = static_cast<float>(share[3]);
+	// The ring at 3 lambda/568 nm degrees for the middle of the spectrum (550 nm), Gaussian of 1/sqrt(2) degrees
+	p.ringRadius = static_cast<float>(3.*550./568.*pixels);
+	p.ringWidth = static_cast<float>(pixels/std::sqrt(2.));
+	// The semi-saturation (scene value 1 before the exposure compensation)
+	p.threshold = 1.f/getPhotoExposureFactor();
+	p.active = true;
+	return p;
+}
+
 double StelSkyDrawer::getEyeAcuityLimit() const
 {
 	return StelEyeVision::acuityLimit(eyeAdaptation.getAdaptationLuminance());
@@ -95,10 +181,8 @@ StelEyeVision::Params StelSkyDrawer::getEyeVisionParams(const StelProjector& prj
 	StelEyeVision::Params p;
 	if (!getFlagNakedEyeModeActive())
 		return p;
-	// Degrees for the eye of the viewer -> pixels of the scene: the field of view of the program fills the angle
-	// eyeScreenFov (narrower fields are magnified, as through an instrument)
-	const double viewFov = qMax(1e-6, static_cast<double>(prj.getFov()));
-	const double pixelsPerEyeDegree = static_cast<double>(prj.getPixelPerRadAtCenter())*(M_PI/180.)*viewFov/eyeScreenFov;
+	// Degrees for the eye of the viewer -> pixels of the scene
+	const double pixelsPerEyeDegree = getEyePixelsPerDegree(prj);
 	const double limit = getEyeAcuityLimit();
 	if (flagEyeAcuity)
 		p.sigma = static_cast<float>(StelEyeVision::blurSigma(limit)*pixelsPerEyeDegree);
@@ -840,6 +924,7 @@ void StelSkyDrawer::savePhotoSettings(QSettings* conf) const
 	conf->setValue("viewing/naked_eye_screen_fov", getEyeScreenFov());
 	conf->setValue("viewing/flag_naked_eye_acuity", getFlagEyeAcuity());
 	conf->setValue("viewing/flag_naked_eye_noise", getFlagEyeNoise());
+	conf->setValue("viewing/flag_naked_eye_glare", getFlagEyeGlare());
 	conf->setValue("viewing/photographic_exposure_ev", getPhotoExposureEV());
 	conf->setValue("viewing/photographic_exposure_time", getPhotoExposureTime());
 	conf->setValue("viewing/photographic_aperture", photoProgramRunning ? photoUserAperture : photoAperture);
