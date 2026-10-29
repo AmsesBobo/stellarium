@@ -511,11 +511,12 @@ double StelSkyDrawer::getPhotoZenithBackgroundLuminance() const
 		return 0.;
 	static LightDomes* domes = GETSTELMODULE(LightDomes);
 	// As the atmosphere draws it (AtmosphereShowMySky): the light pollution setting is the whole night sky at the
-	// zenith, of which the airglow and the light domes of towns are parts; what they leave is spread evenly
+	// zenith (at a normal humidity: the haze makes the artificial part brighter), of which the airglow and the light
+	// domes of towns are parts; what they leave is spread evenly
 	const double airglow = getPhotoAirglowZenithLuminance();
 	const double dome = domes ? domes->getZenithLuminance() : 0.;
 	const double setting = static_cast<double>(lightPollutionLuminance);
-	return airglow + dome + qMax(0., setting - airglow - dome);
+	return airglow + dome + qMax(0., photoHazeLightFactor*(setting - airglow) - dome);
 }
 
 void StelSkyDrawer::drawPhotoInfoLine(StelCore* core) const

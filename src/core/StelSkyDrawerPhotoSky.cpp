@@ -21,6 +21,7 @@
 // extinction, the airglow and the sky during star trails.
 
 #include "StelSkyDrawer.hpp"
+#include "LightDomes.hpp"
 #include "StelProjector.hpp"
 #include "StelApp.hpp"
 #include "StelSRGB.hpp"
@@ -255,17 +256,24 @@ void StelSkyDrawer::setPhotoWhiteBalanceKelvin(double kelvin)
 
 void StelSkyDrawer::updatePhotoExtinction()
 {
-	const double k = static_cast<double>(extinction.getExtinctionCoefficient());
+	const double kInUse = static_cast<double>(extinction.getExtinctionCoefficient());
+	// the coefficient as set: the table (scaled to it) gives the color at the normal humidity; the extra aerosols of
+	// a higher (or lower) humidity are added with their own, flatter color
+	const double k = static_cast<double>(extinctionBase);
 	photoExtinctionActive = flagPhotoExtinctionColor && getFlagPhotographicModeActive() && getFlagHasAtmosphere()
-	                        && k >= 0.01 && atmosphereTransmission.isLoaded()
+	                        && kInUse >= 0.01 && atmosphereTransmission.isLoaded()
 	                        && core->getCurrentLocation().planetName == QStringLiteral("Earth");
 	if (!photoExtinctionActive)
 		return;
 	const double altitude = static_cast<double>(core->getCurrentLocation().altitude);
-	if (altitude == photoExtinctionAltitude && k == photoExtinctionCoefficient && !photoExtinctionTints.empty())
+	if (altitude == photoExtinctionAltitude && k == photoExtinctionCoefficient && kInUse == photoExtinctionInUse && !photoExtinctionTints.empty())
 		return;
 	photoExtinctionAltitude = altitude;
 	photoExtinctionCoefficient = k;
+	photoExtinctionInUse = kInUse;
+	const double extraDepth = photoAerosol.depth - photoAerosol.baseDepth;
+	const double extraRgb[3] = {extraDepth*std::pow(0.610/0.55, -photoAerosol.angstrom), extraDepth,
+	                            extraDepth*std::pow(0.465/0.55, -photoAerosol.angstrom)};
 
 	// The table has its own amount of aerosols etc. Scale its optical depths so that white light loses
 	// as much towards the zenith as the extinction coefficient says (k magnitudes per airmass at the site):
@@ -283,7 +291,15 @@ void StelSkyDrawer::updatePhotoExtinction()
 	{
 		const double u = static_cast<double>(i)/(size-1);
 		const double s = sinMin + (1.-sinMin)*u*u;
-		const Vec3d t = atmosphereTransmission.transmission(altitude, std::asin(std::clamp(s, -1., 1.)), depthScale);
+		Vec3d t = atmosphereTransmission.transmission(altitude, std::asin(std::clamp(s, -1., 1.)), depthScale);
+		if (extraDepth != 0.)
+		{
+			// the airmass of the aerosols (a layer of 1.2 km over a spherical Earth)
+			constexpr double RH = 6371./1.2;
+			const double airmass = std::sqrt(RH*s*RH*s + 2.*RH + 1.) - RH*s;
+			for (int c=0; c<3; ++c)
+				t[c] = qBound(0., t[c]*std::exp(-extraRgb[c]*airmass), 1.);
+		}
 		const double Y = 0.2126*t[0] + 0.7152*t[1] + 0.0722*t[2];
 		if (Y > 1e-7)
 			last = Vec3f(static_cast<float>(t[0]/Y), static_cast<float>(t[1]/Y), static_cast<float>(t[2]/Y));
@@ -327,6 +343,57 @@ void StelSkyDrawer::setPhotoAirglowStrength(double strength)
 	photoAirglowStrength = v;
 	StelApp::immediateSave("viewing/photographic_airglow_strength", static_cast<double>(v));
 	emit photoAirglowStrengthChanged(static_cast<double>(v));
+}
+
+void StelSkyDrawer::setPhotoHumidity(double percent)
+{
+	percent = qBound(20., percent, 98.);
+	if (qFuzzyCompare(percent, photoHumidity))
+		return;
+	photoHumidity = percent;
+	StelApp::immediateSave("viewing/photographic_humidity", percent);
+	updatePhotoHumidity();
+	emit photoHumidityChanged(percent);
+}
+
+void StelSkyDrawer::updatePhotoHumidity()
+{
+	const bool active = getFlagPhotographicModeActive() && core->getCurrentLocation().planetName == QStringLiteral("Earth");
+	const double humidity = active ? photoHumidity : PHOTO_NORMAL_HUMIDITY;
+	const double altitude = qMax(0., static_cast<double>(core->getCurrentLocation().altitude)/1000.);  // km
+	const double base = static_cast<double>(extinctionBase);
+	if (humidity == photoHumidityInputs[0] && base == photoHumidityInputs[1] && altitude == photoHumidityInputs[2])
+		return;
+	photoHumidityInputs[0] = humidity;
+	photoHumidityInputs[1] = base;
+	photoHumidityInputs[2] = altitude;
+
+	// The aerosols at the normal humidity: what the air (Rayleigh, above the observer) and ozone (0.016) do not
+	// explain of the extinction coefficient (magnitudes per airmass = 1.0857 optical depth), at least 0.01
+	const double rayleigh = 0.0088*std::pow(0.55, -4.05)*std::exp(-altitude/8.);
+	const double baseDepth = qMax(0.01, base/1.0857 - rayleigh - 0.016);
+	// Hygroscopic growth: the scattering of the aerosols rises as (1 - RH)^-gamma (Hanel 1976; gamma about 0.5 for
+	// continental air): x2 at 80%, x2.8 at 95% against 60%. The grown particles are larger: the haze becomes whiter
+	// (the Angstrom exponent falls from about 1.3 towards 0.7), scatters more forwards (g from 0.70 towards 0.76)
+	// and absorbs less (albedo from 0.90 towards 0.96), as in the continental aerosols of OPAC (Hess et al. 1998).
+	const double rh = humidity/100., rh0 = PHOTO_NORMAL_HUMIDITY/100.;
+	const double growth = std::pow((1. - rh)/(1. - rh0), -0.5);
+	PhotoAerosol a;
+	a.baseDepth = baseDepth;
+	a.depth = baseDepth*growth;
+	a.angstrom = 1.3*std::pow(growth, -0.6);
+	a.asymmetry = qBound(0.6, 0.70 + 0.06*std::log2(growth), 0.8);
+	a.albedo = qBound(0.8, 1. - 0.1*std::pow(growth, -0.9), 0.98);
+	photoAerosol = a;
+	// The extinction in use: the coefficient as set, with the change of the aerosols
+	const double k = qMax(0., base + 1.0857*(a.depth - baseDepth));
+	extinction.setExtinctionCoefficient(static_cast<float>(k));
+	// The light of lamps nearby scattered towards the zenith, against the normal humidity (single scattering)
+	PhotoAerosol normal;
+	normal.baseDepth = normal.depth = baseDepth;
+	photoHazeLightFactor = std::fabs(growth - 1.) < 1e-6 ? 1.
+	                       : LightDomes::nearbyLightRatio(a.depth, a.angstrom, a.asymmetry, a.albedo,
+	                                                      normal.depth, normal.angstrom, normal.asymmetry, normal.albedo, altitude);
 }
 
 double StelSkyDrawer::getPhotoAirglowZenithLuminance() const

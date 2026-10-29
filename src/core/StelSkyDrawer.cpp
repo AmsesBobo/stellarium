@@ -137,6 +137,7 @@ StelSkyDrawer::StelSkyDrawer(StelCore* acore) :
 	flagPhotoExtinctionColor = conf->value("viewing/flag_photographic_extinction_color", true).toBool();
 	flagPhotoAirglow = conf->value("viewing/flag_photographic_airglow", true).toBool();
 	photoAirglowStrength = qBound(0.25f, conf->value("viewing/photographic_airglow_strength", 1.0).toFloat(), 2.f);
+	photoHumidity = qBound(20., conf->value("viewing/photographic_humidity", PHOTO_NORMAL_HUMIDITY).toDouble(), 98.);
 	photoWhiteBalance = qBound(0, conf->value("viewing/photographic_white_balance", static_cast<int>(PhotoWBDaylight)).toInt(), 8);
 	photoWhiteBalanceKelvin = qBound(2000., conf->value("viewing/photographic_white_balance_kelvin", 5200.).toDouble(), 12000.);
 	flagPhotoVignetting = conf->value("viewing/flag_photographic_vignetting", true).toBool();
@@ -471,6 +472,7 @@ void StelSkyDrawer::update(double)
 		}
 	}
 
+	updatePhotoHumidity();
 	updatePhotoExtinction();
 	// A new realization of the sensor noise every frame, as in the live view of a camera
 	photoNoiseFrame = (photoNoiseFrame + 1u) % 4093u;
@@ -1379,8 +1381,10 @@ void StelSkyDrawer::setDaylightLabelThreshold(double t)
 void StelSkyDrawer::setExtinctionCoefficient(double extCoeff)
 {
 	extinction.setExtinctionCoefficient(static_cast<float>(extCoeff));
+	extinctionBase = extinction.getExtinctionCoefficient();  // as the class keeps it (bounded)
 	StelApp::immediateSave("landscape/atmospheric_extinction_coefficient", extCoeff);
-	emit extinctionCoefficientChanged(static_cast<double>(extinction.getExtinctionCoefficient()));
+	updatePhotoHumidity();
+	emit extinctionCoefficientChanged(static_cast<double>(extinctionBase));
 }
 
 void StelSkyDrawer::setAtmosphereTemperature(double celsius)

@@ -140,6 +140,10 @@ class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 	//! Photographic mode: the brightness of the airglow relative to its mean (1.0); it changes from night to night
 	//! by about a factor of two
 	Q_PROPERTY(double photoAirglowStrength READ getPhotoAirglowStrength WRITE setPhotoAirglowStrength NOTIFY photoAirglowStrengthChanged)
+	//! Photographic mode: the relative humidity of the air (percent, 20 to 98). The aerosols take up water and grow:
+	//! the haze scatters more light, whiter and more forward. The extinction coefficient is the one at a normal
+	//! humidity (60%); see getPhotoAerosol().
+	Q_PROPERTY(double photoHumidity READ getPhotoHumidity WRITE setPhotoHumidity NOTIFY photoHumidityChanged)
 	//! White balance of the camera (see PhotoWhiteBalance): 0 = automatic, 1 = daylight, 2 = cloudy, 3 = shade,
 	//! 4 = tungsten, 5 = fluorescent, 6 = flash, 7 = custom color temperature, 8 = neutral (D65, the rendering as it is)
 	Q_PROPERTY(int photoWhiteBalance READ getPhotoWhiteBalance WRITE setPhotoWhiteBalance NOTIFY photoWhiteBalanceChanged)
@@ -394,6 +398,22 @@ public:
 	//! (optical vignetting is strongest there). Allowed range of that setting:
 	static constexpr float PHOTO_LENS_MAX_APERTURE = 1.4f;
 	static constexpr double PHOTO_LENS_MAX_APERTURE_MIN = 0.95, PHOTO_LENS_MAX_APERTURE_MAX = 8.;
+	//! The aerosols of the photographic mode (haze), at the observer: what the humidity makes of the extinction coefficient
+	struct PhotoAerosol
+	{
+		double depth = 0.1;      //!< vertical optical depth above the observer at 550 nm
+		double baseDepth = 0.1;  //!< the same at the normal humidity (60%)
+		double angstrom = 1.3;   //!< Angstrom exponent: the optical depth goes as wavelength^-angstrom
+		double asymmetry = 0.7;  //!< Henyey-Greenstein asymmetry parameter g of the scattering
+		double albedo = 0.9;     //!< single scattering albedo
+	};
+	//! See PhotoAerosol (the normal humidity outside the photographic mode)
+	const PhotoAerosol& getPhotoAerosol() const {return photoAerosol;}
+	//! How much brighter the light pollution of the sky is with this haze than at the normal humidity (the light of
+	//! lamps nearby, scattered towards the zenith; 1 at the normal humidity)
+	double getPhotoHazeLightFactor() const {return photoHazeLightFactor;}
+	//! The normal humidity: the extinction coefficient and the light pollution setting are for it
+	static constexpr double PHOTO_NORMAL_HUMIDITY = 60.;
 	//! Optical vignetting: offset of the pupil image against the lens barrel in the corner of the frame,
 	//! in units of the barrel radius. 0.81 gives half the light in the corner when wide open.
 	static constexpr float PHOTO_VIGNETTING_SHIFT = 0.81f;
@@ -1127,9 +1147,11 @@ public slots:
 	bool getFlagHasAtmosphere() const {return flagHasAtmosphere;}
 
 	//! Set extinction coefficient, mag/airmass (for extinction).
+	//! In the photographic mode this is the coefficient at a normal humidity (see photoHumidity): the extinction in
+	//! use (getExtinction()) follows the humidity.
 	void setExtinctionCoefficient(double extCoeff);
-	//! Get extinction coefficient, mag/airmass (for extinction).
-	double getExtinctionCoefficient() const {return static_cast<double>(extinction.getExtinctionCoefficient());}
+	//! Get extinction coefficient, mag/airmass (for extinction), as set (at a normal humidity).
+	double getExtinctionCoefficient() const {return static_cast<double>(extinctionBase);}
 	//! Set atmospheric (ground) temperature in deg celsius (for refraction).
 	void setAtmosphereTemperature(double celsius);
 	//! Get atmospheric (ground) temperature in deg celsius (for refraction).
@@ -1138,6 +1160,9 @@ public slots:
 	void setAtmospherePressure(double mbar);
 	//! Get atmospheric (ground) pressure in mbar (for refraction).
 	double getAtmospherePressure() const {return static_cast<double>(refraction.getPressure());}
+
+	void setPhotoHumidity(double percent);
+	double getPhotoHumidity() const {return photoHumidity;}
 
 	//! Get the current valid extinction computation object.
 	const Extinction& getExtinction() const {return extinction;}
@@ -1227,6 +1252,7 @@ signals:
 	void flagPhotoExtinctionColorChanged(bool b);
 	void flagPhotoAirglowChanged(bool b);
 	void photoAirglowStrengthChanged(double strength);
+	void photoHumidityChanged(double percent);
 	void photoWhiteBalanceChanged(int wb);
 	void photoWhiteBalanceKelvinChanged(double kelvin);
 	void flagPhotoVignettingChanged(bool b);
@@ -1633,12 +1659,22 @@ private:
 	bool flagPhotoExtinctionColor = true;
 	bool flagPhotoAirglow = true;
 	float photoAirglowStrength = 1.f;
+	//! See photoHumidity
+	double photoHumidity = PHOTO_NORMAL_HUMIDITY;
+	//! The extinction coefficient as set (the one in use, in extinction, follows the humidity)
+	float extinctionBase = 0.13f;
+	PhotoAerosol photoAerosol;
+	double photoHazeLightFactor = 1.;
+	//! The extinction in use and the aerosols from the coefficient as set and the humidity (each frame)
+	void updatePhotoHumidity();
+	double photoHumidityInputs[4] = {-1., -1., -1., -1.};  //!< what the last update was for
 	bool photoExtinctionActive = false;
 	StelAtmosphereTransmission atmosphereTransmission;
 	std::vector<Vec3f> photoExtinctionTints;
 	float photoExtinctionSinMin = 0.f;
 	double photoExtinctionAltitude = -1e9;
 	double photoExtinctionCoefficient = -1.;
+	double photoExtinctionInUse = -1.;
 	unsigned int photoExtinctionTexture = 0;
 	bool photoExtinctionTextureDirty = true;
 	void updatePhotoExtinction();

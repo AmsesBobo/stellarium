@@ -37,6 +37,7 @@
 #include <QPushButton>
 #include <QTableWidget>
 #include <QHeaderView>
+#include <QLocale>
 #include <cmath>
 
 namespace
@@ -339,6 +340,13 @@ void PhotographicModeDialog::createDialogContent()
 	});
 	connect(drawer, &StelSkyDrawer::photoAirglowStrengthChanged,      this, &PhotographicModeDialog::updateCameraWidgets);
 	connect(drawer, &StelSkyDrawer::flagPhotoAirglowChanged,          this, &PhotographicModeDialog::updateCameraWidgets);
+	// Humidity (percent)
+	connect(ui->humiditySpinBox, QOverload<int>::of(&QSpinBox::valueChanged), this, [drawer](int percent)
+	{
+		drawer->setPhotoHumidity(percent);
+	});
+	connect(drawer, &StelSkyDrawer::photoHumidityChanged,             this, &PhotographicModeDialog::updateCameraWidgets);
+	connect(drawer, &StelSkyDrawer::extinctionCoefficientChanged,     this, &PhotographicModeDialog::updateCameraWidgets);
 	connectBoolProperty(ui->vignettingCheckBox,       "StelSkyDrawer.flagPhotoVignetting");
 	connectBoolProperty(ui->halphaModifiedCheckBox,   "StelSkyDrawer.flagPhotoHalphaModified");
 	connectBoolProperty(ui->aberrationsCheckBox,      "StelSkyDrawer.flagPhotoAberrations");
@@ -886,6 +894,12 @@ void PhotographicModeDialog::updateCameraWidgets()
 		const QSignalBlocker blocker(ui->airglowStrengthSpinBox);
 		ui->airglowStrengthSpinBox->setValue(qRound(100.*drawer->getPhotoAirglowStrength()));
 		ui->airglowStrengthSpinBox->setEnabled(drawer->getFlagPhotoAirglow());
+	}
+	{
+		const QSignalBlocker blocker(ui->humiditySpinBox);
+		ui->humiditySpinBox->setValue(qRound(drawer->getPhotoHumidity()));
+		// the extinction coefficient it gives (the one set is for 60%)
+		ui->humiditySpinBox->setSuffix(QString(" %   (k = %1)").arg(QLocale().toString(static_cast<double>(drawer->getExtinction().getExtinctionCoefficient()), 'f', 2)));
 	}
 	{
 		const QSignalBlocker blocker(ui->detectionSnrSpinBox);

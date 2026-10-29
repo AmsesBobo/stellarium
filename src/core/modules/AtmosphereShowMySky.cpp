@@ -767,7 +767,10 @@ void AtmosphereShowMySky::computeColor(StelCore* core, const double JD, const Pl
 		static LightDomes* lightDomes = GETSTELMODULE(LightDomes);
 		const float naturalLuminance = static_cast<float>(core->getSkyDrawer()->getPhotoAirglowZenithLuminance());
 		const float domeLuminance = lightDomes ? static_cast<float>(lightDomes->getZenithLuminance()) : 0.f;
-		const float artificialLuminance = std::max(0.f, lightPollutionLuminance - naturalLuminance - domeLuminance);
+		// The setting is for a normal humidity: a hazier air scatters more of the light of the lamps (the domes follow
+		// the haze by themselves)
+		const float hazeFactor = static_cast<float>(core->getSkyDrawer()->getPhotoHazeLightFactor());
+		const float artificialLuminance = std::max(0.f, hazeFactor*(lightPollutionLuminance - naturalLuminance) - domeLuminance);
 		const auto lightPollutionRelativeBrightness = fader.getInterstate() * artificialLuminance / lightPollutionUnitLuminance_;
 		const auto airglowRelativeBrightness = 1.f;
 		const auto sunRelativeBrightness = noScatter ? 0.f : 1.f;

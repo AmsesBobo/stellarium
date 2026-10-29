@@ -320,7 +320,42 @@
             </item>
            </layout>
           </item>
-          <item row="13" column="0" colspan="2">
+          <item row="13" column="0">
+           <widget class="QLabel" name="humidityLabel">
+            <property name="text">
+             <string>Humidity:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="13" column="1">
+           <widget class="QSpinBox" name="humiditySpinBox">
+            <property name="toolTip">
+             <string>The relative humidity of the air near the ground. The particles of the haze take up water and grow when the air is humid (above about 80% much more): the sky scatters more light, whiter and more forwards, the stars and the Moon are dimmed more but less reddened near the horizon, and the light domes of towns and the light pollution of the sky become brighter and larger. The extinction coefficient and the light pollution (Bortle) settings are those of a normal humidity of 60%: at 60% nothing changes. Mist and fog are not modelled.</string>
+            </property>
+            <property name="alignment">
+             <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+            </property>
+            <property name="keyboardTracking">
+             <bool>false</bool>
+            </property>
+            <property name="suffix">
+             <string> %</string>
+            </property>
+            <property name="minimum">
+             <number>20</number>
+            </property>
+            <property name="maximum">
+             <number>98</number>
+            </property>
+            <property name="singleStep">
+             <number>5</number>
+            </property>
+            <property name="value">
+             <number>60</number>
+            </property>
+           </widget>
+          </item>
+          <item row="14" column="0" colspan="2">
            <widget class="QCheckBox" name="infoLineCheckBox">
             <property name="toolTip">
              <string>Show the exposure time, aperture, ISO and exposure value in use at the top of the screen</string>
@@ -330,42 +365,42 @@
             </property>
            </widget>
           </item>
-          <item row="14" column="0">
+          <item row="15" column="0">
            <widget class="QLabel" name="mountLabel">
             <property name="text">
              <string>Camera mount:</string>
             </property>
            </widget>
           </item>
-          <item row="14" column="1">
+          <item row="15" column="1">
            <widget class="QComboBox" name="mountComboBox">
             <property name="toolTip">
              <string>What happens while the Earth turns during the exposure (centered on the current time). "No motion": the picture of an instant. "Fixed tripod": the stars, planets and nebulae draw arcs around the celestial pole; the longer the exposure and the focal length, the longer the trails, and faint stars fade as their light is spread out. "Star tracker": the camera turns with the sky, so the stars stay sharp and the landscape blurs instead. "As the view's mount": a fixed tripod while the view is on the alt-azimuthal mount, a star tracker on the equatorial one (switch the mount of the view with Ctrl+M).</string>
             </property>
            </widget>
           </item>
-          <item row="15" column="0">
+          <item row="16" column="0">
            <widget class="QLabel" name="noiseLabel">
             <property name="text">
              <string>Sensor noise:</string>
             </property>
            </widget>
           </item>
-          <item row="15" column="1">
+          <item row="16" column="1">
            <widget class="QComboBox" name="noiseComboBox">
             <property name="toolTip">
              <string>The grain of a real sensor: the photons arrive at random (photon noise), plus the noise of the electronics and of the dark current, and a few hot pixels in long exposures. A high ISO is noisy because the sensor has caught fewer photons for the same brightness in the picture. Red and blue are noisier than green (Bayer mosaic). The dark current grows with the temperature (the air temperature of the atmosphere settings, plus a few degrees). "Whole picture": as the picture looks on the screen, where a screen pixel holds many sensor pixels. "100% view": one sensor pixel per screen pixel, as when you zoom in on a photo.</string>
             </property>
            </widget>
           </item>
-          <item row="16" column="0">
+          <item row="17" column="0">
            <widget class="QLabel" name="sensorLabel">
             <property name="text">
              <string>Sensor:</string>
             </property>
            </widget>
           </item>
-          <item row="16" column="1">
+          <item row="17" column="1">
            <layout class="QHBoxLayout" name="sensorLayout">
             <item>
              <widget class="QComboBox" name="sensorComboBox">
@@ -386,14 +421,14 @@
             </item>
            </layout>
           </item>
-          <item row="17" column="0">
+          <item row="18" column="0">
            <widget class="QLabel" name="filmLabel">
             <property name="text">
              <string>Film:</string>
             </property>
            </widget>
           </item>
-          <item row="17" column="1">
+          <item row="18" column="1">
            <layout class="QHBoxLayout" name="filmLayout">
             <item>
              <widget class="QComboBox" name="filmComboBox">
@@ -421,14 +456,14 @@
             </item>
            </layout>
           </item>
-          <item row="18" column="0">
+          <item row="19" column="0">
            <widget class="QLabel" name="focalLengthLabel">
             <property name="text">
              <string>Focal length:</string>
             </property>
            </widget>
           </item>
-          <item row="18" column="1">
+          <item row="19" column="1">
            <widget class="QDoubleSpinBox" name="focalLengthSpinBox">
             <property name="toolTip">
              <string>The focal length of the lens: sets the field of view for the sensor. Zooming with the mouse changes it, like a zoom lens.</string>
@@ -456,28 +491,28 @@
             </property>
            </widget>
           </item>
-          <item row="19" column="0">
+          <item row="20" column="0">
            <widget class="QLabel" name="zoomStepsLabel">
             <property name="text">
              <string>Mouse wheel zoom:</string>
             </property>
            </widget>
           </item>
-          <item row="19" column="1">
+          <item row="20" column="1">
            <widget class="QComboBox" name="zoomStepsComboBox">
             <property name="toolTip">
              <string>How the mouse wheel changes the focal length: freely, in whole millimeters as on the scale of a zoom lens, or between the focal lengths of common lenses and telescopes (8, 10, 12, 14 ... 50, 70, 85 ... 200, 300, 400 ... 3000 mm). In whole millimeters each step of the wheel changes it by at least one millimeter, between common focal lengths it takes the next one.</string>
             </property>
            </widget>
           </item>
-          <item row="20" column="0">
+          <item row="21" column="0">
            <widget class="QLabel" name="frameLabel">
             <property name="text">
              <string>Frame:</string>
             </property>
            </widget>
           </item>
-          <item row="20" column="1">
+          <item row="21" column="1">
            <layout class="QHBoxLayout" name="frameLayout">
             <item>
              <widget class="QComboBox" name="frameOrientationComboBox">
@@ -498,14 +533,14 @@
             </item>
            </layout>
           </item>
-          <item row="21" column="0">
+          <item row="22" column="0">
            <widget class="QLabel" name="detectionSnrLabel">
             <property name="text">
              <string>Faintest stars:</string>
             </property>
            </widget>
           </item>
-          <item row="21" column="1">
+          <item row="22" column="1">
            <widget class="QDoubleSpinBox" name="detectionSnrSpinBox">
             <property name="toolTip">
              <string>The detection limit: a star is drawn only when its light stands out of the noise of the sky and the sensor by this factor (signal to noise ratio). 3: the faintest stars are barely seen in the grain. 5: the usual limit of detection in astronomy, about half a magnitude brighter and faster to draw. Higher values leave out stars that would be seen in the picture. Off: all stars are drawn, as without noise (slow in wide fields).</string>

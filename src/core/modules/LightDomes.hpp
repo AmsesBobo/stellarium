@@ -151,6 +151,11 @@ public:
 	int getDatabaseDistricts() const {return databaseDistricts;}
 	//! The largest distance of a town (km)
 	static double maxDistance();
+	//! How much brighter the light of lamps nearby makes the zenith with one haze than with another (single
+	//! scattering): vertical aerosol optical depths at the observer (550 nm), Angstrom exponents, asymmetries g and
+	//! albedos; the altitude of the observer in km
+	static double nearbyLightRatio(double depth, double angstrom, double g, double albedo,
+	                               double normalDepth, double normalAngstrom, double normalG, double normalAlbedo, double altitudeKm);
 
 public slots:
 	void setFlagEnabled(bool b);
@@ -187,7 +192,12 @@ private:
 	{
 		double aerosolDepth = -1.; //!< vertical aerosol optical depth at sea level, 550 nm
 		double altitude = -1.;     //!< of the observer, km
-		bool operator==(const AtmosphereKey& o) const {return aerosolDepth == o.aerosolDepth && altitude == o.altitude;}
+		double angstrom = 1.3, asymmetry = 0.7, albedo = 0.9;  //!< of the aerosols (the humidity)
+		bool operator==(const AtmosphereKey& o) const
+		{
+			return aerosolDepth == o.aerosolDepth && altitude == o.altitude && angstrom == o.angstrom
+			       && asymmetry == o.asymmetry && albedo == o.albedo;
+		}
 	};
 	AtmosphereKey currentAtmosphere() const;
 	void startComputation();

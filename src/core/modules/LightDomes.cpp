@@ -59,10 +59,10 @@ constexpr double KERNEL_MIN_DISTANCE = 0.25, KERNEL_MAX_DISTANCE = 400.;  // km
 constexpr int KERNEL_AZIMUTHS = 37;
 constexpr double KERNEL_AZIMUTH_STEP = 5.;                                // degrees
 // The atmosphere: Rayleigh optical depth tau = 0.0088 lambda^-4.05 (lambda in micrometers) over a scale height of
-// 8 km; aerosols with an Angstrom exponent 1.3 over 1.2 km, single scattering albedo 0.9, Henyey-Greenstein g = 0.7
+// 8 km; aerosols over 1.2 km, with the Angstrom exponent, single scattering albedo and Henyey-Greenstein g of the
+// haze of the photographic mode (StelSkyDrawer::getPhotoAerosol(), from the humidity: 1.3, 0.9 and 0.7 normally)
 constexpr double WAVELENGTHS[3] = {0.610, 0.550, 0.465};
 constexpr double RAYLEIGH_SCALE_HEIGHT = 8., AEROSOL_SCALE_HEIGHT = 1.2;
-constexpr double AEROSOL_ANGSTROM = 1.3, AEROSOL_ALBEDO = 0.9, AEROSOL_G = 0.7;
 // Garstang's emission function: G of the light that falls on the ground is reflected, F goes directly upwards
 constexpr double GARSTANG_G = 0.15, GARSTANG_F = 0.15;
 
@@ -96,7 +96,9 @@ inline void columns(double h1, double h2, double L, double& rayleigh, double& ae
 struct Air
 {
 	Vec3d rayleigh;  // scattering coefficients at sea level (1/km), red, green, blue
-	Vec3d aerosol;
+	Vec3d aerosol;   // extinction coefficients of the aerosols at sea level (1/km), delta-M scaled (see makeAir())
+	Vec3d aerosolScattering;  // their scattering coefficients (delta-M scaled)
+	double g = 0.7;  // asymmetry of the aerosol scattering (delta-M scaled)
 	Vec3d depth(double rayleighColumn, double aerosolColumn) const
 	{
 		return rayleigh*rayleighColumn + aerosol*aerosolColumn;
@@ -104,6 +106,28 @@ struct Air
 };
 
 inline double height(const Vec3d& p) { return p.norm() - EARTH_RADIUS_KM; }
+
+// The air of a vertical aerosol optical depth at sea level (550 nm), with its Angstrom exponent, g and albedo.
+// The aerosols scatter strongly forwards: a single scattering model would lose all that light from the beam, though
+// most of it goes on in nearly the same direction (in a haze the light of distant towns is dimmed far less than its
+// optical depth says). The delta-M approximation (Wiscombe 1977) treats the forward peak (the fraction g^2 of the
+// scattered light) as not scattered: the extinction becomes beta (1 - albedo g^2), the scattering beta albedo (1 - g^2)
+// with the asymmetry g/(1 + g).
+Air makeAir(double aerosolDepth, double angstrom, double g, double albedo)
+{
+	Air air;
+	const double f = g*g;
+	for (int c=0; c<3; ++c)
+	{
+		const double lambda = WAVELENGTHS[c];
+		air.rayleigh[c] = 0.0088*std::pow(lambda, -4.05)/RAYLEIGH_SCALE_HEIGHT;
+		const double extinction = aerosolDepth*std::pow(lambda/0.55, -angstrom)/AEROSOL_SCALE_HEIGHT;
+		air.aerosol[c] = extinction*(1. - albedo*f);
+		air.aerosolScattering[c] = extinction*albedo*(1. - f);
+	}
+	air.g = g/(1. + g);
+	return air;
+}
 
 // Luminance (cd/m^2) at the observer (height h0, km), red, green and blue, towards zenith angle z and azimuth a from
 // a town of 1 lumen at the great circle distance d (km): single scattering along the line of sight
@@ -118,7 +142,7 @@ Vec3d scatteredLight(const Air& air, double h0, double d, double z, double a)
 	constexpr int STEPS = 120;
 	const double s0 = 0.02;
 	const double ratio = std::pow(sMax/s0, 1./(STEPS - 1));
-	const double g = AEROSOL_G;
+	const double g = air.g;
 	Vec3d total(0.), toObserver(0.);
 	double sEdge = 0., sNext = s0, hPrev = h0, sPrev = 0.;
 	for (int i=0; i<STEPS; ++i, sNext *= ratio)
@@ -153,10 +177,10 @@ Vec3d scatteredLight(const Air& air, double h0, double d, double z, double a)
 		const double q = 1. + g*g - 2.*g*c;
 		const double hgPhase = (1. - g*g)/(4.*M_PI*q*std::sqrt(q));
 		const double wR = std::exp(-h/RAYLEIGH_SCALE_HEIGHT)*rayleighPhase;
-		const double wA = AEROSOL_ALBEDO*std::exp(-h/AEROSOL_SCALE_HEIGHT)*hgPhase;
+		const double wA = std::exp(-h/AEROSOL_SCALE_HEIGHT)*hgPhase;
 		const double base = emission/(r*r*1e6)*ds;  // lux per scattering coefficient
 		for (int k=0; k<3; ++k)
-			total[k] += base*(air.rayleigh[k]*wR + air.aerosol[k]*wA)*std::exp(-fromTown[k] - toObserver[k]);
+			total[k] += base*(air.rayleigh[k]*wR + air.aerosolScattering[k]*wA)*std::exp(-fromTown[k] - toObserver[k]);
 	}
 	return total;
 }
@@ -367,6 +391,27 @@ void LightDomes::recompute()
 	dirty = true;
 }
 
+double LightDomes::nearbyLightRatio(double depth, double angstrom, double g, double albedo,
+                                    double normalDepth, double normalAngstrom, double normalG, double normalAlbedo, double altitudeKm)
+{
+	// The lamps around the observer as an even carpet of light from 0.25 to 20 km, seen at the zenith (green); the
+	// optical depths at the observer taken back to sea level
+	const double toSeaLevel = std::exp(altitudeKm/AEROSOL_SCALE_HEIGHT);
+	const Air now = makeAir(depth*toSeaLevel, angstrom, g, albedo);
+	const Air normal = makeAir(normalDepth*toSeaLevel, normalAngstrom, normalG, normalAlbedo);
+	double a = 0., b = 0.;
+	constexpr int N = 24;
+	const double ratio = std::pow(20./0.25, 1./N);
+	for (int i=0; i<N; ++i)
+	{
+		const double d0 = 0.25*std::pow(ratio, i), d1 = d0*ratio, d = std::sqrt(d0*d1);
+		const double area = d*(d1 - d0);  // of the ring, up to 2 pi
+		a += area*scatteredLight(now, altitudeKm, d, 0.002, 0.)[1];
+		b += area*scatteredLight(normal, altitudeKm, d, 0.002, 0.)[1];
+	}
+	return b > 0. ? a/b : 1.;
+}
+
 double LightDomes::maxDistance()
 {
 	return KERNEL_MAX_DISTANCE;
@@ -487,26 +532,30 @@ LightDomes::AtmosphereKey LightDomes::currentAtmosphere() const
 	key.altitude = std::round(h*20.)/20.;  // 50 m steps
 	// The aerosols from the extinction coefficient (V magnitudes per airmass, at the observer): what the air
 	// (Rayleigh above the observer) and ozone (0.016) do not explain, at least 0.01, taken back to sea level
-	const double k = static_cast<double>(core->getSkyDrawer()->getExtinction().getExtinctionCoefficient());
-	const double rayleigh = 0.0088*std::pow(0.55, -4.05)*std::exp(-key.altitude/RAYLEIGH_SCALE_HEIGHT);
-	const double aerosolHere = qMax(0.01, k/1.0857 - rayleigh - 0.016);
-	key.aerosolDepth = std::round(qMin(3., aerosolHere*std::exp(key.altitude/AEROSOL_SCALE_HEIGHT))*200.)/200.;
+	// The haze of the sky settings (the extinction coefficient and the humidity), at the observer, taken back to sea
+	// level; quantized, so that small changes need no new table
+	const StelSkyDrawer::PhotoAerosol& haze = core->getSkyDrawer()->getPhotoAerosol();
+	key.aerosolDepth = std::round(qMin(3., haze.depth*std::exp(key.altitude/AEROSOL_SCALE_HEIGHT))*200.)/200.;
+	key.angstrom = std::round(haze.angstrom*20.)/20.;
+	key.asymmetry = std::round(haze.asymmetry*100.)/100.;
+	key.albedo = std::round(haze.albedo*100.)/100.;
 	return key;
 }
 
 namespace
 {
 // The table only depends on the atmosphere: it is kept in the cache directory (a few seconds to compute)
-QString kernelCacheFile(double aerosolDepth, double altitude)
+QString kernelCacheFile(double aerosolDepth, double altitude, double angstrom, double g, double albedo)
 {
-	return QString("%1/lightdomes/kernel-v1-%2-%3.bin").arg(StelFileMgr::getCacheDir()).arg(qRound(aerosolDepth*1000.)).arg(qRound(altitude*1000.));
+	return QString("%1/lightdomes/kernel-v3-%2-%3-%4-%5-%6.bin").arg(StelFileMgr::getCacheDir()).arg(qRound(aerosolDepth*1000.)).arg(qRound(altitude*1000.))
+	        .arg(qRound(angstrom*100.)).arg(qRound(g*100.)).arg(qRound(albedo*100.));
 }
 }
 
 std::shared_ptr<LightDomes::Kernel> LightDomes::computeKernel(const AtmosphereKey& key)
 {
 	const size_t count = static_cast<size_t>(3)*KERNEL_DISTANCES*MAP_ALTITUDES*KERNEL_AZIMUTHS;
-	const QString cacheFile = kernelCacheFile(key.aerosolDepth, key.altitude);
+	const QString cacheFile = kernelCacheFile(key.aerosolDepth, key.altitude, key.angstrom, key.asymmetry, key.albedo);
 	{
 		QFile f(cacheFile);
 		if (f.open(QIODevice::ReadOnly) && f.size() == static_cast<qint64>(count*sizeof(float)))
@@ -524,13 +573,7 @@ std::shared_ptr<LightDomes::Kernel> LightDomes::computeKernel(const AtmosphereKe
 	std::vector<int> jobs(KERNEL_DISTANCES*MAP_ALTITUDES);
 	std::iota(jobs.begin(), jobs.end(), 0);
 	Kernel* k = kern.get();
-	Air air;
-	for (int c=0; c<3; ++c)
-	{
-		const double lambda = WAVELENGTHS[c];
-		air.rayleigh[c] = 0.0088*std::pow(lambda, -4.05)/RAYLEIGH_SCALE_HEIGHT;
-		air.aerosol[c] = key.aerosolDepth*std::pow(lambda/0.55, -AEROSOL_ANGSTROM)/AEROSOL_SCALE_HEIGHT;
-	}
+	const Air air = makeAir(key.aerosolDepth, key.angstrom, key.asymmetry, key.albedo);
 	QtConcurrent::blockingMap(jobs, [k, key, air](int job)
 	{
 		const int d = job / MAP_ALTITUDES, row = job % MAP_ALTITUDES;
