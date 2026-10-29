@@ -56,6 +56,16 @@ void StelSkyDrawer::setFlagEyeInstantAdaptation(bool b)
 	emit flagEyeInstantAdaptationChanged(b);
 }
 
+void StelSkyDrawer::setEyeAge(double years)
+{
+	years = qBound(EYE_MIN_AGE, years, EYE_MAX_AGE);
+	if (qFuzzyCompare(years, eyeAge))
+		return;
+	eyeAge = years;
+	StelApp::immediateSave("viewing/naked_eye_age", years);
+	emit eyeAgeChanged(years);
+}
+
 void StelSkyDrawer::setFlagNakedEyeMode(bool b)
 {
 	if (b==flagNakedEyeMode)
@@ -739,6 +749,7 @@ void StelSkyDrawer::savePhotoSettings(QSettings* conf) const
 	conf->setValue("viewing/flag_photographic_mode", getFlagPhotographicMode());
 	conf->setValue("viewing/flag_naked_eye_mode", getFlagNakedEyeMode());
 	conf->setValue("viewing/flag_naked_eye_instant_adaptation", getFlagEyeInstantAdaptation());
+	conf->setValue("viewing/naked_eye_age", getEyeAge());
 	conf->setValue("viewing/photographic_exposure_ev", getPhotoExposureEV());
 	conf->setValue("viewing/photographic_exposure_time", getPhotoExposureTime());
 	conf->setValue("viewing/photographic_aperture", photoProgramRunning ? photoUserAperture : photoAperture);

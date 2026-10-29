@@ -26,6 +26,7 @@
 #include "VecMath.hpp"
 #include "StelPhotoMeter.hpp"
 #include "StelEyeAdaptation.hpp"
+#include "StelEyePupil.hpp"
 #include "StelAtmosphereTransmission.hpp"
 #include "StelProjectorType.hpp"
 
@@ -95,6 +96,8 @@ class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 	Q_PROPERTY(bool flagNakedEyeMode READ getFlagNakedEyeMode WRITE setFlagNakedEyeMode NOTIFY flagNakedEyeModeChanged)
 	//! Naked eye mode: the eye is always adapted to what it sees (no time for the light and dark adaptation)
 	Q_PROPERTY(bool flagEyeInstantAdaptation READ getFlagEyeInstantAdaptation WRITE setFlagEyeInstantAdaptation NOTIFY flagEyeInstantAdaptationChanged)
+	//! Naked eye mode: the age of the observer (years). It sets the size of the pupil (see StelEyePupil).
+	Q_PROPERTY(double eyeAge READ getEyeAge WRITE setEyeAge NOTIFY eyeAgeChanged)
 	//! Exposure correction of the photographic mode, in photographic stops (EV). 0 is the neutral exposure.
 	Q_PROPERTY(double photoExposureEV READ getPhotoExposureEV WRITE setPhotoExposureEV NOTIFY photoExposureEVChanged)
 	//! Exposure time of the virtual camera in the photographic mode, in seconds.
@@ -231,8 +234,18 @@ public:
 	//! Time constant of the smooth adaptation of the automatic exposure (seconds)
 	static constexpr double PHOTO_AUTO_TIME_CONSTANT = 0.3;
 	//! Naked eye mode: the luminance the eye is adapted to (cd/m^2): the effective adaptation luminance of the
-	//! adaptation over time (see StelEyeAdaptation) to the mean luminance of the view
-	double getEyeAdaptationLuminance() const {return eyeAdaptation.getAdaptationLuminance();}
+	//! adaptation over time (see StelEyeAdaptation) to the mean luminance of the view. The model works with the
+	//! light that an observer of the reference age of the pupil formula would get (the thresholds were measured
+	//! by such observers); this is the luminance of the scene that leads to it through the pupil of the observer.
+	double getEyeAdaptationLuminance() const {return eyeAdaptation.getAdaptationLuminance()/eyeLightFactor;}
+	//! Naked eye mode: the diameter of the pupil now (mm)
+	double getEyePupilDiameter() const {return eyePupil.getDiameter();}
+	//! Naked eye mode: the light that the pupil of the observer lets in, relative to an observer of the
+	//! reference age (see StelEyePupil::getLightFactor())
+	double getEyeLightFactor() const {return eyeLightFactor;}
+	static constexpr double EYE_MIN_AGE = 10.;
+	static constexpr double EYE_MAX_AGE = 90.;
+	static constexpr double EYE_DEFAULT_AGE = 30.;
 	//! Naked eye mode: the state of the adaptation of the eye
 	const StelEyeAdaptation& getEyeAdaptation() const {return eyeAdaptation;}
 	//! Naked eye mode: the time the eye integrates the light over (seconds). It takes the place of the exposure
@@ -931,6 +944,9 @@ public slots:
 	bool getFlagEyeInstantAdaptation() const {return flagEyeInstantAdaptation;}
 	//! Naked eye mode: adapt the eye at once to the current view
 	void resetEyeAdaptation() {eyeAdaptationFresh = true;}
+	//! Naked eye mode: the age of the observer (years, 10 to 90; the formula of the pupil holds from 20 to 83)
+	void setEyeAge(double years);
+	double getEyeAge() const {return eyeAge;}
 
 	//! Set the exposure time of the virtual camera, in seconds (limited to 1/8000 s ... 3600 s).
 	void setPhotoExposureTime(double seconds);
@@ -1296,6 +1312,7 @@ signals:
 	//! Emitted when the naked eye rendering mode is switched on or off
 	void flagNakedEyeModeChanged(bool b);
 	void flagEyeInstantAdaptationChanged(bool b);
+	void eyeAgeChanged(double years);
 	//! Emitted when the exposure correction of the photographic mode is changed
 	void photoExposureEVChanged(double ev);
 	//! Emitted when the exposure time of the virtual camera is changed
@@ -1691,6 +1708,11 @@ private:
 	bool eyeAdaptationFresh = true;
 	double eyeAdaptationLastJD = 0.;
 	bool flagEyeInstantAdaptation = false;
+	//! Naked eye mode: the pupil, the age of the observer (years), and the light factor of the pupil at the last
+	//! reading of the meter
+	StelEyePupil eyePupil;
+	double eyeAge = EYE_DEFAULT_AGE;
+	double eyeLightFactor = 1.;
 	//! The halo of the stars in the picture (the camera's, none for the eye)
 	float getPhotoHaloFractionActive() const {return getFlagPhotoCameraActive() ? photoHaloFraction : 0.f;}
 	//! Exposure correction of the photographic mode, in stops (EV)

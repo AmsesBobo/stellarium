@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>420</width>
-    <height>260</height>
+    <height>340</height>
    </rect>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
@@ -56,6 +56,67 @@
         </property>
         <property name="text">
          <string>Show the information line</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="observerGroupBox">
+     <property name="title">
+      <string>Observer</string>
+     </property>
+     <layout class="QGridLayout" name="observerLayout">
+      <item row="0" column="0">
+       <widget class="QLabel" name="ageLabel">
+        <property name="toolTip">
+         <string>The age of the observer. It sets the size of the pupil (Watson &amp; Yellott 2012): with the years the pupil opens less in the dark, and less light reaches the retina.</string>
+        </property>
+        <property name="text">
+         <string>Age:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QDoubleSpinBox" name="ageSpinBox">
+        <property name="toolTip">
+         <string>The age of the observer. It sets the size of the pupil (Watson &amp; Yellott 2012): with the years the pupil opens less in the dark, and less light reaches the retina.</string>
+        </property>
+        <property name="suffix">
+         <string> years</string>
+        </property>
+        <property name="decimals">
+         <number>0</number>
+        </property>
+        <property name="minimum">
+         <double>10.000000000000000</double>
+        </property>
+        <property name="maximum">
+         <double>90.000000000000000</double>
+        </property>
+        <property name="value">
+         <double>30.000000000000000</double>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="2">
+       <spacer name="ageSpacer">
+        <property name="orientation">
+         <enum>Qt::Horizontal</enum>
+        </property>
+        <property name="sizeHint" stdset="0">
+         <size>
+          <width>40</width>
+          <height>20</height>
+         </size>
+        </property>
+       </spacer>
+      </item>
+      <item row="1" column="0" colspan="3">
+       <widget class="QLabel" name="pupilInfoLabel">
+        <property name="text">
+         <string notr="true"/>
         </property>
        </widget>
       </item>

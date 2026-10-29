@@ -113,6 +113,7 @@ StelSkyDrawer::StelSkyDrawer(StelCore* acore) :
 	flagPhotographicMode = conf->value("viewing/flag_photographic_mode", false).toBool();
 	flagNakedEyeMode = !flagPhotographicMode && conf->value("viewing/flag_naked_eye_mode", false).toBool();
 	flagEyeInstantAdaptation = conf->value("viewing/flag_naked_eye_instant_adaptation", false).toBool();
+	eyeAge = qBound(EYE_MIN_AGE, conf->value("viewing/naked_eye_age", EYE_DEFAULT_AGE).toDouble(), EYE_MAX_AGE);
 	photoExposureEV = qBound(-12., conf->value("viewing/photographic_exposure_ev", 0.0).toDouble(), 12.);
 	photoExposureTime = qBound(1./8000., conf->value("viewing/photographic_exposure_time", 20.0).toDouble(), 3600.);
 	photoLensMaxAperture = qBound(PHOTO_LENS_MAX_APERTURE_MIN, conf->value("viewing/photographic_lens_max_aperture", static_cast<double>(PHOTO_LENS_MAX_APERTURE)).toDouble(), PHOTO_LENS_MAX_APERTURE_MAX);

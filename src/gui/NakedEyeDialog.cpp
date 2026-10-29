@@ -61,6 +61,8 @@ void NakedEyeDialog::createDialogContent()
 	connectBoolProperty(ui->nakedEyeModeCheckBox, "StelSkyDrawer.flagNakedEyeMode");
 	connectBoolProperty(ui->instantAdaptationCheckBox, "StelSkyDrawer.flagEyeInstantAdaptation");
 	connectBoolProperty(ui->infoLineCheckBox, "StelSkyDrawer.flagPhotoInfoLine");
+	ui->ageSpinBox->setRange(StelSkyDrawer::EYE_MIN_AGE, StelSkyDrawer::EYE_MAX_AGE);
+	connectDoubleProperty(ui->ageSpinBox, "StelSkyDrawer.eyeAge");
 	StelSkyDrawer* drawer = StelApp::getInstance().getCore()->getSkyDrawer();
 	connect(ui->adaptNowPushButton, &QPushButton::clicked, drawer, &StelSkyDrawer::resetEyeAdaptation);
 
@@ -81,12 +83,13 @@ void NakedEyeDialog::updateAdaptationInfo()
 	if (!drawer->getFlagNakedEyeModeActive())
 	{
 		ui->adaptationInfoLabel->setText(q_("The naked eye mode is off (it needs OpenGL 3 or later)."));
+		ui->pupilInfoLabel->clear();
 		return;
 	}
 	const StelEyeAdaptation& eye = drawer->getEyeAdaptation();
 	QLocale locale;
 	locale.setNumberOptions(QLocale::OmitGroupSeparator);
-	const double L = eye.getAdaptationLuminance();
+	const double L = drawer->getEyeAdaptationLuminance();
 	const QString luminance = (L >= 1e-3) ? locale.toString(L, 'g', 3) : locale.toString(L, 'e', 1);
 	QString text = q_("Adapted to %1 cd/m%2, seeing with the %3.")
 	                   .arg(luminance, QChar(0x00B2), eye.getLimitingSystem() == StelEyeAdaptation::Rods ? q_("rods") : q_("cones"));
@@ -95,4 +98,5 @@ void NakedEyeDialog::updateAdaptationInfo()
 		text += QStringLiteral(" ") + q_("Still adapting to the dark: the faintest visible light is %1 mag brighter than when adapted.")
 		                                  .arg(locale.toString(elevation, 'f', 1));
 	ui->adaptationInfoLabel->setText(text);
+	ui->pupilInfoLabel->setText(q_("Pupil: %1 mm.").arg(locale.toString(drawer->getEyePupilDiameter(), 'f', 1)));
 }

@@ -56,8 +56,10 @@ float StelSkyDrawer::getPhotoSceneScale() const
 	// The eye: the adaptation luminance is shown at its display value (see eyeAdaptationDisplayValue())
 	if (getFlagNakedEyeModeActive())
 	{
+		// The adaptation works with the light of an observer of the reference age (see getEyeAdaptationLuminance()):
+		// the scene gets there through the light factor of the pupil
 		const double L = qMax(1e-7, eyeAdaptation.getAdaptationLuminance());
-		return static_cast<float>(eyeAdaptationDisplayValue(L)/L);
+		return static_cast<float>(eyeLightFactor*eyeAdaptationDisplayValue(L)/L);
 	}
 	// Reflected-light meter calibration constant K (ISO 2720), and middle grey
 	constexpr double K = 12.5;
@@ -392,16 +394,22 @@ void StelSkyDrawer::applyPhotoMeterReading(const StelPhotoMeter::Reading& readin
 			return;
 		const double luminance = qMax(1e-8, reading.centerWeighted / reading.sceneScale); // cd/m^2
 		const double jd = core->getJD();
+		// The pupil first: the adaptation gets the light it lets in, as the light of an observer of the reference
+		// age (whose thresholds the model has)
 		if (eyeAdaptationFresh || flagEyeInstantAdaptation)
 		{
-			eyeAdaptation.reset(luminance);
+			eyePupil.reset(luminance, eyeAge);
+			eyeLightFactor = eyePupil.getLightFactor(luminance);
+			eyeAdaptation.reset(luminance*eyeLightFactor);
 			eyeAdaptationFresh = false;
 		}
 		else
 		{
 			// The time that passed: on the clock, or in the program when it runs faster (or jumps)
 			const double dt = qMax(qMax(0., deltaTime), std::fabs(jd - eyeAdaptationLastJD)*86400.);
-			eyeAdaptation.update(luminance, dt);
+			eyePupil.update(luminance, eyeAge, dt);
+			eyeLightFactor = eyePupil.getLightFactor(luminance);
+			eyeAdaptation.update(luminance*eyeLightFactor, dt);
 		}
 		eyeAdaptationLastJD = jd;
 		return;
@@ -570,7 +578,7 @@ void StelSkyDrawer::drawPhotoInfoLine(StelCore* core) const
 		// The eye: the mode, the luminance it is adapted to and the system it sees with, and how far it still is
 		// from being adapted in the dark
 		parts << q_("Naked eye");
-		const double L = eyeAdaptation.getAdaptationLuminance();
+		const double L = getEyeAdaptationLuminance();
 		const int decimals = qBound(0, 2 - static_cast<int>(std::floor(std::log10(qMax(1e-9, L)))), 9);
 		QLocale locale;
 		locale.setNumberOptions(QLocale::OmitGroupSeparator);
@@ -582,6 +590,7 @@ void StelSkyDrawer::drawPhotoInfoLine(StelCore* core) const
 		if (elevation >= 0.05)
 			parts << QString("%1 +%2 mag").arg(qc_("dark adaptation", "eye: how much brighter the faintest visible star is than when adapted"),
 			                                    locale.toString(elevation, 'f', 1));
+		parts << QString("%1 %2 mm").arg(qc_("pupil", "eye: diameter of the pupil"), locale.toString(eyePupil.getDiameter(), 'f', 1));
 		if (std::fabs(photoExposureEV) > 0.01)
 			parts << QString("%1 EV").arg(QString::asprintf("%+.1f", photoExposureEV));
 	}

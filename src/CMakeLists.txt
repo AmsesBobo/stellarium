@@ -51,6 +51,8 @@ SET(stellarium_lib_SRCS
      core/StelPhotoMeter.cpp
      core/StelEyeAdaptation.hpp
      core/StelEyeAdaptation.cpp
+     core/StelEyePupil.hpp
+     core/StelEyePupil.cpp
      core/StelPhotoLensFlare.hpp
      core/StelPhotoLensFlare.cpp
      core/StelAtmosphereTransmission.hpp
