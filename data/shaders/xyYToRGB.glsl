@@ -96,6 +96,60 @@ highp vec3 photoLightDomeLight(highp vec3 viewDir)
 	return texture2D(photoLightDomeMap, tc).rgb * photoScale * brightnessScale;
 }
 
+// Photographic mode: the haze that the sky model does not hold (the aerosols of the extinction coefficient and the
+// humidity beyond the very clear air of the ShowMySky models, see StelSkyDrawer::setPhotoHazeUniforms()), as a layer
+// near the ground (1.2 km) in single scattering, delta-M scaled (its forward peak is the aureole): it dims the sky
+// behind it, scatters the light of the sky itself (whitening it), and the light of the Sun and the Moon (a glow, brightest
+// around them). Below the horizon as above it.
+uniform bool photoHaze;
+uniform bool photoHazeAdd;              // add the light of the haze (in one pass only)
+uniform highp vec3 photoHazeExtinction; // vertical optical depth of the haze (delta-M), red, green, blue
+uniform highp vec3 photoHazeAlbedo;     // its scattering against its extinction (delta-M)
+uniform highp float photoHazeG;         // its asymmetry (delta-M)
+uniform highp vec3 photoHazeSunDir;
+uniform highp vec3 photoHazeMoonDir;
+uniform highp vec3 photoHazeSunLight;   // illuminance on the haze (lux, linear sRGB), 0 below the horizon
+uniform highp vec3 photoHazeMoonLight;
+uniform highp vec3 photoHazeDiffuse;    // mean luminance of the sky that lights the haze (cd/m^2, linear sRGB)
+
+highp float photoHazeAirmass(highp float sinElev)
+{
+	const highp float RH = 6371. / 1.2;
+	highp float s = clamp(abs(sinElev), 0., 1.);
+	return sqrt(RH*s*RH*s + 2.*RH + 1.) - RH*s;
+}
+
+highp vec3 photoHazeSource(highp vec3 viewDir, highp float X, highp vec3 dir, highp vec3 E)
+{
+	if (dot(E, E) <= 0.)
+		return vec3(0.);
+	highp float X0 = photoHazeAirmass(dir.z);
+	highp float g = photoHazeG;
+	highp float q = 1. + g*g - 2.*g*dot(viewDir, dir);
+	highp float P = (1. - g*g) / (12.5663706 * q * sqrt(q));
+	highp vec3 tau = photoHazeExtinction;
+	// a slab lit at the airmass X0, seen through the airmass X: E albedo P X (e^-tau X - e^-tau X0)/(X0 - X)
+	highp vec3 f = (abs(X0 - X) < 1e-3) ? X*tau*exp(-tau*X) : X*(exp(-tau*X) - exp(-tau*X0))/(X0 - X);
+	return E * photoHazeAlbedo * P * f;
+}
+
+highp vec3 photoHazeLight(highp vec3 sky, highp vec3 viewDir)
+{
+	if (!photoMode || !photoHaze)
+		return sky;
+	highp float X = photoHazeAirmass(viewDir.z);
+	highp vec3 T = exp(-photoHazeExtinction * X);
+	highp vec3 result = sky * T;
+	if (photoHazeAdd)
+	{
+		highp vec3 add = photoHazeDiffuse * photoHazeAlbedo * (vec3(1.) - T)
+		               + photoHazeSource(viewDir, X, photoHazeSunDir, photoHazeSunLight)
+		               + photoHazeSource(viewDir, X, photoHazeMoonDir, photoHazeMoonLight);
+		result += add * photoScale * brightnessScale;
+	}
+	return result;
+}
+
 float applyTMAndGamma(highp float Y)
 {
 	if (flagUseTmGamma)

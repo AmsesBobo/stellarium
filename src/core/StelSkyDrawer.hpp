@@ -421,6 +421,10 @@ public:
 	bool getFlagPhotoAureoleActive() const;
 	//! The aureole of the haze on the screen: the radius of its core and its extent (pixels, at the centre)
 	void getPhotoAureoleSize(const StelProjector& prj, float& core, float& extent) const;
+	//! Set the uniforms of photoHazeLight() (xyYToRGB.glsl) of a sky shader: the haze beyond the aerosols of the
+	//! ShowMySky models. meanSkyLuminance: of the sky that lights it (cd/m^2); addLight: whether this pass adds the
+	//! light of the haze (one pass of the Sun and the Moon)
+	void setPhotoHazeUniforms(QOpenGLShaderProgram& program, double meanSkyLuminance, bool addLight) const;
 	//! The share of the light that the haze scatters into the aureole, against the light that comes straight through,
 	//! on a grid of gw x gh cells over the scene image (w x h pixels, from the lower left): it grows with the airmass
 	std::vector<float> getPhotoAureoleMap(int gw, int gh, int w, int h) const;

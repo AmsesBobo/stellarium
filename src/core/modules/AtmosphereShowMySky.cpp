@@ -259,6 +259,7 @@ vec3 photoFilmSkyRGB(highp vec4 XYZW);
 uniform bool photoFilmSky;
 vec3 photoAirglowLight(float sinElev);
 vec3 photoLightDomeLight(vec3 viewDir);
+vec3 photoHazeLight(vec3 sky, vec3 viewDir);
 vec3 linearColorToFramebuffer(vec3 c);
 
 void main()
@@ -274,6 +275,8 @@ void main()
 		vec4 winPos = projectionMatrixInverse * vec4(ndcXY, 0., 1.);
 		bool ok = false;
 		vec3 viewDir = normalize(unProject(winPos.x, winPos.y, ok).xyz);
+		// the haze the model does not hold (the photographic mode needs the linear framebuffer: srgb is linear)
+		srgb = photoHazeLight(srgb, viewDir);
 		srgb += linearColorToFramebuffer(photoAirglowLight(viewDir.z) + photoLightDomeLight(viewDir));
 	}
 	color=vec4(srgb,1);
@@ -840,6 +843,7 @@ void AtmosphereShowMySky::draw(StelCore* core)
 		GL(luminanceToScreenProgram_->setUniformValue("photoLightDomes", domes));
 		GL(luminanceToScreenProgram_->setUniformValue("photoLightDomeMap", 3));
 		skyDrawer->setPhotoFilmSkyUniforms(*luminanceToScreenProgram_);
+		skyDrawer->setPhotoHazeUniforms(*luminanceToScreenProgram_, static_cast<double>(averageLuminance) - 0.0001, true);
 		const auto prj = core->getProjection(StelCore::FrameAltAz, StelCore::RefractionOff);
 		prj->setUnProjectUniforms(*luminanceToScreenProgram_);
 		GL(luminanceToScreenProgram_->setUniformValue("projectionMatrixInverse", prj->getProjectionMatrix().toQMatrix().inverted()));

@@ -22,6 +22,7 @@
 
 #include "StelSkyDrawer.hpp"
 #include "LightDomes.hpp"
+#include "SolarSystem.hpp"
 #include "StelProjector.hpp"
 #include "StelApp.hpp"
 #include "StelSRGB.hpp"
@@ -452,6 +453,64 @@ std::vector<float> StelSkyDrawer::getPhotoAureoleMap(int gw, int gh, int w, int 
 			map[static_cast<size_t>(j)*gw + i] = qMin(AUREOLE_MAX, static_cast<float>(std::expm1(forward*airmass)));
 		}
 	return map;
+}
+
+void StelSkyDrawer::setPhotoHazeUniforms(QOpenGLShaderProgram& program, double meanSkyLuminance, bool addLight) const
+{
+	const bool active = getFlagPhotographicModeActive() && getFlagHasAtmosphere()
+	                    && core->getCurrentLocation().planetName == QStringLiteral("Earth");
+	const double altitude = qMax(0., static_cast<double>(core->getCurrentLocation().altitude)/1000.);
+	// The aerosols of the ShowMySky models (atmosphere/default/params.atmo: 1.0333e8 m^-3 over 1.2 km, 0.042968 um^2):
+	// a vertical optical depth of only 0.0053 at sea level. The rest of the haze of the extinction coefficient is added.
+	const double modelDepth = 0.0053*std::exp(-altitude/1.2);
+	const double extra = active ? qMax(0., photoAerosol.depth - modelDepth) : 0.;
+	program.setUniformValue("photoHaze", extra > 1e-4);
+	if (!(extra > 1e-4))
+		return;
+	const PhotoAerosol& a = photoAerosol;
+	const double f = a.asymmetry*a.asymmetry;  // delta-M: the forward peak (the aureole) goes on with the beam
+	const double wl[3] = {0.610, 0.550, 0.465};
+	float ext[3];
+	for (int c=0; c<3; ++c)
+		ext[c] = static_cast<float>(extra*std::pow(wl[c]/0.55, -a.angstrom)*(1. - a.albedo*f));
+	const float albedo = static_cast<float>(a.albedo*(1. - f)/(1. - a.albedo*f));
+	program.setUniformValue("photoHazeExtinction", ext[0], ext[1], ext[2]);
+	program.setUniformValue("photoHazeAlbedo", albedo, albedo, albedo);
+	program.setUniformValue("photoHazeG", static_cast<float>(a.asymmetry/(1. + a.asymmetry)));
+	program.setUniformValue("photoHazeAdd", addLight);
+	// The Sun and the Moon: their light on the haze, dimmed by the air above it (Rayleigh, ozone), none when they are
+	// below the horizon (the haze lies in the shadow of the Earth)
+	static SolarSystem* ssys = GETSTELMODULE(SolarSystem);
+	const auto light = [&](const PlanetP& body, const char* dirName, const char* lightName) {
+		Vec3f E(0.f), dir(0.f, 0.f, 1.f);
+		if (body)
+		{
+			Vec3d v = core->j2000ToAltAz(body->getJ2000EquatorialPos(core), StelCore::RefractionOff);
+			v.normalize();
+			dir = v.toVec3f();
+			const double s = v[2];
+			const double fade = qBound(0., (s + 0.02)/0.03, 1.);
+			if (fade > 0.)
+			{
+				const double illuminance = std::pow(10., -0.4*(static_cast<double>(body->getVMagnitude(core)) + 14.18));  // lux
+				const double airmass = 1./(qMax(s, 0.) + 0.025*std::exp(-11.*qMax(s, 0.)));
+				const double rayleighAtObserver = std::exp(-altitude/8.);
+				const double ozone[3] = {0.020, 0.016, 0.005};
+				for (int c=0; c<3; ++c)
+				{
+					const double tau = 0.0088*std::pow(wl[c], -4.05)*rayleighAtObserver + ozone[c];
+					E[c] = static_cast<float>(fade*illuminance*std::exp(-tau*airmass));
+				}
+			}
+		}
+		program.setUniformValue(dirName, dir[0], dir[1], dir[2]);
+		program.setUniformValue(lightName, E[0], E[1], E[2]);
+	};
+	light(ssys ? ssys->getSun() : PlanetP(), "photoHazeSunDir", "photoHazeSunLight");
+	light(ssys ? ssys->getMoon() : PlanetP(), "photoHazeMoonDir", "photoHazeMoonLight");
+	// The light of the sky itself, which the haze scatters too: its mean luminance, white
+	const float diffuse = static_cast<float>(qMax(0., meanSkyLuminance));
+	program.setUniformValue("photoHazeDiffuse", diffuse, diffuse, diffuse);
 }
 
 double StelSkyDrawer::getPhotoAirglowZenithLuminance() const

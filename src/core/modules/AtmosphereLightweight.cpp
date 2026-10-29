@@ -371,7 +371,9 @@ void main()
 	// Undo the sqrt
 	color_xyY.z *= color_xyY.z;
 	vec3 color_RGB = xyYToRGB(color_xyY.x, color_xyY.y, color_xyY.z * colorScale);
-	// Photographic mode: the airglow (in the pass of the Sun only, see draw())
+	// Photographic mode: the haze the model does not hold (its light in the pass of the Sun only), the airglow
+	// (likewise, see draw())
+	color_RGB = photoHazeLight(color_RGB, viewDir);
 	color_RGB += linearColorToFramebuffer(photoAirglowLight(viewDir.z) + photoLightDomeLight(viewDir));
 	FRAG_COLOR = vec4(color_RGB, 1);
 }
@@ -820,6 +822,7 @@ void AtmosphereLightweight::draw(StelCore*const core)
 		const Vec3f airglow = i == DRAW_PARAM_SUN ? core->getSkyDrawer()->getPhotoAirglow() : Vec3f(0.f);
 		renderShaderProgram_->setUniformValue("photoAirglow", airglow[0], airglow[1], airglow[2]);
 		renderShaderProgram_->setUniformValue("photoLightDomes", domes && i == DRAW_PARAM_SUN);
+		core->getSkyDrawer()->setPhotoHazeUniforms(*renderShaderProgram_, static_cast<double>(averageLuminance) - 0.0001, i == DRAW_PARAM_SUN);
 
 		GL(gl.glDrawArrays(GL_TRIANGLE_STRIP, 0, 4));
 	}
