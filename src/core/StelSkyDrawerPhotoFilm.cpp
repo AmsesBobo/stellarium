@@ -412,7 +412,7 @@ void StelSkyDrawer::setPhotoFilm(int film)
 		photoISO = iso;
 		emit photoISOChanged(iso);
 	}
-	if (getFlagPhotographicModeActive())
+	if (getFlagPhotoCameraActive())
 		core->getMovementMgr()->zoomTo(getPhotoFovForFocalLength(focal), 0.5f);
 	photoWBMatrixKelvin = -1.;
 	updatePhotoWhiteBalanceMatrix();

@@ -573,6 +573,7 @@ void PhotographicModeDialog::createDialogContent()
 		connect(domes, &LightDomes::mapChanged, this, &PhotographicModeDialog::updateLightDomeWidgets);
 		connect(domes, &LightDomes::flagEnabledChanged, this, &PhotographicModeDialog::updateLightDomeWidgets);
 		connect(drawer, &StelSkyDrawer::flagPhotographicModeChanged, this, &PhotographicModeDialog::updateLightDomeWidgets);
+		connect(drawer, &StelSkyDrawer::flagNakedEyeModeChanged, this, &PhotographicModeDialog::updateLightDomeWidgets);
 
 		// the towns of the location database
 		connectBoolProperty(ui->lightDomesDatabaseCheckBox, "LightDomes.flagDatabaseTowns");

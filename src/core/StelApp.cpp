@@ -1154,7 +1154,7 @@ void setPhotoToneUniforms(QOpenGLShaderProgram& program, const StelSkyDrawer& dr
 	program.setUniformValue("photoLensPupil", lens.pupil);
 	program.setUniformValue("photoLensShift", StelSkyDrawer::PHOTO_VIGNETTING_SHIFT);
 	const Vec4f frame = drawer.getPhotoFrame(prj);
-	program.setUniformValue("photoFrameMask", drawer.getFlagPhotoFrameMask());
+	program.setUniformValue("photoFrameMask", drawer.getFlagPhotoFrameMask() && drawer.getFlagPhotoCameraActive());
 	program.setUniformValue("photoFrame", QVector4D(frame[0], frame[1], frame[0] + frame[2], frame[1] + frame[3]));
 	const StelSkyDrawer::PhotoToneParams& p = drawer.getPhotoToneParams();
 	program.setUniformValue("photoToneCurve", drawer.getPhotoActiveToneCurve());
@@ -1339,7 +1339,8 @@ void StelApp::highGraphicsModeDraw()
 	// camera pass can apply the exposure before saturation. Otherwise we keep the
 	// integer format that has always been used on desktop OpenGL.
 	const StelSkyDrawer* skyDrawer = core->getSkyDrawer();
-	const bool photoMode = skyDrawer->getFlagPhotographicMode();
+	// The scene of the photographic mode: for the camera, or for the eye (naked eye mode)
+	const bool photoMode = skyDrawer->getFlagPhotographicMode() || skyDrawer->getFlagNakedEyeMode();
 #if QT_CONFIG(opengles2)
 	const bool wantFloatScene = true;
 #else
@@ -1499,8 +1500,10 @@ void StelApp::highGraphicsModeDraw()
 #endif
 	};
 
-	// Photographic mode: the exposure meter of the automatic exposure and white balance
-	if (photoMode && (skyDrawer->getFlagPhotoAutoExposureActive() || skyDrawer->getFlagPhotoAutoWhiteBalanceActive()))
+	// Photographic mode: the exposure meter of the automatic exposure and white balance; naked eye mode: of the
+	// adaptation of the eye
+	if (photoMode && (skyDrawer->getFlagPhotoAutoExposureActive() || skyDrawer->getFlagPhotoAutoWhiteBalanceActive()
+	                  || skyDrawer->getFlagNakedEyeModeActive()))
 	{
 		resolveScene();
 		if (!photoMeter)

@@ -89,6 +89,9 @@ class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 
 	//! Photographic (camera-like) rendering mode. Only active in high graphics mode (OpenGL 3+).
 	Q_PROPERTY(bool flagPhotographicMode READ getFlagPhotographicMode WRITE setFlagPhotographicMode NOTIFY flagPhotographicModeChanged)
+	//! Naked eye rendering mode: the scene of the photographic mode, seen by the eye instead of a camera. Only active
+	//! in high graphics mode (OpenGL 3+). It excludes the photographic mode (switching one on switches the other off).
+	Q_PROPERTY(bool flagNakedEyeMode READ getFlagNakedEyeMode WRITE setFlagNakedEyeMode NOTIFY flagNakedEyeModeChanged)
 	//! Exposure correction of the photographic mode, in photographic stops (EV). 0 is the neutral exposure.
 	Q_PROPERTY(double photoExposureEV READ getPhotoExposureEV WRITE setPhotoExposureEV NOTIFY photoExposureEVChanged)
 	//! Exposure time of the virtual camera in the photographic mode, in seconds.
@@ -224,6 +227,18 @@ public:
 	static constexpr double PHOTO_AUTO_MAX_TIME = 30.;
 	//! Time constant of the smooth adaptation of the automatic exposure (seconds)
 	static constexpr double PHOTO_AUTO_TIME_CONSTANT = 0.3;
+	//! Naked eye mode: the luminance the eye is adapted to (cd/m^2), from the mean luminance of the view
+	double getEyeAdaptationLuminance() const {return eyeAdaptationLuminance;}
+	//! Naked eye mode: the time the eye integrates the light over (seconds). It takes the place of the exposure
+	//! time (the motion of a body during it, for example).
+	static constexpr double EYE_INTEGRATION_TIME = 0.1;
+	//! Naked eye mode: the display value (linear, 0..1) of the adaptation luminance, a simple tone mapping until
+	//! the model of the retina takes over. Middle grey in daylight, darker at night: (L/(L + L0))^p times 0.18.
+	static double eyeAdaptationDisplayValue(double luminance);
+	static constexpr double EYE_TONE_HALF_LUMINANCE = 1.;   //!< L0 (cd/m^2)
+	static constexpr double EYE_TONE_POWER = 0.25;          //!< p
+	//! Naked eye mode: the time constant of the adaptation (seconds), until the model of the adaptation takes over
+	static constexpr double EYE_ADAPTATION_TIME_CONSTANT = 0.5;
 	//! Program mode: the program line of a camera with automatic ISO, from bright to dark. In daylight the base
 	//! ISO and a medium aperture (stopped down further when 1/8000 s is not short enough); then the aperture opens
 	//! at a time that is safe by hand; then the time grows up to where the stars still stay points on a fixed
@@ -541,7 +556,7 @@ public:
 	const PhotoFilmSpec& getPhotoActiveFilmSpec() const;
 	static constexpr int PHOTO_FILM_MAX_PUSH = 2;
 	//! Whether a film is in use now (photographic mode on)
-	bool getFlagPhotoFilmActive() const {return photoFilm != PhotoFilmNone && getFlagPhotographicModeActive();}
+	bool getFlagPhotoFilmActive() const {return photoFilm != PhotoFilmNone && getFlagPhotoCameraActive();}
 	//! The exposure time that counts for the film (reciprocity failure), for the exposure time t (seconds)
 	double getPhotoFilmEffectiveTime(double t) const;
 	//! The time a film f counts an exposure of t seconds as (reciprocity failure, see PhotoFilmSpec), for the whole
@@ -552,7 +567,13 @@ public:
 	//! Black and white film: the weights of linear red, green and blue (0 otherwise)
 	Vec3f getPhotoFilmMonoWeights() const;
 	//! The tone curve in use: the film's own (PhotoToneFilm with the film's parameters), or photoToneCurve
-	int getPhotoActiveToneCurve() const {return photoFilm != PhotoFilmNone ? static_cast<int>(PhotoToneFilm) : photoToneCurve;}
+	int getPhotoActiveToneCurve() const
+	{
+		// The eye: linear with the soft shoulder, until the model of the retina takes over
+		if (getFlagNakedEyeModeActive())
+			return static_cast<int>(PhotoToneLinear);
+		return photoFilm != PhotoFilmNone ? static_cast<int>(PhotoToneFilm) : photoToneCurve;
+	}
 	//! The sensor format in use: a film is 35 mm (full frame)
 	int getPhotoEffectiveSensorFormat() const {return photoFilm != PhotoFilmNone ? static_cast<int>(PhotoSensorFullFrame) : photoSensorFormat;}
 	//! Full frame: the reference of the noise model (see PHOTO_SENSOR_PITCH)
@@ -882,9 +903,22 @@ public slots:
 	void resetPhotoExposure();
 	//! Get the linear factor of the exposure compensation, i.e. 2^EV. It is applied in the final camera pass.
 	float getPhotoExposureFactor() const;
-	//! Whether the photographic mode is switched on AND can work (high graphics mode).
-	//! Modules should use this one to decide how to render.
+	//! Whether the scene of the photographic mode is rendered: the photographic or the naked eye mode is switched on
+	//! AND can work (high graphics mode). The scene holds the physical luminance of everything (times a scale); the
+	//! final stage shows it like a camera (photographic mode) or like the eye (naked eye mode). Modules should use
+	//! this one to decide how to render.
 	bool getFlagPhotographicModeActive() const;
+	//! Whether the camera of the photographic mode is in use (photographic mode active, not the naked eye mode): its
+	//! exposure, lens, sensor, film and their effects
+	bool getFlagPhotoCameraActive() const;
+
+	//! Switch the naked eye rendering mode on or off (it switches the photographic mode off). The scene is the one
+	//! of the photographic mode; the final stage shows it as the eye sees it, without the effects of a camera.
+	void setFlagNakedEyeMode(bool b);
+	bool getFlagNakedEyeMode() const {return flagNakedEyeMode;}
+	void toggleFlagNakedEyeMode() {setFlagNakedEyeMode(!flagNakedEyeMode);}
+	//! Whether the naked eye mode is switched on AND can work (high graphics mode)
+	bool getFlagNakedEyeModeActive() const;
 
 	//! Set the exposure time of the virtual camera, in seconds (limited to 1/8000 s ... 3600 s).
 	void setPhotoExposureTime(double seconds);
@@ -1247,6 +1281,8 @@ signals:
 	void daylightLabelThresholdChanged(double t);
 	//! Emitted when the photographic rendering mode is switched on or off
 	void flagPhotographicModeChanged(bool b);
+	//! Emitted when the naked eye rendering mode is switched on or off
+	void flagNakedEyeModeChanged(bool b);
 	//! Emitted when the exposure correction of the photographic mode is changed
 	void photoExposureEVChanged(double ev);
 	//! Emitted when the exposure time of the virtual camera is changed
@@ -1634,6 +1670,13 @@ private:
 
 	//! Render the sky like a camera (linear sensor, fixed exposure) instead of like the eye?
 	bool flagPhotographicMode = false;
+	//! Render the scene of the photographic mode as the eye sees it?
+	bool flagNakedEyeMode = false;
+	//! Naked eye mode: the adaptation luminance (cd/m^2), and whether the next reading of the meter sets it at once
+	double eyeAdaptationLuminance = 1e-3;
+	bool eyeAdaptationFresh = true;
+	//! The halo of the stars in the picture (the camera's, none for the eye)
+	float getPhotoHaloFractionActive() const {return getFlagPhotoCameraActive() ? photoHaloFraction : 0.f;}
 	//! Exposure correction of the photographic mode, in stops (EV)
 	double photoExposureEV = 0.;
 	//! Camera settings of the photographic mode: exposure time [s], f-number, ISO

@@ -390,6 +390,7 @@ void StelCore::init()
 	actionsMgr->addAction("actionClear_Background", displayGroup, N_("Toggle star trails"), this, "flagClearSky", "", "", true);
 
 	actionsMgr->addAction("actionShow_Photographic_Mode", displayGroup, N_("Photographic (camera-like) rendering"), skyDrawer, "flagPhotographicMode", "Ctrl+Alt+X");
+	actionsMgr->addAction("actionShow_Naked_Eye_Mode", displayGroup, N_("Naked eye rendering"), skyDrawer, "flagNakedEyeMode", "Ctrl+Alt+N");
 	actionsMgr->addAction("actionIncrease_Photo_Exposure", displayGroup, N_("Increase exposure by 1/3 stop"), skyDrawer, "increasePhotoExposure()", "Alt+X");
 	actionsMgr->addAction("actionDecrease_Photo_Exposure", displayGroup, N_("Decrease exposure by 1/3 stop"), skyDrawer, "decreasePhotoExposure()", "Alt+Shift+X");
 	actionsMgr->addAction("actionReset_Photo_Exposure", displayGroup, N_("Reset exposure to 0 EV"), skyDrawer, "resetPhotoExposure()");

@@ -45,6 +45,12 @@ float encodeSRGB(float c)
 
 const float* StelSkyDrawer::getPhotoWhiteBalanceMatrix() const
 {
+	// The eye: the colors of the scene as they are (its own color adaptation comes later)
+	if (getFlagNakedEyeModeActive())
+	{
+		static const float identity[9] = {1,0,0, 0,1,0, 0,0,1};
+		return identity;
+	}
 	if (!getFlagPhotoFilmActive())
 		return photoWBMatrix;
 	const PhotoFilmSpec& f = getPhotoActiveFilmSpec();
@@ -179,7 +185,7 @@ double StelSkyDrawer::getPhotoWhiteBalanceTemperature() const
 
 bool StelSkyDrawer::getFlagPhotoAutoWhiteBalanceActive() const
 {
-	return photoWhiteBalance == PhotoWBAuto && photoFilm == PhotoFilmNone && getFlagPhotographicModeActive();
+	return photoWhiteBalance == PhotoWBAuto && photoFilm == PhotoFilmNone && getFlagPhotoCameraActive();
 }
 
 double StelSkyDrawer::photoKelvinForBlueRedRatio(double ratio)

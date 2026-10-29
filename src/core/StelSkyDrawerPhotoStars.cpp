@@ -712,7 +712,7 @@ void StelSkyDrawer::flushPhotoPointSources(StelPainter* sPainter, PhotoBatchMode
 	prog.setUniformValue(photoStarShaderVars.coreBeta, PHOTO_CORE_BETA);
 	prog.setUniformValue(photoStarShaderVars.haloAlpha, photoCoreAlpha*PHOTO_HALO_WIDTH_FACTOR);
 	prog.setUniformValue(photoStarShaderVars.haloBeta, PHOTO_HALO_BETA);
-	prog.setUniformValue(photoStarShaderVars.haloFraction, (getFlagPhotoBloomActive() || mode == PhotoBatchCoreOnly) ? 0.f : photoHaloFraction);
+	prog.setUniformValue(photoStarShaderVars.haloFraction, (getFlagPhotoBloomActive() || mode == PhotoBatchCoreOnly) ? 0.f : getPhotoHaloFractionActive());
 	prog.setUniformValue(photoStarShaderVars.coreFraction, getPhotoCoreFraction());
 	prog.setUniformValue(photoStarShaderVars.coreDiskTerm, photoDiskTerm(PHOTO_CORE_BETA));
 	prog.setUniformValue(photoStarShaderVars.haloDiskTerm, photoDiskTerm(PHOTO_HALO_BETA));
@@ -788,7 +788,7 @@ bool StelSkyDrawer::computePhotoRCMag(float mag, RCMag* rcMag) const
 	// Out of focus, the light of the core is spread over the blur disk (the image of the aperture):
 	// faint stars disappear, as on a real photo
 	const float defocusR = std::fabs(photoLensCache.defocus);
-	const float coreFlux = flux*(1.f-photoHaloFraction-spikeFraction);
+	const float coreFlux = flux*(1.f-getPhotoHaloFractionActive()-spikeFraction);
 	const float rCore = defocusR > 0.f ? photoDefocusCoreRadius(coreFlux, defocusR)
 	                                   : radiusAtThreshold(coreFlux, photoCoreAlpha, PHOTO_CORE_BETA);
 	// It must also rise above the noise of the sky: signal-to-noise ratio over its image (matched filter: the
@@ -811,7 +811,7 @@ bool StelSkyDrawer::computePhotoRCMag(float mag, RCMag* rcMag) const
 	{
 		const float alpha = photoCoreAlpha*PHOTO_HALO_WIDTH_FACTOR;
 		const float norm = 1.f/(1.f + photoDiskTerm(PHOTO_HALO_BETA)*defocusR/alpha + (PHOTO_HALO_BETA-1.f)*defocusR*defocusR/(alpha*alpha));
-		const float r = radiusAtThreshold(flux*photoHaloFraction*norm, alpha, PHOTO_HALO_BETA);
+		const float r = radiusAtThreshold(flux*getPhotoHaloFractionActive()*norm, alpha, PHOTO_HALO_BETA);
 		if (r > 0.f)
 			rHalo = r + defocusR;
 	}
@@ -883,7 +883,7 @@ float StelSkyDrawer::getPhotoCoreWeight(float diskPixRadius) const
 float StelSkyDrawer::getPhotoDiskFraction(float diskPixRadius) const
 {
 	const float spikeFraction = getPhotoSpikeFractionEffective();
-	return (1.f - photoHaloFraction - spikeFraction) * (1.f - getPhotoCoreWeight(diskPixRadius));
+	return (1.f - getPhotoHaloFractionActive() - spikeFraction) * (1.f - getPhotoCoreWeight(diskPixRadius));
 }
 
 bool StelSkyDrawer::drawPhotoBody(StelPainter* sPainter, const Vec3d& v, float diskPixRadius, float mag, const Vec3f& color,
@@ -926,9 +926,9 @@ bool StelSkyDrawer::drawPhotoBody(StelPainter* sPainter, const Vec3d& v, float d
 			return 0.f;
 		return alpha * std::sqrt(std::pow(peak/photoVisibleThreshold, 1.f/beta) - 1.f);
 	};
-	const float rCore = defocused ? photoDefocusCoreRadius(flux*(1.f-photoHaloFraction-spikeFraction)*coreWeight, R)
-	                              : wingRadius(flux*(1.f-photoHaloFraction-spikeFraction)*coreWeight, photoCoreAlpha, PHOTO_CORE_BETA);
-	const float rHalo = getFlagPhotoBloomActive() ? 0.f : wingRadius(flux*photoHaloFraction, photoCoreAlpha*PHOTO_HALO_WIDTH_FACTOR, PHOTO_HALO_BETA);
+	const float rCore = defocused ? photoDefocusCoreRadius(flux*(1.f-getPhotoHaloFractionActive()-spikeFraction)*coreWeight, R)
+	                              : wingRadius(flux*(1.f-getPhotoHaloFractionActive()-spikeFraction)*coreWeight, photoCoreAlpha, PHOTO_CORE_BETA);
+	const float rHalo = getFlagPhotoBloomActive() ? 0.f : wingRadius(flux*getPhotoHaloFractionActive(), photoCoreAlpha*PHOTO_HALO_WIDTH_FACTOR, PHOTO_HALO_BETA);
 	float rSpike = 0.f;
 	if (spikeFraction > 0.f)
 	{
@@ -1184,7 +1184,7 @@ float StelSkyDrawer::computePhotoTrail(const StelProjector& prj, const Vec3d& v,
 	{
 		const float alpha = qMax(photoCoreAlpha, 1.5f*std::fabs(photoLensCache.defocus));
 		const float corePeak = flux*getPhotoCoreFraction()*0.75f/(alpha*estimate);
-		const float haloPeak = getFlagPhotoBloomActive() ? 0.f : flux*photoHaloFraction/(M_PIf*photoCoreAlpha*PHOTO_HALO_WIDTH_FACTOR*estimate);
+		const float haloPeak = getFlagPhotoBloomActive() ? 0.f : flux*getPhotoHaloFractionActive()/(M_PIf*photoCoreAlpha*PHOTO_HALO_WIDTH_FACTOR*estimate);
 		bool visible = corePeak > photoVisibleThreshold || haloPeak > photoVisibleThreshold;
 		if (!visible && getPhotoSpikeFractionEffective() > 0.f)
 		{
@@ -1268,7 +1268,7 @@ float StelSkyDrawer::photoDefocusCoreRadius(float coreFlux, float R) const
 
 void StelSkyDrawer::addPhotoGhostSource(const Vec3d& v, float mag, const Vec3f& color)
 {
-	if (flagPhotoLensFlare && photoLensFlareStrength > 0.f && getFlagPhotographicModeActive())
+	if (flagPhotoLensFlare && photoLensFlareStrength > 0.f && getFlagPhotoCameraActive())
 		photoGhostSources.push_back({v, mag, color});
 }
 
@@ -1338,7 +1338,7 @@ float StelSkyDrawer::getPhotoSpikeFractionEffective() const
 	// The light that straight edges diffract into the spikes: per unit length along a spike it falls off
 	// like (lambda N)/x^2 beyond the diffraction scale (lambda N), so the total stays the same while the
 	// spikes get longer with the f-number (see getPhotoSpikeLength()).
-	if (photoApertureBlades <= 0)
+	if (photoApertureBlades <= 0 || !getFlagPhotoCameraActive())
 		return 0.f;
 	return photoSpikeFraction * getPhotoApertureStraightness();
 }
@@ -1371,11 +1371,11 @@ void StelSkyDrawer::setFlagPhotoBloom(bool b)
 
 bool StelSkyDrawer::getFlagPhotoBloomActive() const
 {
-	return flagPhotoBloom && (photoHaloFraction > 0.f || getPhotoSpikeFractionEffective() > 0.f) && getFlagPhotographicModeActive();
+	return flagPhotoBloom && (photoHaloFraction > 0.f || getPhotoSpikeFractionEffective() > 0.f) && getFlagPhotoCameraActive();
 }
 
 float StelSkyDrawer::getPhotoCoreFraction() const
 {
 	const float spikeFraction = getPhotoSpikeFractionEffective();
-	return 1.f - photoHaloFraction - spikeFraction;
+	return 1.f - getPhotoHaloFractionActive() - spikeFraction;
 }

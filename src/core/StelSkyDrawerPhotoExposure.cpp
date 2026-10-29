@@ -45,8 +45,20 @@ double StelSkyDrawer::getPhotoMeterClipLevel() const
 	return clip / static_cast<double>(getPhotoExposureFactor());
 }
 
+double StelSkyDrawer::eyeAdaptationDisplayValue(double luminance)
+{
+	const double L = qMax(0., luminance);
+	return PHOTO_MIDDLE_GREY * std::pow(L/(L + EYE_TONE_HALF_LUMINANCE), EYE_TONE_POWER);
+}
+
 float StelSkyDrawer::getPhotoSceneScale() const
 {
+	// The eye: the adaptation luminance is shown at its display value (see eyeAdaptationDisplayValue())
+	if (getFlagNakedEyeModeActive())
+	{
+		const double L = qMax(1e-7, eyeAdaptationLuminance);
+		return static_cast<float>(eyeAdaptationDisplayValue(L)/L);
+	}
 	// Reflected-light meter calibration constant K (ISO 2720), and middle grey
 	constexpr double K = 12.5;
 	constexpr double middleGrey = 0.18;
@@ -127,11 +139,13 @@ QString StelSkyDrawer::photoExposureTimeText(double seconds)
 
 bool StelSkyDrawer::getFlagPhotoAutoExposureActive() const
 {
-	return flagPhotoAutoExposure && getFlagPhotographicModeActive();
+	return flagPhotoAutoExposure && getFlagPhotoCameraActive();
 }
 
 double StelSkyDrawer::getPhotoEffectiveExposureTime() const
 {
+	if (getFlagNakedEyeModeActive())
+		return EYE_INTEGRATION_TIME;
 	return getFlagPhotoAutoExposureActive() ? photoAutoExposureTime : photoExposureTime;
 }
 
@@ -369,6 +383,28 @@ void StelSkyDrawer::applyPhotoMeterReading(const StelPhotoMeter::Reading& readin
 		updatePhotoWhiteBalanceMatrix();
 	}
 
+	// The eye: it adapts to the mean luminance of the view (center-weighted, like the meter of a camera)
+	if (getFlagNakedEyeModeActive())
+	{
+		photoAutoExposureFresh = true;
+		stopPhotoProgram();
+		if (!(reading.sceneScale > 0.))
+			return;
+		const double wanted = qMax(1e-7, reading.centerWeighted / reading.sceneScale); // cd/m^2
+		if (eyeAdaptationFresh || !(eyeAdaptationLuminance > 0.))
+		{
+			eyeAdaptationLuminance = wanted;
+			eyeAdaptationFresh = false;
+		}
+		else
+		{
+			const double f = 1. - std::exp(-qBound(0., deltaTime, 1.)/EYE_ADAPTATION_TIME_CONSTANT);
+			eyeAdaptationLuminance = std::exp(std::log(eyeAdaptationLuminance) + f*(std::log(wanted) - std::log(eyeAdaptationLuminance)));
+		}
+		return;
+	}
+	eyeAdaptationFresh = true;
+
 	if (!getFlagPhotoAutoExposureActive())
 	{
 		photoAutoExposureFresh = true;
@@ -524,76 +560,92 @@ void StelSkyDrawer::drawPhotoInfoLine(StelCore* core) const
 	if (!flagPhotoInfoLine || !getFlagPhotographicModeActive())
 		return;
 
-	const bool autoExposure = getFlagPhotoAutoExposureActive();
-	const double t = getPhotoEffectiveExposureTime();
-	// Exposure value at ISO 100. In manual mode the compensation brightens the picture like a lower EV;
-	// with the automatic exposure it is already part of the exposure time.
-	const double ev100 = std::log2(photoAperture*photoAperture/t) - std::log2(photoISO/100.) - (autoExposure ? 0. : photoExposureEV);
 	const QString sep = QStringLiteral("   ");
 	QStringList parts;
-	parts << (!autoExposure ? qc_("M", "camera mode: manual")
-	          : (flagPhotoProgramExposure ? qc_("P", "camera mode: program") : qc_("Av", "camera mode: aperture priority")));
-	parts << photoExposureTimeText(t);
-	// Film: what the long exposure counted for (reciprocity failure), when it is noticeably less
-	if (getFlagPhotoFilmActive())
+	if (getFlagNakedEyeModeActive())
 	{
-		const double effective = getPhotoFilmEffectiveTime(t);
-		if (effective < 0.94*t)
+		// The eye: the mode, and the luminance it is adapted to
+		parts << q_("Naked eye");
+		const double L = eyeAdaptationLuminance;
+		const int decimals = qBound(0, 2 - static_cast<int>(std::floor(std::log10(qMax(1e-9, L)))), 9);
+		QLocale locale;
+		locale.setNumberOptions(QLocale::OmitGroupSeparator);
+		const QString value = (L >= 1e-3) ? locale.toString(L, 'f', decimals) : locale.toString(L, 'e', 1);
+		parts << QString("%1 %2 cd/m%3").arg(qc_("adapted to", "eye: adaptation luminance"), value, QChar(0x00B2));
+		if (std::fabs(photoExposureEV) > 0.01)
+			parts << QString("%1 EV").arg(QString::asprintf("%+.1f", photoExposureEV));
+	}
+	else
+	{
+		const bool autoExposure = getFlagPhotoAutoExposureActive();
+		const double t = getPhotoEffectiveExposureTime();
+		// Exposure value at ISO 100. In manual mode the compensation brightens the picture like a lower EV;
+		// with the automatic exposure it is already part of the exposure time.
+		const double ev100 = std::log2(photoAperture*photoAperture/t) - std::log2(photoISO/100.) - (autoExposure ? 0. : photoExposureEV);
+		parts << (!autoExposure ? qc_("M", "camera mode: manual")
+		          : (flagPhotoProgramExposure ? qc_("P", "camera mode: program") : qc_("Av", "camera mode: aperture priority")));
+		parts << photoExposureTimeText(t);
+		// Film: what the long exposure counted for (reciprocity failure), when it is noticeably less
+		if (getFlagPhotoFilmActive())
 		{
-			// not rounded to the steps of the camera: it is a computed value
-			const QString text = effective < 60. ? QString("%1 %2").arg(QLocale().toString(effective, 'g', 2), qc_("s", "unit of time: seconds"))
-			                                     : QString("%1 %2").arg(QLocale().toString(effective/60., 'g', 2), qc_("min", "unit of time: minutes"));
-			parts << QString("(%1 %2)").arg(qc_("as", "film: effective exposure time after the reciprocity failure"), text);
+			const double effective = getPhotoFilmEffectiveTime(t);
+			if (effective < 0.94*t)
+			{
+				// not rounded to the steps of the camera: it is a computed value
+				const QString text = effective < 60. ? QString("%1 %2").arg(QLocale().toString(effective, 'g', 2), qc_("s", "unit of time: seconds"))
+				                                     : QString("%1 %2").arg(QLocale().toString(effective/60., 'g', 2), qc_("min", "unit of time: minutes"));
+				parts << QString("(%1 %2)").arg(qc_("as", "film: effective exposure time after the reciprocity failure"), text);
+			}
 		}
-	}
-	// The nominal values a camera shows (its third stops are rounded: f/1.4 for 1.41, ISO 1250 for 1270)
-	auto nominal = [](double value, std::initializer_list<double> marks) {
-		double best = value, bestDiff = 1e30;
-		for (const double m : marks)
+		// The nominal values a camera shows (its third stops are rounded: f/1.4 for 1.41, ISO 1250 for 1270)
+		auto nominal = [](double value, std::initializer_list<double> marks) {
+			double best = value, bestDiff = 1e30;
+			for (const double m : marks)
+			{
+				const double diff = std::fabs(std::log(value/m));
+				if (diff < bestDiff) { bestDiff = diff; best = m; }
+			}
+			return bestDiff < 0.06 ? best : value; // within 1/12 stop of a mark
+		};
+		const double apertureShown = nominal(photoAperture, {0.95, 1.0, 1.1, 1.2, 1.4, 1.6, 1.8, 2.0, 2.2, 2.5, 2.8, 3.2, 3.5, 4.0, 4.5,
+		                                                    5.0, 5.6, 6.3, 7.1, 8.0, 9.0, 10., 11., 13., 14., 16., 18., 20., 22., 32.});
+		const double isoShown = nominal(photoISO, {50, 64, 80, 100, 125, 160, 200, 250, 320, 400, 500, 640, 800, 1000, 1250, 1600, 2000,
+		                                           2500, 3200, 4000, 5000, 6400, 8000, 10000, 12800, 16000, 20000, 25600, 51200, 102400, 204800});
+		parts << QString("f/%1").arg(QLocale().toString(apertureShown, 'g', 3));
+		// Focal length of the lens for this field on the sensor in use, and the focus when it is not at infinity
 		{
-			const double diff = std::fabs(std::log(value/m));
-			if (diff < bestDiff) { bestDiff = diff; best = m; }
+			QString lens = QString("%1 mm").arg(QLocale().toString(photoNominalFocalLength(1000.*getPhotoFocalLength(*core->getProjection(StelCore::FrameJ2000))), 'g', 5));
+			const char* sensor = getFlagPhotoFilmActive() ? getPhotoActiveFilmSpec().shortName
+			                                              : getPhotoSensorSpec(photoSensorFormat).shortName;
+			if (sensor[0] != 0)
+				lens += QStringLiteral(" ") + QString::fromUtf8(sensor);
+			if (getFlagPhotoFilmActive() && photoFilmPush > 0)
+				lens += QStringLiteral(" +%1").arg(photoFilmPush);
+			parts << lens;
 		}
-		return bestDiff < 0.06 ? best : value; // within 1/12 stop of a mark
-	};
-	const double apertureShown = nominal(photoAperture, {0.95, 1.0, 1.1, 1.2, 1.4, 1.6, 1.8, 2.0, 2.2, 2.5, 2.8, 3.2, 3.5, 4.0, 4.5,
-	                                                    5.0, 5.6, 6.3, 7.1, 8.0, 9.0, 10., 11., 13., 14., 16., 18., 20., 22., 32.});
-	const double isoShown = nominal(photoISO, {50, 64, 80, 100, 125, 160, 200, 250, 320, 400, 500, 640, 800, 1000, 1250, 1600, 2000,
-	                                           2500, 3200, 4000, 5000, 6400, 8000, 10000, 12800, 16000, 20000, 25600, 51200, 102400, 204800});
-	parts << QString("f/%1").arg(QLocale().toString(apertureShown, 'g', 3));
-	// Focal length of the lens for this field on the sensor in use, and the focus when it is not at infinity
-	{
-		QString lens = QString("%1 mm").arg(QLocale().toString(photoNominalFocalLength(1000.*getPhotoFocalLength(*core->getProjection(StelCore::FrameJ2000))), 'g', 5));
-		const char* sensor = getFlagPhotoFilmActive() ? getPhotoActiveFilmSpec().shortName
-		                                              : getPhotoSensorSpec(photoSensorFormat).shortName;
-		if (sensor[0] != 0)
-			lens += QStringLiteral(" ") + QString::fromUtf8(sensor);
-		if (getFlagPhotoFilmActive() && photoFilmPush > 0)
-			lens += QStringLiteral(" +%1").arg(photoFilmPush);
-		parts << lens;
-	}
-	if (photoFocusDistance != 0.)
-		parts << QString("%1 %2").arg(qc_("focus", "camera: focus distance"), photoFocusDistanceText(photoFocusDistance));
-	parts << QString("ISO %1").arg(qRound(isoShown));
-	parts << QString("EV100 %1").arg(QLocale().toString(ev100, 'f', 1));
-	if (std::fabs(photoExposureEV) > 0.01)
-		parts << QString("%1 EV").arg(QString::asprintf("%+.1f", photoExposureEV));
-	if (!getFlagPhotoFilmActive())
-	{
-		const int kelvin = 50*qRound(getPhotoWhiteBalanceTemperature()/50.);
-		parts << QString("%1 %2 K").arg(photoWhiteBalance == PhotoWBAuto ? qc_("AWB", "camera: automatic white balance") : qc_("WB", "camera: white balance")).arg(kelvin);
-	}
-	if (autoExposure)
-	{
-		static const char* modeNames[] = {
-			QT_TRANSLATE_NOOP("StelSkyDrawer", "center-weighted"),
-			QT_TRANSLATE_NOOP("StelSkyDrawer", "spot"),
-			QT_TRANSLATE_NOOP("StelSkyDrawer", "highlight-weighted") };
-		parts << q_(modeNames[qBound(0, photoMeteringMode, 2)]);
-		if (photoAutoExposureLimit < 0)
-			parts << q_("underexposed");
-		else if (photoAutoExposureLimit > 0)
-			parts << q_("overexposed");
+		if (photoFocusDistance != 0.)
+			parts << QString("%1 %2").arg(qc_("focus", "camera: focus distance"), photoFocusDistanceText(photoFocusDistance));
+		parts << QString("ISO %1").arg(qRound(isoShown));
+		parts << QString("EV100 %1").arg(QLocale().toString(ev100, 'f', 1));
+		if (std::fabs(photoExposureEV) > 0.01)
+			parts << QString("%1 EV").arg(QString::asprintf("%+.1f", photoExposureEV));
+		if (!getFlagPhotoFilmActive())
+		{
+			const int kelvin = 50*qRound(getPhotoWhiteBalanceTemperature()/50.);
+			parts << QString("%1 %2 K").arg(photoWhiteBalance == PhotoWBAuto ? qc_("AWB", "camera: automatic white balance") : qc_("WB", "camera: white balance")).arg(kelvin);
+		}
+		if (autoExposure)
+		{
+			static const char* modeNames[] = {
+				QT_TRANSLATE_NOOP("StelSkyDrawer", "center-weighted"),
+				QT_TRANSLATE_NOOP("StelSkyDrawer", "spot"),
+				QT_TRANSLATE_NOOP("StelSkyDrawer", "highlight-weighted") };
+			parts << q_(modeNames[qBound(0, photoMeteringMode, 2)]);
+			if (photoAutoExposureLimit < 0)
+				parts << q_("underexposed");
+			else if (photoAutoExposureLimit > 0)
+				parts << q_("overexposed");
+		}
 	}
 	// The sky at the zenith: what a sky quality meter would read, and the darkest it gets at the place
 	{
@@ -655,7 +707,7 @@ void StelSkyDrawer::showPhotoExposureMessage()
 		labelMgr->deleteLabel(photoExposureMessageID);
 
 	QString text = QString("%1 %2 EV").arg(q_("Exposure"), QString::asprintf("%+.1f", photoExposureEV));
-	if (!flagPhotographicMode)
+	if (!flagPhotographicMode && !flagNakedEyeMode)
 		text += QString(" (%1)").arg(q_("photographic mode is off"));
 
 	const StelProjector::StelProjectorParams params = core->getCurrentStelProjectorParams();

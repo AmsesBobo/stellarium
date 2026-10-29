@@ -869,6 +869,16 @@
                   </widget>
                  </item>
                  <item>
+                  <widget class="QCheckBox" name="nakedEyeModeCheckBox">
+                   <property name="toolTip">
+                    <string>Render the scene of the photographic mode as the eye sees it, without the effects of a camera. Needs OpenGL 3 or later.</string>
+                   </property>
+                   <property name="text">
+                    <string>Naked eye mode</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item>
                   <spacer name="horizontalSpacerPhotographicMode">
                    <property name="orientation">
                     <enum>Qt::Horizontal</enum>

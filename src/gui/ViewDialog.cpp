@@ -247,6 +247,7 @@ void ViewDialog::createDialogContent()
 	connectDoubleProperty(ui->starLimitMagnitudeDoubleSpinBox, "StelSkyDrawer.customStarMagLimit");
 	connectBoolProperty(ui->spikyStarsCheckBox, "StelSkyDrawer.flagStarSpiky");
 	connectBoolProperty(ui->photographicModeCheckBox, "StelSkyDrawer.flagPhotographicMode");
+	connectBoolProperty(ui->nakedEyeModeCheckBox, "StelSkyDrawer.flagNakedEyeMode");
 	connect(ui->photographicModePushButton, &QToolButton::clicked, this, &ViewDialog::showPhotographicModeDialog);
 	connectCheckBox(ui->starLabelCheckBox, "actionShow_Stars_Labels");
 	connectDoubleProperty(ui->starsLabelsHorizontalSlider,"StarMgr.labelsAmount",0.0,10.0);

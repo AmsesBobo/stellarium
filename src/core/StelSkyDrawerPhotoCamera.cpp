@@ -37,11 +37,29 @@ void StelSkyDrawer::setFlagPhotographicMode(bool b)
 {
 	if (b==flagPhotographicMode)
 		return;
+	// The two modes exclude each other
+	if (b && flagNakedEyeMode)
+		setFlagNakedEyeMode(false);
 	flagPhotographicMode=b;
 	StelApp::immediateSave("viewing/flag_photographic_mode", b);
 	emit flagPhotographicModeChanged(b);
 	if (b && !StelMainView::getInstance().getGLInformation().isHighGraphicsMode)
 		qWarning() << "Photographic mode needs high graphics mode (OpenGL 3 or later). It will have no effect.";
+}
+
+void StelSkyDrawer::setFlagNakedEyeMode(bool b)
+{
+	if (b==flagNakedEyeMode)
+		return;
+	if (b && flagPhotographicMode)
+		setFlagPhotographicMode(false);
+	flagNakedEyeMode=b;
+	// The eye adapts to the view it finds
+	eyeAdaptationFresh = true;
+	StelApp::immediateSave("viewing/flag_naked_eye_mode", b);
+	emit flagNakedEyeModeChanged(b);
+	if (b && !StelMainView::getInstance().getGLInformation().isHighGraphicsMode)
+		qWarning() << "Naked eye mode needs high graphics mode (OpenGL 3 or later). It will have no effect.";
 }
 
 void StelSkyDrawer::setPhotoExposureEV(double ev)
@@ -83,7 +101,17 @@ float StelSkyDrawer::getPhotoExposureFactor() const
 
 bool StelSkyDrawer::getFlagPhotographicModeActive() const
 {
-	return flagPhotographicMode && StelMainView::getInstance().getGLInformation().isHighGraphicsMode;
+	return (flagPhotographicMode || flagNakedEyeMode) && StelMainView::getInstance().getGLInformation().isHighGraphicsMode;
+}
+
+bool StelSkyDrawer::getFlagPhotoCameraActive() const
+{
+	return flagPhotographicMode && !flagNakedEyeMode && StelMainView::getInstance().getGLInformation().isHighGraphicsMode;
+}
+
+bool StelSkyDrawer::getFlagNakedEyeModeActive() const
+{
+	return flagNakedEyeMode && StelMainView::getInstance().getGLInformation().isHighGraphicsMode;
 }
 
 void StelSkyDrawer::setPhotoExposureTime(double seconds)
@@ -272,8 +300,8 @@ StelSkyDrawer::PhotoLens StelSkyDrawer::getPhotoLens(const StelProjector& prj) c
 	const float N = static_cast<float>(photoAperture);
 	const float wideOpen = static_cast<float>(photoLensMaxAperture);
 	lens.pupil = qMin(1.f, wideOpen/N);
-	lens.vignetting = flagPhotoVignetting && getFlagPhotographicModeActive();
-	if (flagPhotoAberrations && getFlagPhotographicModeActive())
+	lens.vignetting = flagPhotoVignetting && getFlagPhotoCameraActive();
+	if (flagPhotoAberrations && getFlagPhotoCameraActive())
 	{
 		// Third-order aberrations: the coma grows with the field and the square of the aperture,
 		// the astigmatism with the square of the field and the aperture (the field factors are in the shader)
@@ -291,7 +319,7 @@ StelSkyDrawer::PhotoLens StelSkyDrawer::getPhotoLens(const StelProjector& prj) c
 		const float blur = photoAberrationStrength * 0.5f * lens.focal / N;
 		lens.chromaBlur.set(blur*PHOTO_AXIAL_CA_RED, 0.f, blur*PHOTO_AXIAL_CA_BLUE);
 	}
-	if (photoFocusDistance != 0. && getFlagPhotographicModeActive())
+	if (photoFocusDistance != 0. && getFlagPhotoCameraActive())
 	{
 		// Focused at the distance s, the image of a star (at infinity) lies f^2/(s-f) in front of the sensor.
 		// The cone of light from the aperture (diameter f/N) cuts the sensor in a disk of diameter
@@ -378,7 +406,7 @@ void StelSkyDrawer::setPhotoZoomSteps(int steps)
 		return;
 	photoZoomSteps = s;
 	// Turning it on sets the lens to the nearest step right away
-	if (s != PhotoZoomFree && getFlagPhotographicModeActive())
+	if (s != PhotoZoomFree && getFlagPhotoCameraActive())
 	{
 		const double mm = 1000.*getPhotoFocalLengthForFov(core->getMovementMgr()->getAimFov());
 		if (mm > 0. && std::isfinite(mm))
@@ -390,7 +418,7 @@ void StelSkyDrawer::setPhotoZoomSteps(int steps)
 
 double StelSkyDrawer::getPhotoWheelZoomFov(double currentFov, double targetFov) const
 {
-	if (photoZoomSteps == PhotoZoomFree || !getFlagPhotographicModeActive())
+	if (photoZoomSteps == PhotoZoomFree || !getFlagPhotoCameraActive())
 		return targetFov;
 	const double current = 1000.*getPhotoFocalLengthForFov(currentFov);
 	const double target = 1000.*getPhotoFocalLengthForFov(targetFov);
@@ -459,6 +487,9 @@ Vec4f StelSkyDrawer::getPhotoFrame(const StelProjector& prj) const
 {
 	const double vx = prj.getViewportPosX(), vy = prj.getViewportPosY();
 	const double vw = prj.getViewportWidth(), vh = prj.getViewportHeight();
+	// The eye: no sensor, the whole view
+	if (getFlagNakedEyeModeActive())
+		return Vec4f(static_cast<float>(vx), static_cast<float>(vy), static_cast<float>(vw), static_cast<float>(vh));
 	const auto c = prj.getViewportCenter();
 	// The largest frame around the optical axis that stays in the viewport
 	const double halfW = qMax(1., qMin(c[0] - vx, vx + vw - c[0]));
@@ -487,7 +518,7 @@ void StelSkyDrawer::setFlagPhotoPortrait(bool b)
 	// The same lens on the turned camera: keep the focal length, the frame (and so the field of view) changes
 	const double focal = getPhotoFocalLengthForFov(core->getMovementMgr()->getAimFov());
 	flagPhotoPortrait = b;
-	if (getFlagPhotographicModeActive())
+	if (getFlagPhotoCameraActive())
 		core->getMovementMgr()->zoomTo(getPhotoFovForFocalLength(focal), 0.5f);
 	StelApp::immediateSave("viewing/flag_photographic_portrait", b);
 	emit flagPhotoPortraitChanged(b);
@@ -520,7 +551,7 @@ void StelSkyDrawer::setPhotoSensorFormat(int format)
 	// The same lens on the other camera: keep the focal length, the field of view changes (the crop factor)
 	const double focal = getPhotoFocalLengthForFov(core->getMovementMgr()->getAimFov());
 	photoSensorFormat = f;
-	if (getFlagPhotographicModeActive())
+	if (getFlagPhotoCameraActive())
 		core->getMovementMgr()->zoomTo(getPhotoFovForFocalLength(focal), 0.5f);
 	StelApp::immediateSave("viewing/photographic_sensor_format", f);
 	emit photoSensorFormatChanged(f);
@@ -556,7 +587,7 @@ void StelSkyDrawer::setPhotoNoise(int mode)
 StelSkyDrawer::PhotoNoiseParams StelSkyDrawer::getPhotoNoiseParams(const StelProjector& prj) const
 {
 	PhotoNoiseParams p;
-	if (photoNoise == PhotoNoiseOff || !getFlagPhotographicModeActive() || getFlagPhotoFilmActive())
+	if (photoNoise == PhotoNoiseOff || !getFlagPhotoCameraActive() || getFlagPhotoFilmActive())
 		return p;
 	p.enabled = true;
 	// The sensor collects the light in electrons. A photosite saturates at the scene value
@@ -697,6 +728,7 @@ void StelSkyDrawer::savePhotoSettings(QSettings* conf) const
 {
 	Q_ASSERT(conf);
 	conf->setValue("viewing/flag_photographic_mode", getFlagPhotographicMode());
+	conf->setValue("viewing/flag_naked_eye_mode", getFlagNakedEyeMode());
 	conf->setValue("viewing/photographic_exposure_ev", getPhotoExposureEV());
 	conf->setValue("viewing/photographic_exposure_time", getPhotoExposureTime());
 	conf->setValue("viewing/photographic_aperture", photoProgramRunning ? photoUserAperture : photoAperture);
