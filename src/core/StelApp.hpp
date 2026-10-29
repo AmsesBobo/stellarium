@@ -304,6 +304,8 @@ public:
 	double getPhotoLuminance() const { return photoProbeLuminance; }
 	//! Time between two measurements of requestPhotoLuminance() (5 per second)
 	static constexpr int PHOTO_PROBE_INTERVAL_MS = 200;
+	//! How often the sky quality meter of the information line measures (ms)
+	static constexpr int PHOTO_SQM_INTERVAL_MS = 250;
 
 	static bool isInitialized() {if (singleton) return singleton->initialized; else return false;}
 	
@@ -576,6 +578,9 @@ private:
 	std::unique_ptr<class StelPhotoMeter> photoMeter;
 	//! Milliseconds of the last meter reading (for the smooth adaptation of the exposure)
 	qint64 photoMeterLastMs = -1;
+	//! The sky quality meter of the information line (StelSkyDrawer::applyPhotoSqmReading())
+	std::unique_ptr<class StelPhotoMeter> photoSqmMeter;
+	qint64 photoSqmLastMs = -1;
 	//! Photographic mode: the luminance at a point (see requestPhotoLuminance())
 	std::unique_ptr<class StelPhotoProbe> photoProbe;
 	bool photoProbeRequested = false;

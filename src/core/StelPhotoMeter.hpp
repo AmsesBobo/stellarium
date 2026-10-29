@@ -57,9 +57,17 @@ public:
 		double exposureTime = 0.;   //!< exposure time of the frame that was measured (seconds)
 		//! Sum of the linear red, green and blue of the segments that do not saturate (grey world white balance)
 		double greyRed = 0., greyGreen = 0., greyBlue = 0.;
+		//! The mean luminance of each segment (scene units, GRID x GRID from the lower left), only with AreaMeans
+		std::vector<float> cells;
+		int width = 0, height = 0;  //!< the size of the measured part (pixels)
+	};
+	//! What the meter is for
+	enum Mode {
+		Exposure,  //!< the readings of the metering modes (12 x 12 samples per segment)
+		AreaMeans  //!< the exact mean of all the pixels of each segment (the light of every star counts), in cells
 	};
 
-	StelPhotoMeter();
+	explicit StelPhotoMeter(Mode mode = Exposure);
 	~StelPhotoMeter();
 
 	//! Measure the scene texture (linear light, w x h pixels). The reading becomes available with
@@ -76,6 +84,7 @@ public:
 	void reset();
 
 private:
+	Mode mode;
 	std::unique_ptr<QOpenGLShaderProgram> program;
 	std::unique_ptr<QOpenGLFramebufferObject> fbo;
 	GLuint pbo[2] = {0, 0};

@@ -1060,6 +1060,16 @@ public slots:
 	//! Automatic exposure: use a reading of the exposure meter. Called by StelApp once per frame.
 	//! @param deltaTime time since the last call, seconds (for the smooth adaptation)
 	void applyPhotoMeterReading(const StelPhotoMeter::Reading& reading, double deltaTime);
+	//! Sky quality meter: use a reading of the area means of the scene (StelPhotoMeter::AreaMeans of the whole
+	//! scene buffer), or forget the last one (an empty reading). Called by StelApp a few times per second.
+	void applyPhotoSqmReading(const StelPhotoMeter::Reading& reading);
+	//! What a sky quality meter (SQM-L, about 20 degrees wide) pointed at the zenith would measure: the luminance
+	//! (cd/m^2) of the rendered sky, stars and Milky Way included, weighted by its field; -1 when the zenith is not
+	//! in view enough to tell
+	double getPhotoSqmLuminance() const {return photoSqmLuminance;}
+	//! The darkest the zenith gets at the place: the airglow and the light pollution only (no Moon, twilight,
+	//! zodiacal light, Milky Way or stars), cd/m^2; 0 off the Earth or without the atmosphere
+	double getPhotoZenithBackgroundLuminance() const;
 	//! Draw the line with the camera settings (if switched on). Called by StelApp after the camera
 	//! stage, so that the text is neither exposed nor blurred like the scene.
 	void drawPhotoInfoLine(StelCore* core) const;
@@ -1748,6 +1758,8 @@ private:
 	bool photoAutoExposureFresh = true;
 	//! The metered exposure is outside the range of the camera: -1 too dark (longest time), +1 too bright
 	int photoAutoExposureLimit = 0;
+	//! See getPhotoSqmLuminance()
+	double photoSqmLuminance = -1.;
 	//! Last value announced with photoEffectiveExposureTimeChanged (nominal value)
 	double photoAnnouncedExposureTime = 0.;
 	void announcePhotoExposureTime();

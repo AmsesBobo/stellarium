@@ -1502,6 +1502,30 @@ void StelApp::highGraphicsModeDraw()
 		core->getSkyDrawer()->applyPhotoMeterReading(StelPhotoMeter::Reading(), 0.); // marks the next reading as the first
 	}
 
+	// Photographic mode: the sky quality meter of the information line (the zenith), a few times per second
+	if (photoMode && skyDrawer->getFlagPhotoInfoLine())
+	{
+		if (!photoSqmMeter)
+			photoSqmMeter.reset(new StelPhotoMeter(StelPhotoMeter::AreaMeans));
+		StelPhotoMeter::Reading reading;
+		if (photoSqmMeter->takeReading(reading))
+			core->getSkyDrawer()->applyPhotoSqmReading(reading);
+		const qint64 now = QDateTime::currentMSecsSinceEpoch();
+		if (photoSqmLastMs < 0 || now - photoSqmLastMs >= PHOTO_SQM_INTERVAL_MS)
+		{
+			resolveScene();
+			photoSqmMeter->measure(sceneFBO->texture(), static_cast<int>(w), static_cast<int>(h), photoSceneScale, photoExposureTime,
+			                       postProcessorVAO.get());
+			photoSqmLastMs = now;
+		}
+	}
+	else if (photoSqmMeter)
+	{
+		photoSqmMeter->reset();
+		photoSqmLastMs = -1;
+		core->getSkyDrawer()->applyPhotoSqmReading(StelPhotoMeter::Reading());
+	}
+
 	// Photographic mode: the luminance at a point (requestPhotoLuminance(), e.g. under the mouse pointer), a few
 	// times per second. Each result is taken in a later frame, when its transfer is done.
 	if (photoMode && photoProbeRequested)

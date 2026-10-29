@@ -29,6 +29,9 @@
 #include "StelModuleMgr.hpp"
 #include "LabelMgr.hpp"
 #include "StelPropertyMgr.hpp"
+#include "LandscapeMgr.hpp"
+#include "LightDomes.hpp"
+#include "StelLocation.hpp"
 
 #include <QStringList>
 #include <QtGlobal>
@@ -436,6 +439,85 @@ void StelSkyDrawer::applyPhotoMeterReading(const StelPhotoMeter::Reading& readin
 	announcePhotoExposureTime();
 }
 
+void StelSkyDrawer::applyPhotoSqmReading(const StelPhotoMeter::Reading& reading)
+{
+	const int grid = StelPhotoMeter::GRID;
+	if (reading.cells.size() != static_cast<size_t>(grid)*grid || reading.width <= 0 || reading.height <= 0 || !(reading.sceneScale > 0.))
+	{
+		photoSqmLuminance = -1.;
+		return;
+	}
+	// The field of a SQM-L: about 20 degrees full width at half maximum, as a Gaussian of the angle from its axis
+	constexpr double SIGMA = 20./2.3548*M_PI/180.;
+	static const double fullWeight = []() {
+		// the integral of the weight over the sphere
+		double sum = 0.;
+		constexpr int N = 2000;
+		for (int k=0; k<N; ++k)
+		{
+			const double t = (k + 0.5)*M_PI/N;
+			sum += std::exp(-0.5*t*t/(SIGMA*SIGMA))*std::sin(t)*(M_PI/N);
+		}
+		return 2.*M_PI*sum;
+	}();
+	// The direction of the corners of the segments (the projection of this frame; the reading is a frame or two
+	// older, close enough)
+	const StelProjectorP prj = core->getProjection(StelCore::FrameAltAz, StelCore::RefractionOff);
+	std::vector<Vec3d> corners(static_cast<size_t>(grid + 1)*(grid + 1));
+	std::vector<char> valid(corners.size());
+	for (int j=0; j<=grid; ++j)
+		for (int i=0; i<=grid; ++i)
+		{
+			Vec3d v;
+			const double x = static_cast<double>(i*reading.width/grid), y = static_cast<double>(j*reading.height/grid);
+			const size_t k = static_cast<size_t>(j)*(grid + 1) + i;
+			valid[k] = prj->unProject(x, y, v) && v.normSquared() > 0.;
+			v.normalize();
+			corners[k] = v;
+		}
+	double weight = 0., weighted = 0.;
+	for (int j=0; j<grid; ++j)
+		for (int i=0; i<grid; ++i)
+		{
+			const size_t a = static_cast<size_t>(j)*(grid + 1) + i, b = a + 1, d = a + grid + 1, c = d + 1;
+			if (!valid[a] || !valid[b] || !valid[c] || !valid[d])
+				continue;  // not on the sky (outside the circle of a fisheye)
+			const Vec3d& A = corners[a];
+			const Vec3d& B = corners[b];
+			const Vec3d& C = corners[c];
+			const Vec3d& D = corners[d];
+			// solid angle of the segment: two flat triangles (the segments are small)
+			const double area = 0.5*((B - A)^(C - A)).norm() + 0.5*((C - A)^(D - A)).norm();
+			Vec3d centre = A + B + C + D;
+			centre.normalize();
+			const double theta = std::acos(qBound(-1., centre[2], 1.));
+			const double w = std::exp(-0.5*theta*theta/(SIGMA*SIGMA))*area;
+			const double value = static_cast<double>(reading.cells[static_cast<size_t>(j)*grid + i]);
+			if (!(w > 0.) || !std::isfinite(value) || value < 0.)
+				continue;
+			weight += w;
+			weighted += w*value/reading.sceneScale;
+		}
+	// Only when most of the field is in view (the light around the zenith that is not seen is not known)
+	photoSqmLuminance = (weight > 0.5*fullWeight) ? weighted/weight : -1.;
+}
+
+double StelSkyDrawer::getPhotoZenithBackgroundLuminance() const
+{
+	if (!getFlagPhotographicModeActive() || core->getCurrentLocation().planetName != QStringLiteral("Earth"))
+		return 0.;
+	static LandscapeMgr* lmgr = GETSTELMODULE(LandscapeMgr);
+	if (!lmgr || !lmgr->getFlagAtmosphere())
+		return 0.;
+	static LightDomes* domes = GETSTELMODULE(LightDomes);
+	// As the atmosphere draws it (AtmosphereShowMySky): the light pollution setting is the whole night sky at the
+	// zenith, of which the airglow and the light domes of towns are parts; what they leave is spread evenly
+	const double airglow = getPhotoAirglowZenithLuminance();
+	const double dome = domes ? domes->getZenithLuminance() : 0.;
+	const double setting = static_cast<double>(lightPollutionLuminance);
+	return airglow + dome + qMax(0., setting - airglow - dome);
+}
+
 void StelSkyDrawer::drawPhotoInfoLine(StelCore* core) const
 {
 	if (!flagPhotoInfoLine || !getFlagPhotographicModeActive())
@@ -512,6 +594,24 @@ void StelSkyDrawer::drawPhotoInfoLine(StelCore* core) const
 		else if (photoAutoExposureLimit > 0)
 			parts << q_("overexposed");
 	}
+	// The sky at the zenith: what a sky quality meter would read, and the darkest it gets at the place
+	{
+		const double background = getPhotoZenithBackgroundLuminance();
+		const auto mpsas = [](double luminance) {return QLocale().toString(-2.5*std::log10(luminance/10.8e4), 'f', 2);};
+		QString sky;
+		if (photoSqmLuminance > 0.)
+			sky = QString("%1 %2").arg(qc_("SQM", "sky quality meter: surface brightness of the sky at the zenith"), mpsas(photoSqmLuminance));
+		else if (background > 0.)
+			sky = QString("%1 %2").arg(qc_("SQM", "sky quality meter: surface brightness of the sky at the zenith"),
+			                           qc_("-", "sky quality meter: the zenith is not in view"));
+		if (background > 0.)
+		{
+			const int bortle = StelCore::luminanceToBortleScaleIndex(static_cast<float>(background));
+			sky += QString(" (%1, %2)").arg(q_("best %1").arg(mpsas(background)), q_("Bortle %1").arg(bortle));
+		}
+		if (!sky.isEmpty())
+			parts << sky;
+	}
 	const QString text = parts.join(sep);
 
 	StelPainter sPainter(core->getProjection2d());
@@ -527,7 +627,7 @@ void StelSkyDrawer::drawPhotoInfoLine(StelCore* core) const
 	// At the top of the screen, like the Equation of Time plugin (below its line if that is shown)
 	float lines = 1.5f;
 	StelPropertyMgr* propMgr = StelApp::getInstance().getStelPropertyManager();
-	if (propMgr && propMgr->getProperty("EquationOfTime.showEOT") && propMgr->getStelPropertyValue("EquationOfTime.showEOT").toBool())
+	if (propMgr && propMgr->getProperty("EquationOfTime.showEOT", true) && propMgr->getStelPropertyValue("EquationOfTime.showEOT", true).toBool())
 		lines += 1.5f;
 	const float x = params.viewportXywh[2]*ppx/2.f - fs.width()*ppx/2.f;
 	const float y = params.viewportXywh[3]*ppx - fs.height()*ppx*lines;

@@ -98,10 +98,40 @@ void main()
 )";
 static_assert(StelPhotoMeter::GRID == 48, "update the GRID constant in the meter shader");
 
+// AreaMeans: the exact mean luminance of all the pixels of each segment (red): the stars are a few pixels, which the
+// samples above would mostly miss
+const char* areaSource = R"(
+uniform sampler2D scene;
+uniform ivec2 sceneSize;
+uniform ivec2 sceneOrigin;
+uniform ivec2 textureSize;
+const int GRID = )" "48" R"(;
+highp float sane(highp float x) { return (x >= 0.) ? min(x, 1e30) : 0.; }
+void main()
+{
+	ivec2 cell = ivec2(gl_FragCoord.xy);
+	ivec2 lo = sceneOrigin + (cell*sceneSize)/GRID;
+	ivec2 hi = max(lo + ivec2(1), sceneOrigin + ((cell + ivec2(1))*sceneSize)/GRID);
+	hi = min(hi, textureSize);
+	highp float sum = 0.;
+	for (int y = lo.y; y < hi.y; ++y)
+		for (int x = lo.x; x < hi.x; ++x)
+		{
+			highp vec3 c = texelFetch(scene, ivec2(x, y), 0).rgb;
+			sum += sane(dot(vec3(sane(c.r), sane(c.g), sane(c.b)), vec3(0.2126, 0.7152, 0.0722)));
+		}
+	highp float n = float(max(1, (hi.x - lo.x)*(hi.y - lo.y)));
+	FRAG_COLOR = vec4(min(sum / n, 1e30), 0., 0., 0.);
+}
+)";
+
 constexpr int BUFFER_SIZE = StelPhotoMeter::GRID * StelPhotoMeter::GRID * 4 * static_cast<int>(sizeof(float));
 }
 
-StelPhotoMeter::StelPhotoMeter() = default;
+StelPhotoMeter::StelPhotoMeter(Mode m)
+	: mode(m)
+{
+}
 
 StelPhotoMeter::~StelPhotoMeter()
 {
@@ -125,7 +155,7 @@ void StelPhotoMeter::init()
 
 	program.reset(new QOpenGLShaderProgram);
 	program->addShaderFromSourceCode(QOpenGLShader::Vertex, StelOpenGL::globalShaderPrefix(StelOpenGL::VERTEX_SHADER) + vertexSource);
-	program->addShaderFromSourceCode(QOpenGLShader::Fragment, StelOpenGL::globalShaderPrefix(StelOpenGL::FRAGMENT_SHADER) + meterSource);
+	program->addShaderFromSourceCode(QOpenGLShader::Fragment, StelOpenGL::globalShaderPrefix(StelOpenGL::FRAGMENT_SHADER) + (mode == AreaMeans ? areaSource : meterSource));
 	program->bindAttributeLocation("vertex", 0);
 	if (!StelPainter::linkProg(program.get(), "photographic mode: exposure meter"))
 	{
@@ -237,7 +267,18 @@ bool StelPhotoMeter::takeReading(Reading& reading, double clipLevel)
 	bool result = false;
 	if (data)
 	{
-		reading = evaluate(static_cast<const float*>(data), pendingW[slot], pendingH[slot], clipLevel);
+		if (mode == AreaMeans)
+		{
+			reading = Reading();
+			const float* cells = static_cast<const float*>(data);
+			reading.cells.resize(static_cast<size_t>(GRID)*GRID);
+			for (int k=0; k<GRID*GRID; ++k)
+				reading.cells[static_cast<size_t>(k)] = cells[4*k];
+			reading.width = pendingW[slot];
+			reading.height = pendingH[slot];
+		}
+		else
+			reading = evaluate(static_cast<const float*>(data), pendingW[slot], pendingH[slot], clipLevel);
 		reading.sceneScale = pendingInfo[slot].sceneScale;
 		reading.exposureTime = pendingInfo[slot].exposureTime;
 		gl.glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
