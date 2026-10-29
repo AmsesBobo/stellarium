@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>420</width>
-    <height>470</height>
+    <width>760</width>
+    <height>340</height>
    </rect>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
@@ -34,236 +34,345 @@
     </widget>
    </item>
    <item>
-    <widget class="QGroupBox" name="modeGroupBox">
-     <property name="title">
-      <string>Naked eye mode</string>
-     </property>
-     <layout class="QVBoxLayout" name="modeLayout">
-      <item>
-       <widget class="QCheckBox" name="nakedEyeModeCheckBox">
-        <property name="toolTip">
-         <string>Render the scene of the photographic mode as the eye sees it, without the effects of a camera. Needs OpenGL 3 or later.</string>
-        </property>
-        <property name="text">
-         <string>Naked eye mode</string>
-        </property>
-       </widget>
-      </item>
-      <item>
-       <widget class="QCheckBox" name="infoLineCheckBox">
-        <property name="toolTip">
-         <string>Show the state of the eye and the sky quality at the top of the screen</string>
-        </property>
-        <property name="text">
-         <string>Show the information line</string>
-        </property>
-       </widget>
-      </item>
-     </layout>
-    </widget>
-   </item>
-   <item>
-    <widget class="QGroupBox" name="observerGroupBox">
-     <property name="title">
-      <string>Observer</string>
-     </property>
-     <layout class="QGridLayout" name="observerLayout">
-      <item row="0" column="0">
-       <widget class="QLabel" name="ageLabel">
-        <property name="toolTip">
-         <string>The age of the observer. It sets the size of the pupil (Watson &amp; Yellott 2012): with the years the pupil opens less in the dark, and less light reaches the retina.</string>
-        </property>
-        <property name="text">
-         <string>Age:</string>
-        </property>
-       </widget>
-      </item>
-      <item row="0" column="1">
-       <widget class="QDoubleSpinBox" name="ageSpinBox">
-        <property name="toolTip">
-         <string>The age of the observer. It sets the size of the pupil (Watson &amp; Yellott 2012): with the years the pupil opens less in the dark, and less light reaches the retina.</string>
-        </property>
-        <property name="suffix">
-         <string> years</string>
-        </property>
-        <property name="decimals">
-         <number>0</number>
-        </property>
-        <property name="minimum">
-         <double>10.000000000000000</double>
-        </property>
-        <property name="maximum">
-         <double>90.000000000000000</double>
-        </property>
-        <property name="value">
-         <double>30.000000000000000</double>
-        </property>
-       </widget>
-      </item>
-      <item row="0" column="2">
-       <spacer name="ageSpacer">
-        <property name="orientation">
-         <enum>Qt::Horizontal</enum>
-        </property>
-        <property name="sizeHint" stdset="0">
-         <size>
-          <width>40</width>
-          <height>20</height>
-         </size>
-        </property>
-       </spacer>
-      </item>
-      <item row="1" column="0" colspan="3">
-       <widget class="QLabel" name="pupilInfoLabel">
-        <property name="text">
-         <string notr="true"/>
-        </property>
-       </widget>
-      </item>
-     </layout>
-    </widget>
-   </item>
-   <item>
-    <widget class="QGroupBox" name="screenGroupBox">
-     <property name="title">
-      <string>Screen</string>
-     </property>
-     <layout class="QGridLayout" name="screenLayout">
-      <item row="0" column="0">
-       <widget class="QLabel" name="displayLuminanceLabel">
-        <property name="toolTip">
-         <string>The luminance of white on the screen (about 100 cd/m² for an office screen, 20 to 50 cd/m² for a screen dimmed in a dark room). A dim screen needs a brighter picture: the eye of the viewer is less sensitive to contrast there.</string>
-        </property>
-        <property name="text">
-         <string>Brightness of white:</string>
-        </property>
-       </widget>
-      </item>
-      <item row="0" column="1">
-       <widget class="QDoubleSpinBox" name="displayLuminanceSpinBox">
-        <property name="toolTip">
-         <string>The luminance of white on the screen (about 100 cd/m² for an office screen, 20 to 50 cd/m² for a screen dimmed in a dark room). A dim screen needs a brighter picture: the eye of the viewer is less sensitive to contrast there.</string>
-        </property>
-        <property name="suffix">
-         <string> cd/m²</string>
-        </property>
-        <property name="decimals">
-         <number>0</number>
-        </property>
-        <property name="minimum">
-         <double>5.000000000000000</double>
-        </property>
-        <property name="maximum">
-         <double>1000.000000000000000</double>
-        </property>
-        <property name="singleStep">
-         <double>5.000000000000000</double>
-        </property>
-        <property name="value">
-         <double>100.000000000000000</double>
-        </property>
-       </widget>
-      </item>
-      <item row="0" column="2">
-       <spacer name="screenSpacer">
-        <property name="orientation">
-         <enum>Qt::Horizontal</enum>
-        </property>
-        <property name="sizeHint" stdset="0">
-         <size>
-          <width>40</width>
-          <height>20</height>
-         </size>
-        </property>
-       </spacer>
-      </item>
-     </layout>
-    </widget>
-   </item>
-   <item>
-    <widget class="QGroupBox" name="adaptationGroupBox">
-     <property name="title">
-      <string>Adaptation</string>
-     </property>
-     <layout class="QVBoxLayout" name="adaptationLayout">
-      <item>
-       <widget class="QCheckBox" name="instantAdaptationCheckBox">
-        <property name="toolTip">
-         <string>The eye is always adapted to what it sees. Otherwise it needs time: a fraction of a second for brighter light, up to half an hour in the dark after daylight (the rods take over from the cones after about 10 minutes). The adaptation follows the time of the program when it runs faster than the clock.</string>
-        </property>
-        <property name="text">
-         <string>Always adapted (no adaptation time)</string>
-        </property>
-       </widget>
-      </item>
-      <item>
-       <layout class="QHBoxLayout" name="adaptNowLayout">
-        <item>
-         <widget class="QPushButton" name="adaptNowPushButton">
-          <property name="toolTip">
-           <string>Adapt the eye at once to the current view, as if it had been looking at it for a long time</string>
-          </property>
-          <property name="text">
-           <string>Adapt now</string>
-          </property>
-         </widget>
-        </item>
-        <item>
-         <spacer name="adaptNowSpacer">
-          <property name="orientation">
-           <enum>Qt::Horizontal</enum>
-          </property>
-          <property name="sizeHint" stdset="0">
-           <size>
-            <width>40</width>
-            <height>20</height>
-           </size>
-          </property>
-         </spacer>
-        </item>
-       </layout>
-      </item>
-      <item>
-       <widget class="QLabel" name="adaptationInfoLabel">
-        <property name="minimumSize">
-         <size>
-          <width>0</width>
-          <height>40</height>
-         </size>
-        </property>
-        <property name="text">
-         <string notr="true"/>
-        </property>
-        <property name="wordWrap">
-         <bool>true</bool>
-        </property>
-       </widget>
-      </item>
-      <item>
-       <widget class="QLabel" name="mesopicInfoLabel">
-        <property name="text">
-         <string notr="true"/>
-        </property>
-        <property name="wordWrap">
-         <bool>true</bool>
-        </property>
-       </widget>
-      </item>
-      <item>
-       <spacer name="verticalSpacer">
-        <property name="orientation">
-         <enum>Qt::Vertical</enum>
-        </property>
-        <property name="sizeHint" stdset="0">
-         <size>
-          <width>20</width>
-          <height>10</height>
-         </size>
-        </property>
-       </spacer>
-      </item>
-     </layout>
-    </widget>
+    <layout class="QHBoxLayout" name="columnsLayout">
+     <item>
+      <layout class="QVBoxLayout" name="leftColumn">
+         <item>
+          <widget class="QGroupBox" name="modeGroupBox">
+           <property name="title">
+            <string>Naked eye mode</string>
+           </property>
+           <layout class="QVBoxLayout" name="modeLayout">
+            <item>
+             <widget class="QCheckBox" name="nakedEyeModeCheckBox">
+              <property name="toolTip">
+               <string>Render the scene of the photographic mode as the eye sees it, without the effects of a camera. Needs OpenGL 3 or later.</string>
+              </property>
+              <property name="text">
+               <string>Naked eye mode</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QCheckBox" name="infoLineCheckBox">
+              <property name="toolTip">
+               <string>Show the state of the eye and the sky quality at the top of the screen</string>
+              </property>
+              <property name="text">
+               <string>Show the information line</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+         </item>
+         <item>
+          <widget class="QGroupBox" name="observerGroupBox">
+           <property name="title">
+            <string>Observer</string>
+           </property>
+           <layout class="QGridLayout" name="observerLayout">
+            <item row="0" column="0">
+             <widget class="QLabel" name="ageLabel">
+              <property name="toolTip">
+               <string>The age of the observer. It sets the size of the pupil (Watson &amp; Yellott 2012): with the years the pupil opens less in the dark, and less light reaches the retina.</string>
+              </property>
+              <property name="text">
+               <string>Age:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="0" column="1">
+             <widget class="QDoubleSpinBox" name="ageSpinBox">
+              <property name="toolTip">
+               <string>The age of the observer. It sets the size of the pupil (Watson &amp; Yellott 2012): with the years the pupil opens less in the dark, and less light reaches the retina.</string>
+              </property>
+              <property name="suffix">
+               <string> years</string>
+              </property>
+              <property name="decimals">
+               <number>0</number>
+              </property>
+              <property name="minimum">
+               <double>10.000000000000000</double>
+              </property>
+              <property name="maximum">
+               <double>90.000000000000000</double>
+              </property>
+              <property name="value">
+               <double>30.000000000000000</double>
+              </property>
+             </widget>
+            </item>
+            <item row="0" column="2">
+             <spacer name="ageSpacer">
+              <property name="orientation">
+               <enum>Qt::Horizontal</enum>
+              </property>
+              <property name="sizeHint" stdset="0">
+               <size>
+                <width>40</width>
+                <height>20</height>
+               </size>
+              </property>
+             </spacer>
+            </item>
+            <item row="1" column="0" colspan="3">
+             <widget class="QLabel" name="pupilInfoLabel">
+              <property name="text">
+               <string notr="true"/>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+         </item>
+         <item>
+          <widget class="QGroupBox" name="screenGroupBox">
+           <property name="title">
+            <string>Screen</string>
+           </property>
+           <layout class="QGridLayout" name="screenLayout">
+            <item row="0" column="0">
+             <widget class="QLabel" name="displayLuminanceLabel">
+              <property name="toolTip">
+               <string>The luminance of white on the screen (about 100 cd/m² for an office screen, 20 to 50 cd/m² for a screen dimmed in a dark room). A dim screen needs a brighter picture: the eye of the viewer is less sensitive to contrast there.</string>
+              </property>
+              <property name="text">
+               <string>Brightness of white:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="0" column="1">
+             <widget class="QDoubleSpinBox" name="displayLuminanceSpinBox">
+              <property name="toolTip">
+               <string>The luminance of white on the screen (about 100 cd/m² for an office screen, 20 to 50 cd/m² for a screen dimmed in a dark room). A dim screen needs a brighter picture: the eye of the viewer is less sensitive to contrast there.</string>
+              </property>
+              <property name="suffix">
+               <string> cd/m²</string>
+              </property>
+              <property name="decimals">
+               <number>0</number>
+              </property>
+              <property name="minimum">
+               <double>5.000000000000000</double>
+              </property>
+              <property name="maximum">
+               <double>1000.000000000000000</double>
+              </property>
+              <property name="singleStep">
+               <double>5.000000000000000</double>
+              </property>
+              <property name="value">
+               <double>100.000000000000000</double>
+              </property>
+             </widget>
+            </item>
+            <item row="0" column="2">
+             <spacer name="screenSpacer">
+              <property name="orientation">
+               <enum>Qt::Horizontal</enum>
+              </property>
+              <property name="sizeHint" stdset="0">
+               <size>
+                <width>40</width>
+                <height>20</height>
+               </size>
+              </property>
+             </spacer>
+            </item>
+            <item row="1" column="0">
+             <widget class="QLabel" name="screenFovLabel">
+              <property name="toolTip">
+               <string>The angle that the field of view of Stellarium fills for your eye (normally the height of the screen, seen from where you sit). At this field of view the sky is shown life-size; narrower fields are seen as through an ideal instrument.</string>
+              </property>
+              <property name="text">
+               <string>Field of view for the eye:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="1">
+             <widget class="QDoubleSpinBox" name="screenFovSpinBox">
+              <property name="toolTip">
+               <string>The angle that the field of view of Stellarium fills for your eye (normally the height of the screen, seen from where you sit). At this field of view the sky is shown life-size; narrower fields are seen as through an ideal instrument.</string>
+              </property>
+              <property name="suffix">
+               <string>°</string>
+              </property>
+              <property name="decimals">
+               <number>0</number>
+              </property>
+              <property name="minimum">
+               <double>10.000000000000000</double>
+              </property>
+              <property name="maximum">
+               <double>150.000000000000000</double>
+              </property>
+              <property name="value">
+               <double>55.000000000000000</double>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+         </item>
+         <item>
+          <spacer name="leftSpacer">
+           <property name="orientation">
+            <enum>Qt::Vertical</enum>
+           </property>
+           <property name="sizeHint" stdset="0">
+            <size>
+             <width>20</width>
+             <height>0</height>
+            </size>
+           </property>
+          </spacer>
+         </item>
+      </layout>
+     </item>
+     <item>
+      <layout class="QVBoxLayout" name="rightColumn">
+         <item>
+          <widget class="QGroupBox" name="nightVisionGroupBox">
+           <property name="title">
+            <string>Night vision</string>
+           </property>
+           <layout class="QVBoxLayout" name="nightVisionLayout">
+            <item>
+             <widget class="QCheckBox" name="acuityCheckBox">
+              <property name="toolTip">
+               <string>In dim light the eye resolves less detail (Shaler 1937, Ferwerda et al. 1996): the view is blurred to the finest detail the eye can see.</string>
+              </property>
+              <property name="text">
+               <string>Loss of acuity in the dark</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QCheckBox" name="noiseCheckBox">
+              <property name="toolTip">
+               <string>In the dark the rods catch few photons: their number fluctuates, and the view looks grainy (Thompson, Shirley &amp; Ferwerda 2002).</string>
+              </property>
+              <property name="text">
+               <string>Noise of the rods</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLabel" name="acuityInfoLabel">
+              <property name="text">
+               <string notr="true"/>
+              </property>
+              <property name="wordWrap">
+               <bool>true</bool>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+         </item>
+         <item>
+          <widget class="QGroupBox" name="adaptationGroupBox">
+           <property name="title">
+            <string>Adaptation</string>
+           </property>
+           <layout class="QVBoxLayout" name="adaptationLayout">
+            <item>
+             <widget class="QCheckBox" name="instantAdaptationCheckBox">
+              <property name="toolTip">
+               <string>The eye is always adapted to what it sees. Otherwise it needs time: a fraction of a second for brighter light, up to half an hour in the dark after daylight (the rods take over from the cones after about 10 minutes). The adaptation follows the time of the program when it runs faster than the clock.</string>
+              </property>
+              <property name="text">
+               <string>Always adapted (no adaptation time)</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <layout class="QHBoxLayout" name="adaptNowLayout">
+              <item>
+               <widget class="QPushButton" name="adaptNowPushButton">
+                <property name="toolTip">
+                 <string>Adapt the eye at once to the current view, as if it had been looking at it for a long time</string>
+                </property>
+                <property name="text">
+                 <string>Adapt now</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <spacer name="adaptNowSpacer">
+                <property name="orientation">
+                 <enum>Qt::Horizontal</enum>
+                </property>
+                <property name="sizeHint" stdset="0">
+                 <size>
+                  <width>40</width>
+                  <height>20</height>
+                 </size>
+                </property>
+               </spacer>
+              </item>
+             </layout>
+            </item>
+            <item>
+             <widget class="QLabel" name="adaptationInfoLabel">
+              <property name="minimumSize">
+               <size>
+                <width>0</width>
+                <height>40</height>
+               </size>
+              </property>
+              <property name="text">
+               <string notr="true"/>
+              </property>
+              <property name="wordWrap">
+               <bool>true</bool>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLabel" name="mesopicInfoLabel">
+              <property name="text">
+               <string notr="true"/>
+              </property>
+              <property name="wordWrap">
+               <bool>true</bool>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <spacer name="verticalSpacer">
+              <property name="orientation">
+               <enum>Qt::Vertical</enum>
+              </property>
+              <property name="sizeHint" stdset="0">
+               <size>
+                <width>20</width>
+                <height>10</height>
+               </size>
+              </property>
+             </spacer>
+            </item>
+           </layout>
+          </widget>
+         </item>
+         <item>
+          <spacer name="rightSpacer">
+           <property name="orientation">
+            <enum>Qt::Vertical</enum>
+           </property>
+           <property name="sizeHint" stdset="0">
+            <size>
+             <width>20</width>
+             <height>0</height>
+            </size>
+           </property>
+          </spacer>
+         </item>
+      </layout>
+     </item>
+    </layout>
    </item>
   </layout>
  </widget>

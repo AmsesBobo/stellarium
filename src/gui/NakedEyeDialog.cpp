@@ -65,6 +65,10 @@ void NakedEyeDialog::createDialogContent()
 	connectDoubleProperty(ui->ageSpinBox, "StelSkyDrawer.eyeAge");
 	ui->displayLuminanceSpinBox->setRange(StelSkyDrawer::EYE_MIN_DISPLAY_LUMINANCE, StelSkyDrawer::EYE_MAX_DISPLAY_LUMINANCE);
 	connectDoubleProperty(ui->displayLuminanceSpinBox, "StelSkyDrawer.eyeDisplayLuminance");
+	ui->screenFovSpinBox->setRange(StelSkyDrawer::EYE_MIN_SCREEN_FOV, StelSkyDrawer::EYE_MAX_SCREEN_FOV);
+	connectDoubleProperty(ui->screenFovSpinBox, "StelSkyDrawer.eyeScreenFov");
+	connectBoolProperty(ui->acuityCheckBox, "StelSkyDrawer.flagEyeAcuity");
+	connectBoolProperty(ui->noiseCheckBox, "StelSkyDrawer.flagEyeNoise");
 	StelSkyDrawer* drawer = StelApp::getInstance().getCore()->getSkyDrawer();
 	connect(ui->adaptNowPushButton, &QPushButton::clicked, drawer, &StelSkyDrawer::resetEyeAdaptation);
 
@@ -87,6 +91,7 @@ void NakedEyeDialog::updateAdaptationInfo()
 		ui->adaptationInfoLabel->setText(q_("The naked eye mode is off (it needs OpenGL 3 or later)."));
 		ui->pupilInfoLabel->clear();
 		ui->mesopicInfoLabel->clear();
+		ui->acuityInfoLabel->clear();
 		return;
 	}
 	const StelEyeAdaptation& eye = drawer->getEyeAdaptation();
@@ -103,4 +108,8 @@ void NakedEyeDialog::updateAdaptationInfo()
 	ui->adaptationInfoLabel->setText(text);
 	ui->mesopicInfoLabel->setText(q_("Share of the cones in brightness and color (CIE 191:2010): %1 %.").arg(qRound(100.*eye.getMesopicM())));
 	ui->pupilInfoLabel->setText(q_("Pupil: %1 mm.").arg(locale.toString(drawer->getEyePupilDiameter(), 'f', 1)));
+	// The finest detail: one period of the highest resolved frequency, in minutes of arc
+	const double limit = drawer->getEyeAcuityLimit();
+	ui->acuityInfoLabel->setText(q_("Acuity: %1 cycles per degree (the finest detail is %2 arc minutes).")
+	                             .arg(locale.toString(limit, 'f', 1), locale.toString(60./limit, 'f', 1)));
 }

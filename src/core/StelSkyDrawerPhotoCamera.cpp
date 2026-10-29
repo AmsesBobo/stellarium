@@ -28,6 +28,7 @@
 #include "StelMainView.hpp"
 
 #include <QSettings>
+#include <QDateTime>
 #include <QDebug>
 #include <QtGlobal>
 #include <algorithm>
@@ -54,6 +55,73 @@ void StelSkyDrawer::setFlagEyeInstantAdaptation(bool b)
 	flagEyeInstantAdaptation = b;
 	StelApp::immediateSave("viewing/flag_naked_eye_instant_adaptation", b);
 	emit flagEyeInstantAdaptationChanged(b);
+}
+
+void StelSkyDrawer::setEyeScreenFov(double degrees)
+{
+	degrees = qBound(EYE_MIN_SCREEN_FOV, degrees, EYE_MAX_SCREEN_FOV);
+	if (qFuzzyCompare(degrees, eyeScreenFov))
+		return;
+	eyeScreenFov = degrees;
+	StelApp::immediateSave("viewing/naked_eye_screen_fov", degrees);
+	emit eyeScreenFovChanged(degrees);
+}
+
+void StelSkyDrawer::setFlagEyeAcuity(bool b)
+{
+	if (b == flagEyeAcuity)
+		return;
+	flagEyeAcuity = b;
+	StelApp::immediateSave("viewing/flag_naked_eye_acuity", b);
+	emit flagEyeAcuityChanged(b);
+}
+
+void StelSkyDrawer::setFlagEyeNoise(bool b)
+{
+	if (b == flagEyeNoise)
+		return;
+	flagEyeNoise = b;
+	StelApp::immediateSave("viewing/flag_naked_eye_noise", b);
+	emit flagEyeNoiseChanged(b);
+}
+
+double StelSkyDrawer::getEyeAcuityLimit() const
+{
+	return StelEyeVision::acuityLimit(eyeAdaptation.getAdaptationLuminance());
+}
+
+StelEyeVision::Params StelSkyDrawer::getEyeVisionParams(const StelProjector& prj) const
+{
+	StelEyeVision::Params p;
+	if (!getFlagNakedEyeModeActive())
+		return p;
+	// Degrees for the eye of the viewer -> pixels of the scene: the field of view of the program fills the angle
+	// eyeScreenFov (narrower fields are magnified, as through an instrument)
+	const double viewFov = qMax(1e-6, static_cast<double>(prj.getFov()));
+	const double pixelsPerEyeDegree = static_cast<double>(prj.getPixelPerRadAtCenter())*(M_PI/180.)*viewFov/eyeScreenFov;
+	const double limit = getEyeAcuityLimit();
+	if (flagEyeAcuity)
+		p.sigma = static_cast<float>(StelEyeVision::blurSigma(limit)*pixelsPerEyeDegree);
+	if (flagEyeNoise)
+	{
+		// A noise cell: one period of the finest detail the eye resolves; the rods summed up: a circle of the
+		// diameter of two periods
+		const double cellDegrees = 1./limit;
+		p.cellSize = static_cast<float>(cellDegrees*pixelsPerEyeDegree);
+		const double rods = StelEyeVision::RODS_PER_MM2*M_PI*std::pow(cellDegrees*StelEyeVision::MM_PER_DEGREE, 2.);
+		const double pupilArea = M_PI*0.25*eyePupil.getDiameter()*eyePupil.getDiameter(); // mm^2
+		// scotopic scene value -> scotopic cd/m^2 -> scotopic trolands -> photoisomerizations in the cell
+		const double scale = static_cast<double>(getPhotoSceneScale());
+		p.noiseScale = static_cast<float>(pupilArea*StelEyeVision::ISOMERIZATIONS_PER_TROLAND*EYE_INTEGRATION_TIME*rods/qMax(1e-30, scale));
+		p.noiseShare = static_cast<float>(1. - eyeAdaptation.getMesopicM());
+		// the time in integration times, within an hour (for the precision of a float)
+		const qint64 ms = QDateTime::currentMSecsSinceEpoch() % (3600LL*1000LL);
+		p.seed = static_cast<float>(static_cast<double>(ms)/(1000.*EYE_INTEGRATION_TIME));
+	}
+	p.scotopic[0] = static_cast<float>(StelEyeAdaptation::SCOTOPIC_RED);
+	p.scotopic[1] = static_cast<float>(StelEyeAdaptation::SCOTOPIC_GREEN);
+	p.scotopic[2] = static_cast<float>(StelEyeAdaptation::SCOTOPIC_BLUE);
+	return p;
 }
 
 void StelSkyDrawer::setEyeDisplayLuminance(double luminance)
@@ -769,6 +837,9 @@ void StelSkyDrawer::savePhotoSettings(QSettings* conf) const
 	conf->setValue("viewing/flag_naked_eye_instant_adaptation", getFlagEyeInstantAdaptation());
 	conf->setValue("viewing/naked_eye_age", getEyeAge());
 	conf->setValue("viewing/naked_eye_display_luminance", getEyeDisplayLuminance());
+	conf->setValue("viewing/naked_eye_screen_fov", getEyeScreenFov());
+	conf->setValue("viewing/flag_naked_eye_acuity", getFlagEyeAcuity());
+	conf->setValue("viewing/flag_naked_eye_noise", getFlagEyeNoise());
 	conf->setValue("viewing/photographic_exposure_ev", getPhotoExposureEV());
 	conf->setValue("viewing/photographic_exposure_time", getPhotoExposureTime());
 	conf->setValue("viewing/photographic_aperture", photoProgramRunning ? photoUserAperture : photoAperture);

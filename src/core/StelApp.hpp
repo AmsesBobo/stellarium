@@ -574,6 +574,8 @@ private:
 	std::unique_ptr<QOpenGLFramebufferObject> sceneFBO;
 	//! The lens halo ("bloom") of the photographic mode
 	std::unique_ptr<class StelPhotoBloom> photoBloom;
+	//! Naked eye mode: the loss of acuity and the noise of the rods in the dark
+	std::unique_ptr<class StelEyeVision> eyeVision;
 	//! Photographic mode: the exposure meter of the automatic exposure
 	std::unique_ptr<class StelPhotoMeter> photoMeter;
 	//! Milliseconds of the last meter reading (for the smooth adaptation of the exposure)

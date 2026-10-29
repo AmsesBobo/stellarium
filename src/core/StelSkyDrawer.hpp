@@ -27,6 +27,7 @@
 #include "StelPhotoMeter.hpp"
 #include "StelEyeAdaptation.hpp"
 #include "StelEyePupil.hpp"
+#include "StelEyeVision.hpp"
 #include "StelAtmosphereTransmission.hpp"
 #include "StelProjectorType.hpp"
 
@@ -100,6 +101,12 @@ class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 	Q_PROPERTY(double eyeAge READ getEyeAge WRITE setEyeAge NOTIFY eyeAgeChanged)
 	//! Naked eye mode: the luminance of the white of the screen (cd/m^2), see eyeDisplayGain()
 	Q_PROPERTY(double eyeDisplayLuminance READ getEyeDisplayLuminance WRITE setEyeDisplayLuminance NOTIFY eyeDisplayLuminanceChanged)
+	//! Naked eye mode: the angle that the field of view of the program fills for the viewer's eye (degrees): at
+	//! this field of view the view is life-size. Narrower fields are seen through an ideal instrument.
+	Q_PROPERTY(double eyeScreenFov READ getEyeScreenFov WRITE setEyeScreenFov NOTIFY eyeScreenFovChanged)
+	//! Naked eye mode: the loss of acuity in dim light, and the noise of the rods (see StelEyeVision)
+	Q_PROPERTY(bool flagEyeAcuity READ getFlagEyeAcuity WRITE setFlagEyeAcuity NOTIFY flagEyeAcuityChanged)
+	Q_PROPERTY(bool flagEyeNoise READ getFlagEyeNoise WRITE setFlagEyeNoise NOTIFY flagEyeNoiseChanged)
 	//! Exposure correction of the photographic mode, in photographic stops (EV). 0 is the neutral exposure.
 	Q_PROPERTY(double photoExposureEV READ getPhotoExposureEV WRITE setPhotoExposureEV NOTIFY photoExposureEVChanged)
 	//! Exposure time of the virtual camera in the photographic mode, in seconds.
@@ -245,6 +252,14 @@ public:
 	//! Naked eye mode: the light that the pupil of the observer lets in, relative to an observer of the
 	//! reference age (see StelEyePupil::getLightFactor())
 	double getEyeLightFactor() const {return eyeLightFactor;}
+	static constexpr double EYE_DEFAULT_SCREEN_FOV = 55.;
+	static constexpr double EYE_MIN_SCREEN_FOV = 10.;
+	static constexpr double EYE_MAX_SCREEN_FOV = 150.;
+	//! Naked eye mode: what the night vision (StelEyeVision) needs for this frame: the scene is w pixels wide in
+	//! the projection prj
+	StelEyeVision::Params getEyeVisionParams(const StelProjector& prj) const;
+	//! Naked eye mode: the highest spatial frequency the eye resolves now (cycles per degree, see StelEyeVision)
+	double getEyeAcuityLimit() const;
 	static constexpr double EYE_MIN_AGE = 10.;
 	static constexpr double EYE_MAX_AGE = 90.;
 	static constexpr double EYE_DEFAULT_AGE = 30.;
@@ -970,6 +985,13 @@ public slots:
 	//! Naked eye mode: the luminance of the white of the screen (cd/m^2, 5 to 1000)
 	void setEyeDisplayLuminance(double luminance);
 	double getEyeDisplayLuminance() const {return eyeDisplayLuminance;}
+	//! Naked eye mode: the angle of the field of view on the screen for the viewer (degrees, 10 to 150)
+	void setEyeScreenFov(double degrees);
+	double getEyeScreenFov() const {return eyeScreenFov;}
+	void setFlagEyeAcuity(bool b);
+	bool getFlagEyeAcuity() const {return flagEyeAcuity;}
+	void setFlagEyeNoise(bool b);
+	bool getFlagEyeNoise() const {return flagEyeNoise;}
 
 	//! Set the exposure time of the virtual camera, in seconds (limited to 1/8000 s ... 3600 s).
 	void setPhotoExposureTime(double seconds);
@@ -1337,6 +1359,9 @@ signals:
 	void flagEyeInstantAdaptationChanged(bool b);
 	void eyeAgeChanged(double years);
 	void eyeDisplayLuminanceChanged(double luminance);
+	void eyeScreenFovChanged(double degrees);
+	void flagEyeAcuityChanged(bool b);
+	void flagEyeNoiseChanged(bool b);
 	//! Emitted when the exposure correction of the photographic mode is changed
 	void photoExposureEVChanged(double ev);
 	//! Emitted when the exposure time of the virtual camera is changed
@@ -1737,6 +1762,9 @@ private:
 	StelEyePupil eyePupil;
 	double eyeAge = EYE_DEFAULT_AGE;
 	double eyeDisplayLuminance = EYE_STANDARD_DISPLAY_LUMINANCE;
+	double eyeScreenFov = EYE_DEFAULT_SCREEN_FOV;
+	bool flagEyeAcuity = true;
+	bool flagEyeNoise = true;
 	double eyeLightFactor = 1.;
 	//! The halo of the stars in the picture (the camera's, none for the eye)
 	float getPhotoHaloFractionActive() const {return getFlagPhotoCameraActive() ? photoHaloFraction : 0.f;}

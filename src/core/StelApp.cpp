@@ -24,6 +24,7 @@
 #include "StelSkyDrawer.hpp"
 #include "StelPhotoBloom.hpp"
 #include "StelPhotoMeter.hpp"
+#include "StelEyeVision.hpp"
 #include "StelMainView.hpp"
 #include "StelSplashScreen.hpp"
 #include "StelUtils.hpp"
@@ -1642,7 +1643,21 @@ void StelApp::highGraphicsModeDraw()
 	}
 	photoProbeRequested = false;
 
-	if(sceneMultisampledFBO && !bloomDone)
+	// Naked eye mode: the loss of acuity and the noise of the rods in the dark (on the plain scene texture)
+	bool eyeDone = false;
+	if (photoMode && skyDrawer->getFlagNakedEyeModeActive())
+	{
+		const StelEyeVision::Params params = skyDrawer->getEyeVisionParams(*core->getProjection(StelCore::FrameJ2000));
+		if (params.sigma >= 0.3f || params.noiseScale > 0.f)
+		{
+			resolveScene();
+			if (!eyeVision)
+				eyeVision.reset(new StelEyeVision);
+			eyeDone = eyeVision->process(sceneFBO->texture(), static_cast<int>(w), static_cast<int>(h), params, postProcessorVAO.get());
+		}
+	}
+
+	if(sceneMultisampledFBO && !bloomDone && !eyeDone)
 	{
 		GL(gl->glBindFramebuffer(GL_FRAMEBUFFER, targetFBO));
 		postProcessorProgramMS->bind();
@@ -1670,7 +1685,7 @@ void StelApp::highGraphicsModeDraw()
 
 		const int sceneTexSampler = 0;
 		GL(gl->glActiveTexture(GL_TEXTURE0 + sceneTexSampler));
-		GL(gl->glBindTexture(GL_TEXTURE_2D, sceneFBO->texture()));
+		GL(gl->glBindTexture(GL_TEXTURE_2D, eyeDone ? eyeVision->outputTexture() : sceneFBO->texture()));
 		postProcessorProgram->setUniformValue(postProcessorUniformLocations.tex, sceneTexSampler);
 
 		const int ditherTexSampler = 1;
