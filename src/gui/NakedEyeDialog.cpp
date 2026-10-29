@@ -86,6 +86,7 @@ void NakedEyeDialog::updateAdaptationInfo()
 	{
 		ui->adaptationInfoLabel->setText(q_("The naked eye mode is off (it needs OpenGL 3 or later)."));
 		ui->pupilInfoLabel->clear();
+		ui->mesopicInfoLabel->clear();
 		return;
 	}
 	const StelEyeAdaptation& eye = drawer->getEyeAdaptation();
@@ -100,5 +101,6 @@ void NakedEyeDialog::updateAdaptationInfo()
 		text += QStringLiteral(" ") + q_("Still adapting to the dark: the faintest visible light is %1 mag brighter than when adapted.")
 		                                  .arg(locale.toString(elevation, 'f', 1));
 	ui->adaptationInfoLabel->setText(text);
+	ui->mesopicInfoLabel->setText(q_("Share of the cones in brightness and color (CIE 191:2010): %1 %.").arg(qRound(100.*eye.getMesopicM())));
 	ui->pupilInfoLabel->setText(q_("Pupil: %1 mm.").arg(locale.toString(drawer->getEyePupilDiameter(), 'f', 1)));
 }

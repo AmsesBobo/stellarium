@@ -66,22 +66,23 @@ double StelEyeAdaptation::rodsThreshold(double luminance)
 	return std::pow(10., t);
 }
 
-double StelEyeAdaptation::steadyThreshold(double luminance)
+double StelEyeAdaptation::steadyThreshold(double luminance, double scotopicRatio)
 {
-	return std::min(conesThreshold(luminance), rodsThreshold(luminance));
+	const double k = std::max(1e-3, scotopicRatio);
+	return std::min(conesThreshold(luminance), rodsThreshold(k*luminance)/k);
 }
 
-double StelEyeAdaptation::luminanceForThreshold(double threshold)
+double StelEyeAdaptation::luminanceForThreshold(double threshold, double scotopicRatio)
 {
 	// The threshold of the steady state rises with the luminance (from the plateau of the dark adapted rods):
 	// the highest luminance whose threshold is not above the given one, by bisection in log units
 	double lo = MIN_LOG_LUMINANCE, hi = MAX_LOG_LUMINANCE;
-	if (steadyThreshold(std::pow(10., hi)) <= threshold)
+	if (steadyThreshold(std::pow(10., hi), scotopicRatio) <= threshold)
 		return std::pow(10., hi);
 	for (int i=0; i<60; ++i)
 	{
 		const double mid = 0.5*(lo + hi);
-		if (steadyThreshold(std::pow(10., mid)) <= threshold)
+		if (steadyThreshold(std::pow(10., mid), scotopicRatio) <= threshold)
 			lo = mid;
 		else
 			hi = mid;
@@ -108,61 +109,90 @@ double StelEyeAdaptation::fallRateLimited(double height, double rate, double kne
 	return std::exp(u);
 }
 
-void StelEyeAdaptation::reset(double luminance)
+double StelEyeAdaptation::mesopicLuminance(double photopic, double scotopic, double m)
 {
-	const double l = logOf(luminance);
-	cones.neural = rods.neural = l;
-	cones.photo = (l > CONES_BLEACH_LEVEL) ? l : MIN_LOG_LUMINANCE;
-	rods.photo = (l > RODS_BLEACH_LEVEL) ? rodsPhotoTarget(l) : MIN_LOG_LUMINANCE;
-	updateDerived(l);
+	return (m*photopic + (1. - m)*scotopic*MESOPIC_V0) / (m + (1. - m)*MESOPIC_V0);
 }
 
-void StelEyeAdaptation::update(double luminance, double dt)
+double StelEyeAdaptation::mesopicAdaptation(double photopic, double scotopic)
 {
-	const double l = logOf(luminance);
+	// The iteration of CIE 191:2010, from the middle
+	double m = 0.5;
+	for (int i=0; i<40; ++i)
+	{
+		const double lmes = std::max(1e-12, mesopicLuminance(photopic, scotopic, m));
+		const double next = std::clamp(MESOPIC_A + MESOPIC_B*std::log10(lmes), 0., 1.);
+		if (std::fabs(next - m) < 1e-6)
+			return next;
+		m = next;
+	}
+	return m;
+}
+
+void StelEyeAdaptation::reset(double photopic, double scotopic)
+{
+	const double lc = logOf(photopic), lr = logOf(scotopic);
+	cones.neural = lc;
+	rods.neural = lr;
+	cones.photo = (lc > CONES_BLEACH_LEVEL) ? lc : MIN_LOG_LUMINANCE;
+	rods.photo = (lr > RODS_BLEACH_LEVEL) ? rodsPhotoTarget(lr) : MIN_LOG_LUMINANCE;
+	updateDerived(lc, lr);
+}
+
+void StelEyeAdaptation::update(double photopic, double scotopic, double dt)
+{
+	const double lc = logOf(photopic), lr = logOf(scotopic);
 	if (!(dt > 0.))
 	{
-		updateDerived(l);
+		updateDerived(lc, lr);
 		return;
 	}
 	// After more than a few hours the eye is adapted, whatever it saw before
 	if (dt > 6.*3600.)
 	{
-		reset(luminance);
+		reset(photopic, scotopic);
 		return;
 	}
 
 	// The neural levels: light adaptation within a fraction of a second, the first part of the dark adaptation
 	// within seconds (the cones) or a few minutes (the rods)
-	if (l >= cones.neural)
-		cones.neural = approach(cones.neural, l, dt, CONES_LIGHT_TIME);
+	if (lc >= cones.neural)
+		cones.neural = approach(cones.neural, lc, dt, CONES_LIGHT_TIME);
 	else
-		cones.neural = approach(cones.neural, l, dt, CONES_NEURAL_DARK_TIME);
-	if (l >= rods.neural)
-		rods.neural = approach(rods.neural, l, dt, RODS_LIGHT_TIME);
+		cones.neural = approach(cones.neural, lc, dt, CONES_NEURAL_DARK_TIME);
+	if (lr >= rods.neural)
+		rods.neural = approach(rods.neural, lr, dt, RODS_LIGHT_TIME);
 	else
-		rods.neural = l + fallRateLimited(rods.neural - l, RODS_NEURAL_DARK_RATE, RODS_REGENERATION_KNEE, dt);
+		rods.neural = lr + fallRateLimited(rods.neural - lr, RODS_NEURAL_DARK_RATE, RODS_REGENERATION_KNEE, dt);
 
 	// The photochemical levels: bleaching by bright light, regeneration of the pigment in the dark
-	const double conesTarget = l;
-	if (l > CONES_BLEACH_LEVEL && conesTarget > cones.photo)
-		cones.photo = approach(std::max(cones.photo, CONES_BLEACH_LEVEL), conesTarget, dt, BLEACH_TIME);
-	else if (cones.photo > l)
-		cones.photo = approach(cones.photo, l, dt, CONES_REGENERATION_TIME);
-	const double rodsTarget = rodsPhotoTarget(l);
-	if (l > RODS_BLEACH_LEVEL && rodsTarget > rods.photo)
+	if (lc > CONES_BLEACH_LEVEL && lc > cones.photo)
+		cones.photo = approach(std::max(cones.photo, CONES_BLEACH_LEVEL), lc, dt, BLEACH_TIME);
+	else if (cones.photo > lc)
+		cones.photo = approach(cones.photo, lc, dt, CONES_REGENERATION_TIME);
+	const double rodsTarget = rodsPhotoTarget(lr);
+	if (lr > RODS_BLEACH_LEVEL && rodsTarget > rods.photo)
 		rods.photo = approach(std::max(rods.photo, RODS_BLEACH_LEVEL), rodsTarget, dt, BLEACH_TIME);
-	else if (rods.photo > l)
-		rods.photo = l + fallRateLimited(rods.photo - l, RODS_REGENERATION_RATE, RODS_REGENERATION_KNEE, dt);
-	updateDerived(l);
+	else if (rods.photo > lr)
+		rods.photo = lr + fallRateLimited(rods.photo - lr, RODS_REGENERATION_RATE, RODS_REGENERATION_KNEE, dt);
+	updateDerived(lc, lr);
 }
 
-void StelEyeAdaptation::updateDerived(double logLuminance)
+void StelEyeAdaptation::updateDerived(double logPhotopic, double logScotopic)
 {
+	// The thresholds for a test light of the spectrum of the view, in photopic units
+	scotopicRatio = std::clamp(std::pow(10., logScotopic - logPhotopic), 1e-3, 1e3);
 	const double tc = conesThreshold(std::pow(10., cones.level()));
-	const double tr = rodsThreshold(std::pow(10., rods.level()));
+	const double tr = rodsThreshold(std::pow(10., rods.level()))/scotopicRatio;
 	threshold = std::min(tc, tr);
 	limitingSystem = (tr < tc) ? Rods : Cones;
-	adaptationLuminance = luminanceForThreshold(threshold);
-	thresholdElevation = std::max(0., std::log10(threshold/steadyThreshold(std::pow(10., logLuminance))));
+	adaptationLuminance = luminanceForThreshold(threshold, scotopicRatio);
+	thresholdElevation = std::max(0., std::log10(threshold/steadyThreshold(std::pow(10., logPhotopic), scotopicRatio)));
+	// The mesopic adaptation: CIE 191:2010 for the light the two systems follow (their neural levels, the steady
+	// state), but at least the dominance of the cones while they are much more sensitive than the rods (after
+	// bright light the rods need minutes: until then the eye sees with the cones). The dominance goes from 1 to 0
+	// over two log units of the ratio of the thresholds (from rods 10 times less sensitive to 10 times more).
+	const double steadyM = mesopicAdaptation(std::pow(10., cones.neural), std::pow(10., rods.neural));
+	const double dominance = std::clamp(0.5 + 0.5*std::log10(tr/tc), 0., 1.);
+	mesopicM = std::max(steadyM, dominance);
 }

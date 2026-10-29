@@ -20,6 +20,7 @@
 #include "StelPhotoMeter.hpp"
 #include "StelOpenGL.hpp"
 #include "StelPainter.hpp"
+#include "StelEyeAdaptation.hpp"
 
 #include <QOpenGLContext>
 #include <QOpenGLExtraFunctions>
@@ -74,25 +75,33 @@ void main()
 	highp float sumR = 0.;
 	highp float sumB = 0.;
 	highp float brightest = 0.;
+	highp float n = 0.;
 	for (int sj = 0; sj < SUB; ++sj)
 		for (int si = 0; si < SUB; ++si)
 		{
 			highp float subSum = 0.;
+			highp float subN = 0.;
 			for (int j = 0; j < SUBSAMPLES; ++j)
 				for (int i = 0; i < SUBSAMPLES; ++i)
 				{
 					highp vec2 k = vec2(float(si*SUBSAMPLES + i), float(sj*SUBSAMPLES + j)) + 0.5;
 					ivec2 texel = clamp(ivec2(origin + k*step), ivec2(0), textureSize - ivec2(1));
-					highp vec3 c = texelFetch(scene, texel, 0).rgb;
-					c = vec3(sane(c.r), sane(c.g), sane(c.b));
+					highp vec4 t = texelFetch(scene, texel, 0);
+					// the lines and labels (their coverage in alpha) are not part of the scene
+					if (t.a > 0.02)
+						continue;
+					highp vec3 c = vec3(sane(t.r), sane(t.g), sane(t.b));
 					subSum += sane(dot(c, vec3(0.2126, 0.7152, 0.0722)));
+					subN += 1.;
 					sumR += c.r;
 					sumB += c.b;
 				}
 			sum += subSum;
-			brightest = max(brightest, subSum / float(SUBSAMPLES*SUBSAMPLES));
+			n += subN;
+			if (subN > 0.)
+				brightest = max(brightest, subSum / subN);
 		}
-	highp float n = float(SUB*SUB*SUBSAMPLES*SUBSAMPLES);
+	n = max(n, 1.);
 	FRAG_COLOR = vec4(sum / n, brightest, min(sumR / n, 1e30), min(sumB / n, 1e30));
 }
 )";
@@ -114,14 +123,18 @@ void main()
 	ivec2 hi = max(lo + ivec2(1), sceneOrigin + ((cell + ivec2(1))*sceneSize)/GRID);
 	hi = min(hi, textureSize);
 	highp float sum = 0.;
+	highp float n = 0.;
 	for (int y = lo.y; y < hi.y; ++y)
 		for (int x = lo.x; x < hi.x; ++x)
 		{
-			highp vec3 c = texelFetch(scene, ivec2(x, y), 0).rgb;
+			highp vec4 c = texelFetch(scene, ivec2(x, y), 0);
+			// the lines and labels (their coverage in alpha) are not part of the scene
+			if (c.a > 0.02)
+				continue;
 			sum += sane(dot(vec3(sane(c.r), sane(c.g), sane(c.b)), vec3(0.2126, 0.7152, 0.0722)));
+			n += 1.;
 		}
-	highp float n = float(max(1, (hi.x - lo.x)*(hi.y - lo.y)));
-	FRAG_COLOR = vec4(min(sum / n, 1e30), 0., 0., 0.);
+	FRAG_COLOR = vec4(min(sum / max(n, 1.), 1e30), 0., 0., 0.);
 }
 )";
 
@@ -302,8 +315,9 @@ StelPhotoMeter::Reading StelPhotoMeter::evaluate(const float* cells, int w, int 
 
 	double sumAll = 0., sumCenter = 0., weightCenter = 0., sumSpot = 0., weightSpot = 0., maxCell = 0.;
 	double grey[3] = {0., 0., 0.};
-	std::vector<double> segments;
+	std::vector<double> segments, scotopicSegments;
 	segments.reserve(GRID*GRID);
+	scotopicSegments.reserve(GRID*GRID);
 	const auto sane = [](double x) { return (x >= 0. && std::isfinite(x)) ? x : 0.; };
 	for (int j=0; j<GRID; ++j)
 	{
@@ -331,6 +345,7 @@ StelPhotoMeter::Reading StelPhotoMeter::evaluate(const float* cells, int w, int 
 			const double red = sane(static_cast<double>(cells[4*(j*GRID+i)+2]));
 			const double blue = sane(static_cast<double>(cells[4*(j*GRID+i)+3]));
 			const double green = std::max(0., (m - 0.2126*red - 0.0722*blue)/0.7152);
+			scotopicSegments.push_back(StelEyeAdaptation::scotopicLuminance(red, green, blue));
 			if (red < clipLevel && green < clipLevel && blue < clipLevel)
 			{
 				grey[0] += red;
@@ -344,18 +359,20 @@ StelPhotoMeter::Reading StelPhotoMeter::evaluate(const float* cells, int w, int 
 	r.spot = weightSpot > 0. ? sumSpot/weightSpot : meanAll;
 	r.highlight = maxCell;
 	// The log-average without the brightest 2% of the segments. A black segment counts as a thousandth of the mean.
-	{
-		std::sort(segments.begin(), segments.end());
-		const size_t n = segments.size() - segments.size()/50;
+	const auto logAverage = [](std::vector<double>& values) {
+		std::sort(values.begin(), values.end());
+		const size_t n = values.size() - values.size()/50;
 		double trimmedSum = 0.;
 		for (size_t k=0; k<n; ++k)
-			trimmedSum += segments[k];
+			trimmedSum += values[k];
 		const double floor = 1e-3*trimmedSum/static_cast<double>(std::max<size_t>(1, n));
 		double logSum = 0.;
 		for (size_t k=0; k<n; ++k)
-			logSum += std::log(std::max(segments[k], floor));
-		r.logMean = (n > 0 && floor > 0.) ? std::exp(logSum/static_cast<double>(n)) : 0.;
-	}
+			logSum += std::log(std::max(values[k], floor));
+		return (n > 0 && floor > 0.) ? std::exp(logSum/static_cast<double>(n)) : 0.;
+	};
+	r.logMean = logAverage(segments);
+	r.logMeanScotopic = logAverage(scotopicSegments);
 	r.greyRed = grey[0];
 	r.greyGreen = grey[1];
 	r.greyBlue = grey[2];

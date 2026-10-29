@@ -425,6 +425,8 @@ void StelSkyDrawer::applyPhotoMeterReading(const StelPhotoMeter::Reading& readin
 			return;
 		// The log-average of the view: small bright parts (the Sun, the labels) hardly count
 		const double luminance = qMax(1e-8, reading.logMean / reading.sceneScale); // cd/m^2
+		// and what the rods see of it (scotopic cd/m^2)
+		const double scotopic = qMax(1e-8, reading.logMeanScotopic / reading.sceneScale);
 		const double jd = core->getJD();
 		// The pupil first: the adaptation gets the light it lets in, as the light of an observer of the reference
 		// age (whose thresholds the model has)
@@ -432,7 +434,7 @@ void StelSkyDrawer::applyPhotoMeterReading(const StelPhotoMeter::Reading& readin
 		{
 			eyePupil.reset(luminance, eyeAge);
 			eyeLightFactor = eyePupil.getLightFactor(luminance);
-			eyeAdaptation.reset(luminance*eyeLightFactor);
+			eyeAdaptation.reset(luminance*eyeLightFactor, scotopic*eyeLightFactor);
 			eyeAdaptationFresh = false;
 		}
 		else
@@ -441,7 +443,7 @@ void StelSkyDrawer::applyPhotoMeterReading(const StelPhotoMeter::Reading& readin
 			const double dt = qMax(qMax(0., deltaTime), std::fabs(jd - eyeAdaptationLastJD)*86400.);
 			eyePupil.update(luminance, eyeAge, dt);
 			eyeLightFactor = eyePupil.getLightFactor(luminance);
-			eyeAdaptation.update(luminance*eyeLightFactor, dt);
+			eyeAdaptation.update(luminance*eyeLightFactor, scotopic*eyeLightFactor, dt);
 		}
 		eyeAdaptationLastJD = jd;
 		return;
@@ -615,9 +617,13 @@ void StelSkyDrawer::drawPhotoInfoLine(StelCore* core) const
 		QLocale locale;
 		locale.setNumberOptions(QLocale::OmitGroupSeparator);
 		const QString value = (L >= 1e-3) ? locale.toString(L, 'f', decimals) : locale.toString(L, 'e', 1);
-		parts << QString("%1 %2 cd/m%3 (%4)").arg(qc_("adapted to", "eye: adaptation luminance"), value, QChar(0x00B2),
-		                                          eyeAdaptation.getLimitingSystem() == StelEyeAdaptation::Rods ? qc_("rods", "eye: rod vision")
-		                                                                                                    : qc_("cones", "eye: cone vision"));
+		// The vision: with the cones, the rods, or both (mesopic, with the share of the cones)
+		const double m = eyeAdaptation.getMesopicM();
+		const QString vision = (m >= 0.995) ? qc_("cones", "eye: cone vision")
+		                     : (m <= 0.005) ? qc_("rods", "eye: rod vision")
+		                                    : QString("%1 %2 %").arg(qc_("mesopic", "eye: vision with the cones and the rods, with the share of the cones"),
+		                                                              QString::number(qRound(100.*m)));
+		parts << QString("%1 %2 cd/m%3 (%4)").arg(qc_("adapted to", "eye: adaptation luminance"), value, QChar(0x00B2), vision);
 		const double elevation = 2.5*eyeAdaptation.getThresholdElevation();
 		if (elevation >= 0.05)
 			parts << QString("%1 +%2 mag").arg(qc_("dark adaptation", "eye: how much brighter the faintest visible star is than when adapted"),

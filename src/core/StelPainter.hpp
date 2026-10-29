@@ -262,6 +262,11 @@ public:
 	void setAnnotation(bool b) {annotationOverride = b ? 1 : 0;}
 	//! Go back to the default classification of annotation vs. sky (see setAnnotation()).
 	void resetAnnotation() {annotationOverride = -1;}
+	//! The scene of the photographic and naked eye modes marks the lines and labels it holds: their coverage is
+	//! written into its alpha channel (which nothing else writes then, see StelApp), so that the final stage and
+	//! the meters can tell them from the sky. Only text and plain lines and polygons are marked (not textures).
+	static void setAnnotationCoverage(bool b) {annotationCoverageActive = b;}
+	static bool getAnnotationCoverage() {return annotationCoverageActive;}
 
 	//! Marks everything a painter draws as annotation (or as sky) while this object exists,
 	//! and restores the previous classification when it goes out of scope.
@@ -476,6 +481,11 @@ private:
 	//! The current color as it has to be passed to the shaders, with the compensation for the
 	//! photographic mode applied if the drawing is an annotation.
 	QVector4D shaderColor(bool annotationByDefault) const;
+	//! See setAnnotationCoverage(): write the coverage of the next drawing into alpha, and stop after it
+	void openAnnotationCoverage() const;
+	void closeAnnotationCoverage();
+	mutable bool annotationCoverageOpen = false;
+	static bool annotationCoverageActive;
 	//! Saturation effect adjustment.
 	float saturation = 1.f;
 	float textureGamma = 1.f;

@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>420</width>
-    <height>400</height>
+    <height>470</height>
    </rect>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
@@ -225,6 +225,22 @@
       </item>
       <item>
        <widget class="QLabel" name="adaptationInfoLabel">
+        <property name="minimumSize">
+         <size>
+          <width>0</width>
+          <height>40</height>
+         </size>
+        </property>
+        <property name="text">
+         <string notr="true"/>
+        </property>
+        <property name="wordWrap">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLabel" name="mesopicInfoLabel">
         <property name="text">
          <string notr="true"/>
         </property>

@@ -260,12 +260,42 @@ void StelPainter::setColor(Vec4f rgba)
 	currentColor=rgba;
 }
 
+bool StelPainter::annotationCoverageActive = false;
+
+void StelPainter::openAnnotationCoverage() const
+{
+	if (annotationCoverageOpen)
+		return;
+	QOpenGLContext* ctx = QOpenGLContext::currentContext();
+	if (!ctx)
+		return;
+	QOpenGLFunctions* f = ctx->functions();
+	f->glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	// the coverage adds up like opacity, whatever the blending of the color
+	if (glState.blend)
+		f->glBlendFuncSeparate(glState.blendSrc, glState.blendDst, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+	annotationCoverageOpen = true;
+}
+
+void StelPainter::closeAnnotationCoverage()
+{
+	if (!annotationCoverageOpen)
+		return;
+	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
+	if (glState.blend)
+		glBlendFunc(glState.blendSrc, glState.blendDst);
+	annotationCoverageOpen = false;
+}
+
 QVector4D StelPainter::shaderColor(bool annotationByDefault) const
 {
 	const QVector4D c = colorToShader(currentColor);
 	const bool annotation = annotationOverride < 0 ? annotationByDefault : annotationOverride == 1;
 	if (!annotation)
 		return c;
+	// text and plain lines: mark their coverage (see setAnnotationCoverage())
+	if (annotationCoverageActive && annotationByDefault)
+		openAnnotationCoverage();
 	const StelCore* core = StelApp::getInstance().getCore();
 	const StelSkyDrawer* drawer = core ? core->getSkyDrawer() : nullptr;
 	if (!drawer || !drawer->getFlagPhotographicModeActive())
@@ -916,6 +946,7 @@ void StelPainter::drawText(float x, float y, const QString& str, float angleDeg,
 		pr.enableAttributeArray(textShaderVars.texCoord);
 
 		glDrawArrays(TriangleStrip, 0, vertexCount);
+		closeAnnotationCoverage();
 
 		verticesVBO->release();
 		vao->release();
@@ -2944,6 +2975,7 @@ void StelPainter::drawFixedColorWideLinesAsQuads(const ArrayDesc& vertexArray, i
 
 	// TODO: convert this to a triangle strip, but mind the overlaps and gaps of non-parallel lines' corners
 	glDrawArrays(GL_TRIANGLES, 0, newVertices.size());
+	closeAnnotationCoverage();
 
 	verticesVBO->release();
 	vao->release();
@@ -3158,6 +3190,7 @@ void StelPainter::drawFromArray(DrawingMode mode, int count, int offset, bool do
 		glDrawElements(mode, count, GL_UNSIGNED_SHORT, 0);
 	else
 		glDrawArrays(mode, offset, count);
+	closeAnnotationCoverage();
 
 	verticesVBO->release();
 	indicesVBO->release();

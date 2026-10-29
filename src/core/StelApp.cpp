@@ -921,6 +921,26 @@ QByteArray makeCameraResponseShader()
 	       QByteArray::number(StelSkyDrawer::PHOTO_SHOULDER_KNEE, 'f', 6) + ";\n" + R"(
 uniform bool photoMode;
 uniform highp float photoExposure;
+// The coverage of the lines and labels in the pixel (the alpha of the scene, see StelPainter::setAnnotationCoverage())
+highp float annotationCoverage = 0.;
+// Naked eye mode: the mesopic vision (CIE 191:2010). The input of the response of the retina is the mesopic
+// luminance for the share m of the cones, relative to that of the adapting field (eyeMesopicNorm), and the
+// colors fade as m goes to 0 (the rods do not see color). Lines and labels keep their colors.
+uniform bool eyeMesopic;
+uniform highp float eyeMesopicM;
+uniform highp float eyeMesopicNorm;
+uniform highp vec3 eyeScotopicWeights;
+uniform highp float eyeMesopicV0;
+highp vec3 eyeMesopicVision(highp vec3 x)
+{
+	highp float lp = dot(x, vec3(0.2126, 0.7152, 0.0722));
+	highp float ls = max(0., dot(x, eyeScotopicWeights));
+	highp float m = eyeMesopicM;
+	highp float lmes = (m*lp + (1. - m)*ls*eyeMesopicV0) / (m + (1. - m)*eyeMesopicV0) * eyeMesopicNorm;
+	highp vec3 color = lp > 0. ? x/lp : vec3(1.);
+	highp vec3 seen = lmes * mix(vec3(1.), color, m);
+	return mix(seen, x, annotationCoverage);
+}
 // Tone curve: 0 = linear with a soft shoulder; otherwise y = x^a / (x^(a*d)*b + c) up to the
 // clipping point (white above). photoTone = (a, a*d, b, c), see StelSkyDrawer::PhotoToneParams
 uniform int photoToneCurve;
@@ -1119,6 +1139,8 @@ highp vec3 cameraResponse(highp vec3 lin)
 	if (photoNoise)
 		sensor = sensorNoise(sensor, gl_FragCoord.xy);
 	highp vec3 x = min(max((photoWhiteBalance * sensor) * photoExposure, vec3(0)), vec3(1e30));
+	if (eyeMesopic)
+		x = eyeMesopicVision(x);
 	if (photoRecip)
 		x = filmReciprocity(x);
 	if (photoToneCurve != 0)
@@ -1155,6 +1177,23 @@ void setPhotoToneUniforms(QOpenGLShaderProgram& program, const StelSkyDrawer& dr
 	program.setUniformValue("photoLensShift", StelSkyDrawer::PHOTO_VIGNETTING_SHIFT);
 	const Vec4f frame = drawer.getPhotoFrame(prj);
 	program.setUniformValue("photoFrameMask", drawer.getFlagPhotoFrameMask() && drawer.getFlagPhotoCameraActive());
+	// Naked eye mode: the mesopic vision
+	const bool eye = drawer.getFlagNakedEyeModeActive();
+	program.setUniformValue("eyeMesopic", eye);
+	if (eye)
+	{
+		const StelEyeAdaptation& adaptation = drawer.getEyeAdaptation();
+		const double m = adaptation.getMesopicM();
+		const double k = adaptation.getScotopicRatio();
+		constexpr double v0 = StelEyeAdaptation::MESOPIC_V0;
+		// The adapting field (photopic luminance 1, scotopic k) keeps its value: the semi-saturation is set for it
+		const double field = StelEyeAdaptation::mesopicLuminance(1., k, m);
+		program.setUniformValue("eyeMesopicM", static_cast<float>(m));
+		program.setUniformValue("eyeMesopicNorm", static_cast<float>(field > 0. ? 1./field : 1.));
+		program.setUniformValue("eyeScotopicWeights", static_cast<float>(StelEyeAdaptation::SCOTOPIC_RED),
+		                        static_cast<float>(StelEyeAdaptation::SCOTOPIC_GREEN), static_cast<float>(StelEyeAdaptation::SCOTOPIC_BLUE));
+		program.setUniformValue("eyeMesopicV0", static_cast<float>(v0));
+	}
 	program.setUniformValue("photoFrame", QVector4D(frame[0], frame[1], frame[0] + frame[2], frame[1] + frame[3]));
 	const StelSkyDrawer::PhotoToneParams& p = drawer.getPhotoToneParams();
 	program.setUniformValue("photoToneCurve", drawer.getPhotoActiveToneCurve());
@@ -1263,7 +1302,8 @@ void main()
 	if (halationEnabled)
 		extra += halationAmount * texture2D(halationTex, texcoord * halationScale).rgb;
 	rgba.rgb += extra;
-	FRAG_COLOR = vec4(dither(photoFrameMasked(linearToSRGB(cameraResponse(rgba.rgb)), gl_FragCoord.xy)), rgba.a);
+	annotationCoverage = photoMode ? clamp(rgba.a, 0., 1.) : 0.;
+	FRAG_COLOR = vec4(dither(photoFrameMasked(linearToSRGB(cameraResponse(rgba.rgb)), gl_FragCoord.xy)), photoMode ? 1. : rgba.a);
 }
 )");
 	StelPainter::linkProg(postProcessorProgram.get(), "Post-processing program");
@@ -1311,7 +1351,8 @@ void main()
 	for(int n = 0; n < numMultiSamples; ++n)
 		rgba += texelFetch(tex, ivec2(gl_FragCoord.xy), n);
 	rgba /= float(numMultiSamples);
-	FRAG_COLOR = vec4(dither(photoFrameMasked(linearToSRGB(cameraResponse(rgba.rgb)), gl_FragCoord.xy)), rgba.a);
+	annotationCoverage = photoMode ? clamp(rgba.a, 0., 1.) : 0.;
+	FRAG_COLOR = vec4(dither(photoFrameMasked(linearToSRGB(cameraResponse(rgba.rgb)), gl_FragCoord.xy)), photoMode ? 1. : rgba.a);
 }
 )");
 		StelPainter::linkProg(postProcessorProgramMS.get(), "Multisampled post-processing program");
@@ -1427,6 +1468,14 @@ void StelApp::highGraphicsModeDraw()
 
 	GL(gl->glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT));
 
+	// Photographic and naked eye modes: the alpha channel of the scene (cleared to 0) holds the coverage of the
+	// lines and labels only (see StelPainter::setAnnotationCoverage()), for the final stage and the meters
+	if (photoMode)
+	{
+		GL(gl->glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE));
+		StelPainter::setAnnotationCoverage(true);
+	}
+
 	const QList<StelModule*> modules = moduleMgr->getCallOrders(StelModule::ActionDraw);
 
 	for(auto* module : modules)
@@ -1437,6 +1486,11 @@ void StelApp::highGraphicsModeDraw()
 	// Photographic mode: halo and spikes of the bright bodies, over everything (also the landscape)
 	if (photoMode)
 		core->getSkyDrawer()->drawDeferredPhotoBodies(core);
+	if (photoMode)
+	{
+		StelPainter::setAnnotationCoverage(false);
+		GL(gl->glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE));
+	}
 
 	// Photographic mode: the lens halo of the whole image (bloom)
 	bool bloomDone = false;

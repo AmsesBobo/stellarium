@@ -42,6 +42,8 @@ class QOpenGLVertexArrayObject;
 //! - spot: a central circle of 2.5% of the image area
 //! - highlight: the brightest sub-segment (each segment is divided into 4 x 4 for this)
 //! It also sums up the colors of the segments for the automatic white balance (grey world).
+//! The lines and labels drawn over the sky (marked in the alpha channel of the scene, see StelPainter) are left
+//! out: the meter sees the scene alone.
 class StelPhotoMeter
 {
 public:
@@ -57,6 +59,8 @@ public:
 		//! image, which the adaptation of the eye follows (small bright parts, such as the disk of the Sun or the
 		//! lines and labels drawn over the sky, hardly count)
 		double logMean = 0.;
+		//! The same for the scotopic luminance (see StelEyeAdaptation::scotopicLuminance()), in scene units
+		double logMeanScotopic = 0.;
 		double sceneScale = 0.;     //!< scene units per cd/m^2 of the frame that was measured
 		double exposureTime = 0.;   //!< exposure time of the frame that was measured (seconds)
 		//! Sum of the linear red, green and blue of the segments that do not saturate (grey world white balance)
