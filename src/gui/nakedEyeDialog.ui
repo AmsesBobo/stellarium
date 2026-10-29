@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>420</width>
-    <height>340</height>
+    <height>400</height>
    </rect>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
@@ -119,6 +119,63 @@
          <string notr="true"/>
         </property>
        </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="screenGroupBox">
+     <property name="title">
+      <string>Screen</string>
+     </property>
+     <layout class="QGridLayout" name="screenLayout">
+      <item row="0" column="0">
+       <widget class="QLabel" name="displayLuminanceLabel">
+        <property name="toolTip">
+         <string>The luminance of white on the screen (about 100 cd/m² for an office screen, 20 to 50 cd/m² for a screen dimmed in a dark room). A dim screen needs a brighter picture: the eye of the viewer is less sensitive to contrast there.</string>
+        </property>
+        <property name="text">
+         <string>Brightness of white:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QDoubleSpinBox" name="displayLuminanceSpinBox">
+        <property name="toolTip">
+         <string>The luminance of white on the screen (about 100 cd/m² for an office screen, 20 to 50 cd/m² for a screen dimmed in a dark room). A dim screen needs a brighter picture: the eye of the viewer is less sensitive to contrast there.</string>
+        </property>
+        <property name="suffix">
+         <string> cd/m²</string>
+        </property>
+        <property name="decimals">
+         <number>0</number>
+        </property>
+        <property name="minimum">
+         <double>5.000000000000000</double>
+        </property>
+        <property name="maximum">
+         <double>1000.000000000000000</double>
+        </property>
+        <property name="singleStep">
+         <double>5.000000000000000</double>
+        </property>
+        <property name="value">
+         <double>100.000000000000000</double>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="2">
+       <spacer name="screenSpacer">
+        <property name="orientation">
+         <enum>Qt::Horizontal</enum>
+        </property>
+        <property name="sizeHint" stdset="0">
+         <size>
+          <width>40</width>
+          <height>20</height>
+         </size>
+        </property>
+       </spacer>
       </item>
      </layout>
     </widget>

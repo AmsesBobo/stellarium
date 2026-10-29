@@ -63,6 +63,8 @@ void NakedEyeDialog::createDialogContent()
 	connectBoolProperty(ui->infoLineCheckBox, "StelSkyDrawer.flagPhotoInfoLine");
 	ui->ageSpinBox->setRange(StelSkyDrawer::EYE_MIN_AGE, StelSkyDrawer::EYE_MAX_AGE);
 	connectDoubleProperty(ui->ageSpinBox, "StelSkyDrawer.eyeAge");
+	ui->displayLuminanceSpinBox->setRange(StelSkyDrawer::EYE_MIN_DISPLAY_LUMINANCE, StelSkyDrawer::EYE_MAX_DISPLAY_LUMINANCE);
+	connectDoubleProperty(ui->displayLuminanceSpinBox, "StelSkyDrawer.eyeDisplayLuminance");
 	StelSkyDrawer* drawer = StelApp::getInstance().getCore()->getSkyDrawer();
 	connect(ui->adaptNowPushButton, &QPushButton::clicked, drawer, &StelSkyDrawer::resetEyeAdaptation);
 

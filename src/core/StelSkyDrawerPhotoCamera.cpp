@@ -56,6 +56,16 @@ void StelSkyDrawer::setFlagEyeInstantAdaptation(bool b)
 	emit flagEyeInstantAdaptationChanged(b);
 }
 
+void StelSkyDrawer::setEyeDisplayLuminance(double luminance)
+{
+	luminance = qBound(EYE_MIN_DISPLAY_LUMINANCE, luminance, EYE_MAX_DISPLAY_LUMINANCE);
+	if (qFuzzyCompare(luminance, eyeDisplayLuminance))
+		return;
+	eyeDisplayLuminance = luminance;
+	StelApp::immediateSave("viewing/naked_eye_display_luminance", luminance);
+	emit eyeDisplayLuminanceChanged(luminance);
+}
+
 void StelSkyDrawer::setEyeAge(double years)
 {
 	years = qBound(EYE_MIN_AGE, years, EYE_MAX_AGE);
@@ -277,7 +287,7 @@ float StelSkyDrawer::photoToneCurveValue(float x) const
 			return x;
 		return knee + (1.f-knee)*(1.f - std::exp(-(x-knee)/(1.f-knee)));
 	}
-	const PhotoToneParams& p = photoToneParams;
+	const PhotoToneParams& p = getPhotoToneParams();
 	if (x >= p.clip)
 		return 1.f;
 	return std::pow(x, p.a) / (std::pow(x, p.ad)*p.b + p.c);
@@ -289,6 +299,14 @@ float StelSkyDrawer::photoToneCurveInverse(float y) const
 		return invertPhotoShoulder(qMax(0.f, y));
 	if (!(y > 0.f))
 		return 0.f;
+	// The response of the retina: y = x^n / (x^n + 1)
+	if (getPhotoActiveToneCurve() == PhotoToneEye)
+	{
+		const PhotoToneParams& p = eyeToneParams();
+		if (y >= 1.f)
+			return p.clip;
+		return qMin(p.clip, std::pow(y/(1.f - y), 1.f/p.a));
+	}
 	if (y >= 1.f)
 		return photoToneParams.clip;
 	// The curve rises monotonically from 0 to 1 between 0 and the clipping point: bisection
@@ -750,6 +768,7 @@ void StelSkyDrawer::savePhotoSettings(QSettings* conf) const
 	conf->setValue("viewing/flag_naked_eye_mode", getFlagNakedEyeMode());
 	conf->setValue("viewing/flag_naked_eye_instant_adaptation", getFlagEyeInstantAdaptation());
 	conf->setValue("viewing/naked_eye_age", getEyeAge());
+	conf->setValue("viewing/naked_eye_display_luminance", getEyeDisplayLuminance());
 	conf->setValue("viewing/photographic_exposure_ev", getPhotoExposureEV());
 	conf->setValue("viewing/photographic_exposure_time", getPhotoExposureTime());
 	conf->setValue("viewing/photographic_aperture", photoProgramRunning ? photoUserAperture : photoAperture);
@@ -814,6 +833,11 @@ void StelSkyDrawer::setPhotoToneCurve(int curve)
 Vec3f StelSkyDrawer::photoAnnotationCompensation(const Vec3f& linearColor) const
 {
 	const float invExposure = 1.f / getPhotoExposureFactor();
+	// The eye: no white balance, the inverse of the response of the retina
+	if (getFlagNakedEyeModeActive())
+		return Vec3f(photoToneCurveInverse(qBound(0.f, linearColor[0], 0.998f)) * invExposure,
+		             photoToneCurveInverse(qBound(0.f, linearColor[1], 0.998f)) * invExposure,
+		             photoToneCurveInverse(qBound(0.f, linearColor[2], 0.998f)) * invExposure);
 	// Undo the white balance as well (the camera stage applies it before the tone curve)
 	const auto unbalance = [this](const Vec3f& v) {
 		const float* m = photoWBInverse;

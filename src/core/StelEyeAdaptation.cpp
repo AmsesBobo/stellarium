@@ -161,7 +161,7 @@ void StelEyeAdaptation::updateDerived(double logLuminance)
 {
 	const double tc = conesThreshold(std::pow(10., cones.level()));
 	const double tr = rodsThreshold(std::pow(10., rods.level()));
-	const double threshold = std::min(tc, tr);
+	threshold = std::min(tc, tr);
 	limitingSystem = (tr < tc) ? Rods : Cones;
 	adaptationLuminance = luminanceForThreshold(threshold);
 	thresholdElevation = std::max(0., std::log10(threshold/steadyThreshold(std::pow(10., logLuminance))));

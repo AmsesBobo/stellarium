@@ -52,6 +52,8 @@ public:
 
 	//! The effective adaptation luminance (cd/m^2), see the class description
 	double getAdaptationLuminance() const {return adaptationLuminance;}
+	//! The increment threshold of the eye now (cd/m^2)
+	double getThreshold() const {return threshold;}
 	//! How much higher the threshold of the eye is than when fully adapted to the current light (log10 units,
 	//! 0 when adapted; times 2.5 it is in magnitudes)
 	double getThresholdElevation() const {return thresholdElevation;}
@@ -113,6 +115,7 @@ private:
 
 	Levels cones, rods;
 	double adaptationLuminance = 1e-3;
+	double threshold = 1e-3;
 	double thresholdElevation = 0.;
 	System limitingSystem = Rods;
 };

@@ -302,6 +302,8 @@ StelPhotoMeter::Reading StelPhotoMeter::evaluate(const float* cells, int w, int 
 
 	double sumAll = 0., sumCenter = 0., weightCenter = 0., sumSpot = 0., weightSpot = 0., maxCell = 0.;
 	double grey[3] = {0., 0., 0.};
+	std::vector<double> segments;
+	segments.reserve(GRID*GRID);
 	const auto sane = [](double x) { return (x >= 0. && std::isfinite(x)) ? x : 0.; };
 	for (int j=0; j<GRID; ++j)
 	{
@@ -319,6 +321,7 @@ StelPhotoMeter::Reading StelPhotoMeter::evaluate(const float* cells, int w, int 
 			const double inCenter = std::clamp((centerRadius-d)/softness + 0.5, 0., 1.);
 			const double inSpot = std::clamp((spotRadius-d)/softness + 0.5, 0., 1.);
 			sumAll += m;
+			segments.push_back(m);
 			sumCenter += inCenter*m;
 			weightCenter += inCenter;
 			sumSpot += inSpot*m;
@@ -340,6 +343,19 @@ StelPhotoMeter::Reading StelPhotoMeter::evaluate(const float* cells, int w, int 
 	r.centerWeighted = weightCenter > 0. ? 0.25*meanAll + 0.75*sumCenter/weightCenter : meanAll;
 	r.spot = weightSpot > 0. ? sumSpot/weightSpot : meanAll;
 	r.highlight = maxCell;
+	// The log-average without the brightest 2% of the segments. A black segment counts as a thousandth of the mean.
+	{
+		std::sort(segments.begin(), segments.end());
+		const size_t n = segments.size() - segments.size()/50;
+		double trimmedSum = 0.;
+		for (size_t k=0; k<n; ++k)
+			trimmedSum += segments[k];
+		const double floor = 1e-3*trimmedSum/static_cast<double>(std::max<size_t>(1, n));
+		double logSum = 0.;
+		for (size_t k=0; k<n; ++k)
+			logSum += std::log(std::max(segments[k], floor));
+		r.logMean = (n > 0 && floor > 0.) ? std::exp(logSum/static_cast<double>(n)) : 0.;
+	}
 	r.greyRed = grey[0];
 	r.greyGreen = grey[1];
 	r.greyBlue = grey[2];

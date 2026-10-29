@@ -41,25 +41,56 @@
 
 double StelSkyDrawer::getPhotoMeterClipLevel() const
 {
-	const double clip = (getPhotoActiveToneCurve() == PhotoToneLinear) ? 1. : static_cast<double>(photoToneParams.clip);
+	const double clip = (getPhotoActiveToneCurve() == PhotoToneLinear) ? 1. : static_cast<double>(getPhotoToneParams().clip);
 	return clip / static_cast<double>(getPhotoExposureFactor());
 }
 
-double StelSkyDrawer::eyeAdaptationDisplayValue(double luminance)
+double StelSkyDrawer::eyeSemiSaturation(double adaptation, double threshold)
 {
-	const double L = qMax(0., luminance);
-	return PHOTO_MIDDLE_GREY * std::pow(L/(L + EYE_TONE_HALF_LUMINANCE), EYE_TONE_POWER);
+	// The response to the adaptation luminance: middle grey where the threshold follows Weber's law (as in
+	// daylight: the luminance times 10^-1.255, see StelEyeAdaptation), less where the eye is less sensitive
+	const double weber = adaptation*std::pow(10., -1.255);
+	const double relative = (threshold > 0.) ? qMin(1., weber/threshold) : 1.;
+	const double response = PHOTO_MIDDLE_GREY*std::pow(relative, EYE_BRIGHTNESS_EXPONENT);
+	// R = x^n / (x^n + 1) with x = A/s
+	const double x = std::pow(response/(1. - response), 1./EYE_RESPONSE_EXPONENT);
+	return adaptation/x;
+}
+
+double StelSkyDrawer::eyeDisplayGain(double displayLuminance)
+{
+	const auto relative = [](double white) {
+		const double adaptation = PHOTO_MIDDLE_GREY*white;
+		return StelEyeAdaptation::steadyThreshold(adaptation)/adaptation;
+	};
+	return relative(qBound(EYE_MIN_DISPLAY_LUMINANCE, displayLuminance, EYE_MAX_DISPLAY_LUMINANCE))
+	       / relative(EYE_STANDARD_DISPLAY_LUMINANCE);
+}
+
+const StelSkyDrawer::PhotoToneParams& StelSkyDrawer::eyeToneParams()
+{
+	static const PhotoToneParams p = []() {
+		PhotoToneParams t;
+		t.a = t.ad = static_cast<float>(EYE_RESPONSE_EXPONENT);
+		t.b = 1.f;
+		t.c = 1.f;
+		t.clip = 1e6f; // a response of 1 - 4e-5
+		return t;
+	}();
+	return p;
 }
 
 float StelSkyDrawer::getPhotoSceneScale() const
 {
-	// The eye: the adaptation luminance is shown at its display value (see eyeAdaptationDisplayValue())
+	// The eye: the luminance over the semi-saturation of the photoreceptors, the input of their response (the
+	// tone curve, see eyeToneParams()). The adaptation works with the light of an observer of the reference age
+	// (see getEyeAdaptationLuminance()): the scene gets there through the light factor of the pupil. The gain of
+	// the screen raises the response (s^n smaller by the gain).
 	if (getFlagNakedEyeModeActive())
 	{
-		// The adaptation works with the light of an observer of the reference age (see getEyeAdaptationLuminance()):
-		// the scene gets there through the light factor of the pupil
-		const double L = qMax(1e-7, eyeAdaptation.getAdaptationLuminance());
-		return static_cast<float>(eyeLightFactor*eyeAdaptationDisplayValue(L)/L);
+		const double s = qMax(1e-12, eyeSemiSaturation(eyeAdaptation.getAdaptationLuminance(), eyeAdaptation.getThreshold()));
+		const double gain = std::pow(eyeDisplayGain(eyeDisplayLuminance), 1./EYE_RESPONSE_EXPONENT);
+		return static_cast<float>(eyeLightFactor*gain/s);
 	}
 	// Reflected-light meter calibration constant K (ISO 2720), and middle grey
 	constexpr double K = 12.5;
@@ -392,7 +423,8 @@ void StelSkyDrawer::applyPhotoMeterReading(const StelPhotoMeter::Reading& readin
 		stopPhotoProgram();
 		if (!(reading.sceneScale > 0.))
 			return;
-		const double luminance = qMax(1e-8, reading.centerWeighted / reading.sceneScale); // cd/m^2
+		// The log-average of the view: small bright parts (the Sun, the labels) hardly count
+		const double luminance = qMax(1e-8, reading.logMean / reading.sceneScale); // cd/m^2
 		const double jd = core->getJD();
 		// The pupil first: the adaptation gets the light it lets in, as the light of an observer of the reference
 		// age (whose thresholds the model has)

@@ -98,6 +98,8 @@ class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 	Q_PROPERTY(bool flagEyeInstantAdaptation READ getFlagEyeInstantAdaptation WRITE setFlagEyeInstantAdaptation NOTIFY flagEyeInstantAdaptationChanged)
 	//! Naked eye mode: the age of the observer (years). It sets the size of the pupil (see StelEyePupil).
 	Q_PROPERTY(double eyeAge READ getEyeAge WRITE setEyeAge NOTIFY eyeAgeChanged)
+	//! Naked eye mode: the luminance of the white of the screen (cd/m^2), see eyeDisplayGain()
+	Q_PROPERTY(double eyeDisplayLuminance READ getEyeDisplayLuminance WRITE setEyeDisplayLuminance NOTIFY eyeDisplayLuminanceChanged)
 	//! Exposure correction of the photographic mode, in photographic stops (EV). 0 is the neutral exposure.
 	Q_PROPERTY(double photoExposureEV READ getPhotoExposureEV WRITE setPhotoExposureEV NOTIFY photoExposureEVChanged)
 	//! Exposure time of the virtual camera in the photographic mode, in seconds.
@@ -251,11 +253,26 @@ public:
 	//! Naked eye mode: the time the eye integrates the light over (seconds). It takes the place of the exposure
 	//! time (the motion of a body during it, for example).
 	static constexpr double EYE_INTEGRATION_TIME = 0.1;
-	//! Naked eye mode: the display value (linear, 0..1) of the adaptation luminance, a simple tone mapping until
-	//! the model of the retina takes over. Middle grey in daylight, darker at night: (L/(L + L0))^p times 0.18.
-	static double eyeAdaptationDisplayValue(double luminance);
-	static constexpr double EYE_TONE_HALF_LUMINANCE = 1.;   //!< L0 (cd/m^2)
-	static constexpr double EYE_TONE_POWER = 0.25;          //!< p
+	//! Naked eye mode: the response of the retina is shown on the screen. The photoreceptors respond to the
+	//! luminance L as R = L^n / (L^n + s^n) (Naka & Rushton 1966), with n = 0.74 (cones, Valeton & van Norren
+	//! 1983). The semi-saturation s follows the adaptation luminance A, so that the response to A itself (the
+	//! brightness of the adapting light) is middle grey in daylight, where the eye follows Weber's law, and less
+	//! where it is less sensitive than that: R(A) = 0.18 (A 10^-1.255 / T)^(1/3), T the increment threshold (see
+	//! StelEyeAdaptation), 1/3 the exponent of the brightness of Stevens (1961). The night sky, close to the
+	//! threshold of the eye, becomes dark but not black; bright light is compressed towards white.
+	static constexpr double EYE_RESPONSE_EXPONENT = 0.74;
+	static constexpr double EYE_BRIGHTNESS_EXPONENT = 1./3.;
+	//! Naked eye mode: the semi-saturation of the photoreceptors (cd/m^2) for the adaptation luminance (cd/m^2)
+	//! and the increment threshold (cd/m^2)
+	static double eyeSemiSaturation(double adaptation, double threshold);
+	//! Naked eye mode: the screen. Its white has the luminance L_w (cd/m^2), and the viewer is taken as adapted to
+	//! its middle grey. A dim screen (in a dark room) needs a brighter picture: the response is raised by the
+	//! ratio of the relative thresholds of the viewer (threshold / adaptation luminance) at this screen and at
+	//! the standard screen of 100 cd/m^2.
+	static constexpr double EYE_STANDARD_DISPLAY_LUMINANCE = 100.;
+	static constexpr double EYE_MIN_DISPLAY_LUMINANCE = 5.;
+	static constexpr double EYE_MAX_DISPLAY_LUMINANCE = 1000.;
+	static double eyeDisplayGain(double displayLuminance);
 	//! Program mode: the program line of a camera with automatic ISO, from bright to dark. In daylight the base
 	//! ISO and a medium aperture (stopped down further when 1/8000 s is not short enough); then the aperture opens
 	//! at a time that is safe by hand; then the time grows up to where the stars still stay points on a fixed
@@ -586,9 +603,9 @@ public:
 	//! The tone curve in use: the film's own (PhotoToneFilm with the film's parameters), or photoToneCurve
 	int getPhotoActiveToneCurve() const
 	{
-		// The eye: linear with the soft shoulder, until the model of the retina takes over
+		// The eye: the response of the retina
 		if (getFlagNakedEyeModeActive())
-			return static_cast<int>(PhotoToneLinear);
+			return static_cast<int>(PhotoToneEye);
 		return photoFilm != PhotoFilmNone ? static_cast<int>(PhotoToneFilm) : photoToneCurve;
 	}
 	//! The sensor format in use: a film is 35 mm (full frame)
@@ -659,7 +676,8 @@ public:
 	enum PhotoToneCurve {
 		PhotoToneLinear = 0,   //!< linear, with a soft shoulder above PHOTO_SHOULDER_KNEE (never clips)
 		PhotoToneStandard = 1, //!< like the JPEG of a camera: more contrast, clipping 3 stops above middle grey
-		PhotoToneFilm = 2      //!< like negative film: soft contrast, 6 stops of room above middle grey
+		PhotoToneFilm = 2,     //!< like negative film: soft contrast, 6 stops of room above middle grey
+		PhotoToneEye = 3       //!< the response of the retina (naked eye mode only, see EYE_RESPONSE_EXPONENT)
 	};
 	//! Parameters of a tone curve y = x^a / (x^(a*d)*b + c) for x below the clipping point, 1 above
 	//! (T. Lottes, "Advanced Techniques and Optimization of HDR Color Pipelines", GDC 2016). It maps
@@ -679,7 +697,9 @@ public:
 	//! The inverse of the tone curve in use (exact, by bisection): display value -> scene value
 	float photoToneCurveInverse(float y) const;
 	//! Parameters of the tone curve in use (not meaningful for PhotoToneLinear)
-	const PhotoToneParams& getPhotoToneParams() const {return photoToneParams;}
+	const PhotoToneParams& getPhotoToneParams() const {return getFlagNakedEyeModeActive() ? eyeToneParams() : photoToneParams;}
+	//! The response of the retina as a tone curve y = x^n / (x^n + 1), x the luminance over the semi-saturation
+	static const PhotoToneParams& eyeToneParams();
 	//! For annotations (lines, labels, markers) in the photographic mode: the linear color that has
 	//! to be written into the scene buffer so that the camera pass reproduces the given linear color
 	//! exactly, independently of the exposure.
@@ -947,6 +967,9 @@ public slots:
 	//! Naked eye mode: the age of the observer (years, 10 to 90; the formula of the pupil holds from 20 to 83)
 	void setEyeAge(double years);
 	double getEyeAge() const {return eyeAge;}
+	//! Naked eye mode: the luminance of the white of the screen (cd/m^2, 5 to 1000)
+	void setEyeDisplayLuminance(double luminance);
+	double getEyeDisplayLuminance() const {return eyeDisplayLuminance;}
 
 	//! Set the exposure time of the virtual camera, in seconds (limited to 1/8000 s ... 3600 s).
 	void setPhotoExposureTime(double seconds);
@@ -1313,6 +1336,7 @@ signals:
 	void flagNakedEyeModeChanged(bool b);
 	void flagEyeInstantAdaptationChanged(bool b);
 	void eyeAgeChanged(double years);
+	void eyeDisplayLuminanceChanged(double luminance);
 	//! Emitted when the exposure correction of the photographic mode is changed
 	void photoExposureEVChanged(double ev);
 	//! Emitted when the exposure time of the virtual camera is changed
@@ -1712,6 +1736,7 @@ private:
 	//! reading of the meter
 	StelEyePupil eyePupil;
 	double eyeAge = EYE_DEFAULT_AGE;
+	double eyeDisplayLuminance = EYE_STANDARD_DISPLAY_LUMINANCE;
 	double eyeLightFactor = 1.;
 	//! The halo of the stars in the picture (the camera's, none for the eye)
 	float getPhotoHaloFractionActive() const {return getFlagPhotoCameraActive() ? photoHaloFraction : 0.f;}

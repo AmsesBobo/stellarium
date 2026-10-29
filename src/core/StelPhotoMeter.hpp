@@ -53,6 +53,10 @@ public:
 		double centerWeighted = 0.; //!< center-weighted mean (scene units)
 		double spot = 0.;           //!< mean of the central spot (scene units)
 		double highlight = 0.;      //!< brightest sub-segment (scene units)
+		//! Geometric mean of the segments, without the brightest 2% of them (scene units): the "log-average" of the
+		//! image, which the adaptation of the eye follows (small bright parts, such as the disk of the Sun or the
+		//! lines and labels drawn over the sky, hardly count)
+		double logMean = 0.;
 		double sceneScale = 0.;     //!< scene units per cd/m^2 of the frame that was measured
 		double exposureTime = 0.;   //!< exposure time of the frame that was measured (seconds)
 		//! Sum of the linear red, green and blue of the segments that do not saturate (grey world white balance)
