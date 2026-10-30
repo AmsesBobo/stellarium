@@ -57,6 +57,8 @@ private:
 private slots:
 	void setStandardAtmosphere();
 	void setTfromK(double k);
+	//! Show the pressure and temperature in use at the observer
+	void updateEffectiveAtmosphere();
 };
 
 #endif // ATMOSPHEREDIALOG_HPP

@@ -1404,6 +1404,7 @@ void ConfigurationDialog::saveAllSettings()
 	conf->setValue("landscape/atmospheric_extinction_coefficient",	propMgr->getStelPropertyValue("StelSkyDrawer.extinctionCoefficient").toFloat());
 	conf->setValue("landscape/pressure_mbar",			propMgr->getStelPropertyValue("StelSkyDrawer.atmospherePressure").toFloat());
 	conf->setValue("landscape/temperature_C",			propMgr->getStelPropertyValue("StelSkyDrawer.atmosphereTemperature").toFloat());
+	conf->setValue("landscape/flag_atmosphere_from_altitude",	propMgr->getStelPropertyValue("StelSkyDrawer.flagAtmosphereFromAltitude").toBool());
 
 	// view dialog / sky culture tab
 	auto& scmgr = StelApp::getInstance().getSkyCultureMgr();

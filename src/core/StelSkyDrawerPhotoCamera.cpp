@@ -574,7 +574,7 @@ StelSkyDrawer::PhotoNoiseParams StelSkyDrawer::getPhotoNoiseParams(const StelPro
 	p.read2 = PHOTO_READ_NOISE_UPSTREAM*PHOTO_READ_NOISE_UPSTREAM + downstream*downstream;
 	// Dark current grows with the temperature of the sensor: the air temperature (atmosphere settings) plus its own warming
 	const float t = static_cast<float>(getPhotoEffectiveExposureTime());
-	const float celsius = static_cast<float>(getAtmosphereTemperature()) + PHOTO_SENSOR_WARMING;
+	const float celsius = static_cast<float>(getEffectiveAtmosphereTemperature()) + PHOTO_SENSOR_WARMING;
 	const float thermal = std::exp2((celsius - 20.f)/PHOTO_DARK_DOUBLING);
 	p.dark = PHOTO_DARK_CURRENT * area * thermal * t;
 	p.hot = PHOTO_HOT_PIXEL_CURRENT * thermal * t;

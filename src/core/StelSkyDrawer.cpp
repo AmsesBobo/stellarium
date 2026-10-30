@@ -203,6 +203,7 @@ StelSkyDrawer::StelSkyDrawer(StelCore* acore) :
 
 	setAtmosphereTemperature(conf->value("landscape/temperature_C", 15.0).toDouble());
 	setAtmospherePressure(conf->value("landscape/pressure_mbar", 1013.0).toDouble());
+	setFlagAtmosphereFromAltitude(conf->value("landscape/flag_atmosphere_from_altitude", true).toBool());
 
 	// four extras for finetuning
 	setFlagDrawSunAfterAtmosphere(conf->value("landscape/draw_sun_after_atmosphere",false).toBool());
@@ -356,6 +357,11 @@ void StelSkyDrawer::releaseVAO()
 
 void StelSkyDrawer::update(double)
 {
+	// The ray-traced refraction model follows the altitude of the observer (rebuilt only when something changed)
+	updateEffectiveAtmosphere();
+	refraction.setObserverAltitude(static_cast<double>(core->getCurrentLocation().altitude));
+	refraction.updateModel();
+
 	float fov = static_cast<float>(core->getMovementMgr()->getCurrentFov());
 	if (fov > maxAdaptFov)
 	{
@@ -1391,16 +1397,48 @@ void StelSkyDrawer::setExtinctionCoefficient(double extCoeff)
 
 void StelSkyDrawer::setAtmosphereTemperature(double celsius)
 {
-	refraction.setTemperature(static_cast<float>(celsius));
+	atmosphereTemperatureSet = celsius;
 	StelApp::immediateSave("landscape/temperature_C", celsius);
-	emit atmosphereTemperatureChanged(static_cast<double>(refraction.getTemperature()));
+	updateEffectiveAtmosphere();
+	emit atmosphereTemperatureChanged(atmosphereTemperatureSet);
 }
 
 void StelSkyDrawer::setAtmospherePressure(double mbar)
 {
-	refraction.setPressure(static_cast<float>(mbar));
+	atmospherePressureSet = mbar;
 	StelApp::immediateSave("landscape/pressure_mbar", mbar);
-	emit atmospherePressureChanged(static_cast<double>(refraction.getPressure()));
+	updateEffectiveAtmosphere();
+	emit atmospherePressureChanged(atmospherePressureSet);
+}
+
+void StelSkyDrawer::setFlagAtmosphereFromAltitude(bool b)
+{
+	if (b == flagAtmosphereFromAltitude)
+		return;
+	flagAtmosphereFromAltitude = b;
+	StelApp::immediateSave("landscape/flag_atmosphere_from_altitude", b);
+	updateEffectiveAtmosphere();
+	emit flagAtmosphereFromAltitudeChanged(b);
+}
+
+void StelSkyDrawer::updateEffectiveAtmosphere()
+{
+	double pressure = atmospherePressureSet;
+	double temperature = atmosphereTemperatureSet;
+	// The standard atmosphere is the Earth's; elsewhere the set values are kept
+	const StelLocation& location = core->getCurrentLocation();
+	if (flagAtmosphereFromAltitude && location.planetName == QStringLiteral("Earth"))
+	{
+		const double altitude = static_cast<double>(location.altitude);
+		pressure = StelRefractionModel::standardPressure(altitude);
+		temperature = StelRefractionModel::standardTemperature(altitude);
+	}
+	const float p = static_cast<float>(pressure), t = static_cast<float>(temperature);
+	if (p == refraction.getPressure() && t == refraction.getTemperature())
+		return;
+	refraction.setPressure(p);
+	refraction.setTemperature(t);
+	emit effectiveAtmosphereChanged();
 }
 
 // These are to find out the best sky parameters. Program feature for debugging/expert mode.

@@ -26,6 +26,8 @@
 #include "StelUtils.hpp"
 
 #include <QOpenGLShaderProgram>
+#include <QElapsedTimer>
+#include <QDebug>
 
 Extinction::Extinction() : ext_coeff(50), undergroundExtinctionMode(UndergroundExtinctionZero)
 {
@@ -471,4 +473,26 @@ void Refraction::setTemperature(float t)
 {
 	temperature=t;
 	updatePrecomputed();
+}
+
+void Refraction::updateModel()
+{
+	StelRefractionModel::Conditions c;
+	c.altitude = observerAltitude;
+	c.pressure = static_cast<double>(pressure);
+	c.temperature = static_cast<double>(temperature);
+	if (model && model->getConditions() == c)
+		return;
+	QElapsedTimer timer;
+	timer.start();
+	model = std::make_shared<const StelRefractionModel>(c);
+	const double toArcmin = 60.*M_180_PI;
+	qInfo().noquote() << QString("Refraction model: observer at %1 m, %2 hPa, %3 C: true horizon at %4 deg (geometric dip %5 deg), "
+	                             "refraction there %6', at 0 deg %7', at 5 deg %8' (%9 ms)")
+	                     .arg(c.altitude, 0, 'f', 0).arg(c.pressure, 0, 'f', 1).arg(c.temperature, 0, 'f', 1)
+	                     .arg(model->getHorizonApparent()*M_180_PI, 0, 'f', 3).arg(model->getGeometricDip()*M_180_PI, 0, 'f', 3)
+	                     .arg(model->getHorizonRefraction()*toArcmin, 0, 'f', 2)
+	                     .arg((0. - model->toGeometric(0.))*toArcmin, 0, 'f', 2)
+	                     .arg((5.*M_PI_180 - model->toGeometric(5.*M_PI_180))*toArcmin, 0, 'f', 2)
+	                     .arg(timer.elapsed());
 }

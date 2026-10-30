@@ -30,6 +30,9 @@
 
 #include "VecMath.hpp"
 #include "StelProjector.hpp"
+#include "StelRefractionModel.hpp"
+
+#include <memory>
 
 //! @class Extinction
 //! This class performs extinction computations, following literature from atmospheric optics and astronomy.
@@ -170,6 +173,16 @@ public:
 	void setTemperature(float t_C);
 	float getTemperature() const {return temperature;}
 
+	//! Set the altitude of the observer above sea level (m), for the ray-traced refraction model
+	void setObserverAltitude(double altitude_m) {observerAltitude=altitude_m;}
+	double getObserverAltitude() const {return observerAltitude;}
+	//! Rebuild the ray-traced refraction model if the observer altitude, pressure or temperature changed
+	//! (a few milliseconds; call it once per frame, not per projection)
+	void updateModel();
+	//! The ray-traced refraction model for the current conditions (shared between the copies of this object).
+	//! Null until updateModel() has been called.
+	std::shared_ptr<const StelRefractionModel> getModel() const {return model;}
+
 	//! Set the transformation matrices used to transform input vector to AltAz frame.
 	void setPreTransfoMat(const Mat4d& m);
 	void setPostTransfoMat(const Mat4d& m);
@@ -188,6 +201,10 @@ private:
 	float temperature;
 	//! Correction factor for refraction formula, to be cached for speed.
 	float press_temp_corr;
+	//! Altitude of the observer above sea level [m]
+	double observerAltitude = 0.;
+	//! Ray-traced refraction model for the current conditions (immutable, shared between copies)
+	std::shared_ptr<const StelRefractionModel> model;
 
 	//! Used to pretransform coordinates into AltAz frame.
 	Mat4d preTransfoMat;

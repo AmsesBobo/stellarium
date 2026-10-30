@@ -53,6 +53,8 @@ SET(stellarium_lib_SRCS
      core/StelPhotoLensFlare.cpp
      core/StelAtmosphereTransmission.hpp
      core/StelAtmosphereTransmission.cpp
+     core/StelRefractionModel.hpp
+     core/StelRefractionModel.cpp
      core/StelSkyDrawer.hpp
      core/StelPainter.hpp
      core/StelPainter.cpp

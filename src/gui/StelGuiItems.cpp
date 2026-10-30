@@ -1016,7 +1016,7 @@ void BottomStelBar::updateText(bool updatePos, bool updateTopocentric)
 			if (core->getCurrentPlanet()->hasAtmosphere())
 			{
 				const StelPropertyMgr* propMgr=StelApp::getInstance().getStelPropertyManager();
-				QString weather = QString("%1: %2 %3; %4: %5 °C").arg(q_("Atmospheric pressure"), QString::number(propMgr->getStelPropertyValue("StelSkyDrawer.atmospherePressure").toDouble(), 'f', 2), qc_("mbar", "pressure unit"), q_("temperature"), QString::number(propMgr->getStelPropertyValue("StelSkyDrawer.atmosphereTemperature").toDouble(), 'f', 1));
+				QString weather = QString("%1: %2 %3; %4: %5 °C").arg(q_("Atmospheric pressure"), QString::number(propMgr->getStelPropertyValue("StelSkyDrawer.effectiveAtmospherePressure").toDouble(), 'f', 2), qc_("mbar", "pressure unit"), q_("temperature"), QString::number(propMgr->getStelPropertyValue("StelSkyDrawer.effectiveAtmosphereTemperature").toDouble(), 'f', 1));
 				location->setToolTip(QString("<p style='white-space:pre'>%1 %2; %3<br>%4</p>").arg(latStr, lonStr, rho, weather));
 			}
 			else if (core->getCurrentPlanet()->getPlanetType()==Planet::isObserver)

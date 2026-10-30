@@ -70,6 +70,22 @@ void AtmosphereDialog::createDialogContent()
 	connectDoubleProperty(ui->pressureDoubleSpinBox,"StelSkyDrawer.atmospherePressure");
 	connectDoubleProperty(ui->temperatureDoubleSpinBox,"StelSkyDrawer.atmosphereTemperature");
 	connectDoubleProperty(ui->extinctionDoubleSpinBox,"StelSkyDrawer.extinctionCoefficient");
+	connectBoolProperty(ui->atmosphereFromAltitudeCheckBox, "StelSkyDrawer.flagAtmosphereFromAltitude");
+	// With the standard atmosphere the set values are not used
+	connect(ui->atmosphereFromAltitudeCheckBox, &QCheckBox::toggled, this, [this](bool b){
+		ui->pressureDoubleSpinBox->setDisabled(b);
+		ui->temperatureDoubleSpinBox->setDisabled(b);
+		ui->pressureLabel->setDisabled(b);
+		ui->temperatureLabel->setDisabled(b);
+	});
+	ui->pressureDoubleSpinBox->setDisabled(ui->atmosphereFromAltitudeCheckBox->isChecked());
+	ui->temperatureDoubleSpinBox->setDisabled(ui->atmosphereFromAltitudeCheckBox->isChecked());
+	ui->pressureLabel->setDisabled(ui->atmosphereFromAltitudeCheckBox->isChecked());
+	ui->temperatureLabel->setDisabled(ui->atmosphereFromAltitudeCheckBox->isChecked());
+	StelSkyDrawer* drawer = StelApp::getInstance().getCore()->getSkyDrawer();
+	connect(drawer, &StelSkyDrawer::effectiveAtmosphereChanged, this, &AtmosphereDialog::updateEffectiveAtmosphere);
+	connect(StelApp::getInstance().getCore(), &StelCore::locationChanged, this, &AtmosphereDialog::updateEffectiveAtmosphere);
+	updateEffectiveAtmosphere();
 	connect(StelApp::getInstance().getStelPropertyManager()->getProperty(STATUS_TEXT_PROPERTY),
 			&StelProperty::changed, this, [this](const QVariant& v){ ui->showMySky_statusLabel->setText(v.toString()); });
 	connect(StelApp::getInstance().getStelPropertyManager()->getProperty(ERROR_PROPERTY),
@@ -147,6 +163,18 @@ void AtmosphereDialog::setStandardAtmosphere()
 	ui->temperatureDoubleSpinBox->setValue(15.0);
 	// See http://www.icq.eps.harvard.edu/ICQExtinct.html
 	ui->extinctionDoubleSpinBox->setValue(0.2);
+}
+
+void AtmosphereDialog::updateEffectiveAtmosphere()
+{
+	const StelSkyDrawer* drawer = StelApp::getInstance().getCore()->getSkyDrawer();
+	const StelLocation& location = StelApp::getInstance().getCore()->getCurrentLocation();
+	// TRANSLATORS: the pressure and temperature at the observer used for the refraction, e.g. "In use at 2000 m: 795.0 mbar, 2.0 °C"
+	ui->effectiveAtmosphereLabel->setText(q_("In use at %1 m: %2 %3, %4 °C")
+					      .arg(QString::number(static_cast<double>(location.altitude), 'f', 0),
+						   QString::number(drawer->getEffectiveAtmospherePressure(), 'f', 1),
+						   qc_("mbar", "pressure unit"),
+						   QString::number(drawer->getEffectiveAtmosphereTemperature(), 'f', 1)));
 }
 
 void AtmosphereDialog::setTfromK(double k)

@@ -206,6 +206,12 @@ class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 	Q_PROPERTY(double extinctionCoefficient READ getExtinctionCoefficient WRITE setExtinctionCoefficient NOTIFY extinctionCoefficientChanged)
 	Q_PROPERTY(double atmosphereTemperature READ getAtmosphereTemperature WRITE setAtmosphereTemperature NOTIFY atmosphereTemperatureChanged)
 	Q_PROPERTY(double atmospherePressure READ getAtmospherePressure WRITE setAtmospherePressure NOTIFY atmospherePressureChanged)
+	//! On Earth: take the pressure and temperature at the observer from the U.S. Standard Atmosphere 1976 at the
+	//! altitude of the observer instead of the set values (atmospherePressure, atmosphereTemperature)
+	Q_PROPERTY(bool flagAtmosphereFromAltitude READ getFlagAtmosphereFromAltitude WRITE setFlagAtmosphereFromAltitude NOTIFY flagAtmosphereFromAltitudeChanged)
+	//! The pressure (mbar) and temperature (deg C) at the observer in use: the set ones, or those of the standard atmosphere
+	Q_PROPERTY(double effectiveAtmospherePressure READ getEffectiveAtmospherePressure NOTIFY effectiveAtmosphereChanged)
+	Q_PROPERTY(double effectiveAtmosphereTemperature READ getEffectiveAtmosphereTemperature NOTIFY effectiveAtmosphereChanged)
 
 	Q_PROPERTY(bool flagDrawSunAfterAtmosphere READ getFlagDrawSunAfterAtmosphere WRITE setFlagDrawSunAfterAtmosphere NOTIFY flagDrawSunAfterAtmosphereChanged)
 	Q_PROPERTY(bool flagEarlySunHalo READ getFlagEarlySunHalo WRITE setFlagEarlySunHalo NOTIFY flagEarlySunHaloChanged)
@@ -1169,14 +1175,21 @@ public slots:
 	void setExtinctionCoefficient(double extCoeff);
 	//! Get extinction coefficient, mag/airmass (for extinction), as set (at a normal humidity).
 	double getExtinctionCoefficient() const {return static_cast<double>(extinctionBase);}
-	//! Set atmospheric (ground) temperature in deg celsius (for refraction).
+	//! Set atmospheric (ground) temperature in deg celsius (for refraction), as set by the user.
 	void setAtmosphereTemperature(double celsius);
-	//! Get atmospheric (ground) temperature in deg celsius (for refraction).
-	double getAtmosphereTemperature() const {return static_cast<double>(refraction.getTemperature());}
-	//! Set atmospheric (ground) pressure in mbar (for refraction).
+	//! Get atmospheric (ground) temperature in deg celsius (for refraction), as set by the user (see getEffectiveAtmosphereTemperature()).
+	double getAtmosphereTemperature() const {return atmosphereTemperatureSet;}
+	//! Set atmospheric (ground) pressure in mbar (for refraction), as set by the user.
 	void setAtmospherePressure(double mbar);
-	//! Get atmospheric (ground) pressure in mbar (for refraction).
-	double getAtmospherePressure() const {return static_cast<double>(refraction.getPressure());}
+	//! Get atmospheric (ground) pressure in mbar (for refraction), as set by the user (see getEffectiveAtmospherePressure()).
+	double getAtmospherePressure() const {return atmospherePressureSet;}
+	//! Take pressure and temperature from the standard atmosphere at the altitude of the observer (on Earth)
+	void setFlagAtmosphereFromAltitude(bool b);
+	bool getFlagAtmosphereFromAltitude() const {return flagAtmosphereFromAltitude;}
+	//! Pressure (mbar) at the observer in use for refraction and extinction
+	double getEffectiveAtmospherePressure() const {return static_cast<double>(refraction.getPressure());}
+	//! Temperature (deg C) at the observer in use for refraction and extinction
+	double getEffectiveAtmosphereTemperature() const {return static_cast<double>(refraction.getTemperature());}
 
 	void setPhotoHumidity(double percent);
 	double getPhotoHumidity() const {return photoHumidity;}
@@ -1302,6 +1315,8 @@ signals:
 	void extinctionCoefficientChanged(double coeff);
 	void atmosphereTemperatureChanged(double celsius);
 	void atmospherePressureChanged(double mbar);
+	void flagAtmosphereFromAltitudeChanged(bool b);
+	void effectiveAtmosphereChanged();
 
 	void flagTfromKChanged(bool b);
 	void flagDrawSunAfterAtmosphereChanged(bool b);
@@ -1373,6 +1388,12 @@ private:
 
 	Extinction extinction;
 	Refraction refraction;
+	//! Pressure (mbar) and temperature (deg C) as set by the user
+	double atmospherePressureSet = 1013.25;
+	double atmosphereTemperatureSet = 15.;
+	bool flagAtmosphereFromAltitude = true;
+	//! Set pressure and temperature of the refraction from the settings or the altitude of the observer
+	void updateEffectiveAtmosphere();
 
 	float maxAdaptFov, minAdaptFov, lnfovFactor;
 	bool flagStarTwinkle;      //! flickering stars due to atmospheric turbulence
