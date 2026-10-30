@@ -408,7 +408,10 @@ void StelSkyDrawer::updatePhotoHumidity()
 	// and ozone (0.016) do not explain of the extinction coefficient (magnitudes per airmass = 1.0857 optical depth),
 	// at least 0.01
 	const double rayleigh = 0.0088*std::pow(0.55, -4.05)*std::exp(-coefficientAltitude/8.);
-	const double baseDepth = qMax(0.01, base/1.0857 - rayleigh - 0.016);
+	const double coefficientDepth = qMax(0.01, base/1.0857 - rayleigh - 0.016);
+	// PhotoAerosol holds the haze above the observer (the light domes and the haze of the sky take it back to sea
+	// level with the scale height of 1.2 km): for a coefficient at sea level only that part of the aerosols
+	const double baseDepth = coefficientDepth*std::exp(-(altitude - coefficientAltitude)/1.2);
 	// Hygroscopic growth: the scattering of the aerosols rises as (1 - RH)^-gamma (Hanel 1976; gamma about 0.5 for
 	// continental air): x2 at 80%, x2.8 at 95% against 60%. The grown particles are larger: the haze becomes whiter
 	// (the Angstrom exponent falls from about 1.3 towards 0.7), scatters more forwards (g from 0.70 towards 0.76)
@@ -422,8 +425,8 @@ void StelSkyDrawer::updatePhotoHumidity()
 	a.asymmetry = qBound(0.6, 0.70 + 0.06*std::log2(growth), 0.8);
 	a.albedo = qBound(0.8, 1. - 0.1*std::pow(growth, -0.9), 0.98);
 	photoAerosol = a;
-	// The extinction in use: the coefficient as set, with the change of the aerosols
-	const double k = qMax(0., base + 1.0857*(a.depth - baseDepth));
+	// The extinction in use: the coefficient as set (where it is set), with the change of the aerosols there
+	const double k = qMax(0., base + 1.0857*coefficientDepth*(growth - 1.));
 	extinction.setExtinctionCoefficient(static_cast<float>(k));
 	// The light of lamps nearby scattered towards the zenith, against the normal humidity (single scattering)
 	PhotoAerosol normal;
