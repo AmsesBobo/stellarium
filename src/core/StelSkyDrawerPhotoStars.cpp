@@ -1107,9 +1107,10 @@ Vec3f StelSkyDrawer::photoTrailExtinctionFactor(const Vec3d& view, const Vec3d& 
 	photoTrailAltAzTransform->backward(altAzRef);
 	altAz.normalize();
 	altAzRef.normalize();
-	// Below the horizon (from about -2 degrees) the light is gone, whatever the setting for the extinction there
-	auto extinctionMag = [this](const Vec3d& aa) -> float {
-		if (aa[2] < -0.035)
+	// Below the horizon (the true horizon, or about -2 degrees) the light is gone, whatever the setting for the extinction there
+	const double horizonSine = extinction.getHorizonSineGeometric();
+	auto extinctionMag = [this, horizonSine](const Vec3d& aa) -> float {
+		if (aa[2] < horizonSine)
 			return 42.f*extinction.getExtinctionCoefficient();
 		float mag = 0.f;
 		extinction.forward(aa, &mag);

@@ -170,12 +170,13 @@ void AtmosphereDialog::updateEffectiveAtmosphere()
 {
 	const StelSkyDrawer* drawer = StelApp::getInstance().getCore()->getSkyDrawer();
 	const StelLocation& location = StelApp::getInstance().getCore()->getCurrentLocation();
-	// TRANSLATORS: the pressure and temperature at the observer used for the refraction, e.g. "In use at 2000 m: 795.0 mbar, 2.0 °C"
-	ui->effectiveAtmosphereLabel->setText(q_("In use at %1 m: %2 %3, %4 °C")
+	// TRANSLATORS: the pressure, temperature and extinction coefficient at the observer in use, e.g. "In use at 2000 m: 795.0 mbar, 2.0 °C, k = 0.10"
+	ui->effectiveAtmosphereLabel->setText(q_("In use at %1 m: %2 %3, %4 °C, k = %5")
 					      .arg(QString::number(static_cast<double>(location.altitude), 'f', 0),
 						   QString::number(drawer->getEffectiveAtmospherePressure(), 'f', 1),
 						   qc_("mbar", "pressure unit"),
-						   QString::number(drawer->getEffectiveAtmosphereTemperature(), 'f', 1)));
+						   QString::number(drawer->getEffectiveAtmosphereTemperature(), 'f', 1),
+						   QString::number(drawer->getEffectiveExtinctionCoefficient(), 'f', 2)));
 }
 
 void AtmosphereDialog::setTfromK(double k)

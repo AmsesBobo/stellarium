@@ -33,6 +33,7 @@
 #include "StelRefractionModel.hpp"
 
 #include <memory>
+#include <vector>
 
 //! @class Extinction
 //! This class performs extinction computations, following literature from atmospheric optics and astronomy.
@@ -65,13 +66,13 @@ public:
 	void forward(const Vec3d& altAzPos, float* mag) const
 	{
 		//Q_ASSERT(std::fabs(altAzPos.length()-1.)<0.001);
-		*mag += airmass(static_cast<float>(altAzPos[2]), false) * ext_coeff;
+		*mag += magnitude(static_cast<float>(altAzPos[2]));
 	}
 	
 	void forward(const Vec3f& altAzPos, float* mag) const
 	{
 		//Q_ASSERT(std::fabs(altAzPos.length()-1.f)<0.001f);
-		*mag += airmass(altAzPos[2], false) * ext_coeff;
+		*mag += magnitude(altAzPos[2]);
 	}
 
 	//! Compute inverse extinction effect for given position vector and magnitude.
@@ -80,13 +81,15 @@ public:
 	//! Note that forward/backward are no absolute reverse operations!
 	void backward(const Vec3d& altAzPos, float* mag) const
 	{
-		*mag -= airmass(static_cast<float>(altAzPos[2]), false) * ext_coeff;
+		*mag -= magnitude(static_cast<float>(altAzPos[2]));
 	}
 	
 	void backward(const Vec3f& altAzPos, float* mag) const
 	{
-		*mag -= airmass(altAzPos[2], false) * ext_coeff;
+		*mag -= magnitude(altAzPos[2]);
 	}
+	//! Extinction (magnitudes, of white light: the luminance) of an object at the given sine of its geometric altitude
+	float magnitude(float sinGeometricAltitude) const;
 
 	//! Set visual extinction coefficient (mag/airmass), influences extinction computation.
 	//! @param k= 0.1 for highest mountains, 0.2 for very good lowland locations, 0.35 for typical lowland, 0.5 in humid climates.
@@ -108,9 +111,57 @@ public:
 	QByteArray getForwardTransformShader() const;
 	void setForwardTransformUniforms(QOpenGLShaderProgram& program) const;
 
+	//! Use the columns of air, ozone and aerosols along the rays of the ray-traced refraction model (null: the classic
+	//! airmass formulas). The extinction coefficient k is then split into Rayleigh scattering (from the air column),
+	//! ozone absorption and aerosols (the rest).
+	//! @param coefficientAtSeaLevel true: k is the extinction at sea level, and from altitude the air and the aerosols
+	//! above the observer are less (the standard atmosphere); false: k is the extinction at the observer.
+	//! Call updateModel() afterwards.
+	void setModel(std::shared_ptr<const StelRefractionModel> model, bool coefficientAtSeaLevel);
+	//! Angstrom exponent of the aerosols (their optical depth falls with the wavelength as lambda^-alpha), default 1.3
+	void setAngstrom(float alpha) {angstrom=alpha;}
+	//! Rebuild the extinction along the rays if model, coefficient or aerosols changed (call once per frame)
+	void updateModel();
+	//! True if the extinction comes from the ray-traced model
+	bool isModelInUse() const {return model != nullptr && !table.empty();}
+	//! Changes each time the extinction along the rays is rebuilt (to update caches of colors etc.)
+	int getModelVersion() const {return modelVersion;}
+	//! Extinction towards the zenith at the observer, magnitudes (k itself without the model, or at the observer if
+	//! k is given for sea level)
+	float getZenithExtinction() const;
+	//! Linear RGB transmission (sRGB primaries, effective wavelengths 610, 550 and 465 nm) towards an object at the
+	//! given geometric altitude (radians), from the model; white (1,1,1) without it.
+	//! Behind the Earth (below the true horizon) it is the transmission at the horizon.
+	Vec3d transmission(double geometricAltitude) const;
+	//! Relative airmass (the air column along the line of sight against the one towards the zenith) at the given
+	//! apparent altitude (radians), from the model; -1 below the true horizon or without the model
+	float relativeAirmass(double apparentAltitude) const;
+	//! Sine of the geometric altitude below which an object is behind the Earth (the true horizon), or of -2 degrees
+	//! (below which the classic airmass formulas do not hold)
+	double getHorizonSineGeometric() const;
+
 private:
 	//! k, magnitudes/airmass, in [0.00, ... 1.00], (default 0.20).
 	float ext_coeff;
+
+	//! The extinction along the rays of the refraction model
+	std::shared_ptr<const StelRefractionModel> model;
+	bool coefficientAtSeaLevel = false;
+	float angstrom = 1.3f;
+	//! The inputs of the last rebuild
+	std::shared_ptr<const StelRefractionModel> builtModel;
+	float builtCoefficient = -1.f, builtAngstrom = -1.f;
+	bool builtAtSeaLevel = false;
+	int modelVersion = 0;
+	//! Zenith optical depths at sea level per channel (R, G, B) of the air, the ozone and the aerosols
+	double depthRayleigh[3] = {0., 0., 0.}, depthOzone[3] = {0., 0., 0.}, depthAerosol[3] = {0., 0., 0.};
+	float zenithExtinction = 0.f;
+	//! Extinction (magnitudes) at the geometric altitude limb + span*(i/(size-1))^3 above the true horizon
+	std::vector<float> table;
+	float tableLimb = 0.f, tableSpan = 1.f;
+	//! Luminance extinction for the given columns (in units of the sea-level zenith columns)
+	double columnMagnitude(const StelRefractionModel::Columns& c) const;
+	Vec3d columnTransmission(const StelRefractionModel::Columns& c) const;
 
 	//! Define what we are going to do for underground stars when ground is not rendered
 	UndergroundExtinctionMode undergroundExtinctionMode;

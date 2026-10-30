@@ -261,17 +261,43 @@ void StelSkyDrawer::updatePhotoExtinction()
 	// the coefficient as set: the table (scaled to it) gives the color at the normal humidity; the extra aerosols of
 	// a higher (or lower) humidity are added with their own, flatter color
 	const double k = static_cast<double>(extinctionBase);
+	const bool fromModel = extinction.isModelInUse();
 	photoExtinctionActive = flagPhotoExtinctionColor && getFlagPhotographicModeActive() && getFlagHasAtmosphere()
-	                        && kInUse >= 0.01 && atmosphereTransmission.isLoaded()
+	                        && kInUse >= 0.01 && (fromModel || atmosphereTransmission.isLoaded())
 	                        && core->getCurrentLocation().planetName == QStringLiteral("Earth");
 	if (!photoExtinctionActive)
 		return;
 	const double altitude = static_cast<double>(core->getCurrentLocation().altitude);
-	if (altitude == photoExtinctionAltitude && k == photoExtinctionCoefficient && kInUse == photoExtinctionInUse && !photoExtinctionTints.empty())
+	const int version = fromModel ? extinction.getModelVersion() : -1;
+	if (altitude == photoExtinctionAltitude && k == photoExtinctionCoefficient && kInUse == photoExtinctionInUse
+	    && version == photoExtinctionModelVersion && !photoExtinctionTints.empty())
 		return;
 	photoExtinctionAltitude = altitude;
 	photoExtinctionCoefficient = k;
 	photoExtinctionInUse = kInUse;
+	photoExtinctionModelVersion = version;
+	constexpr int size = 256;
+	if (fromModel)
+	{
+		// The columns of air, ozone and aerosols along the refracted rays (Extinction::transmission()), down to the
+		// true horizon; the aerosols of the humidity are in the coefficient in use and the Angstrom exponent
+		const double sinMin = extinction.getHorizonSineGeometric();
+		photoExtinctionSinMin = static_cast<float>(sinMin);
+		photoExtinctionTints.assign(size, Vec3f(1.f));
+		Vec3f last(1.f);
+		for (int i = size-1; i >= 0; --i)
+		{
+			const double u = static_cast<double>(i)/(size-1);
+			const double s = sinMin + (1.-sinMin)*u*u;
+			const Vec3d t = extinction.transmission(std::asin(std::clamp(s, -1., 1.)));
+			const double Y = 0.2126*t[0] + 0.7152*t[1] + 0.0722*t[2];
+			if (Y > 1e-12)
+				last = Vec3f(static_cast<float>(t[0]/Y), static_cast<float>(t[1]/Y), static_cast<float>(t[2]/Y));
+			photoExtinctionTints[static_cast<size_t>(i)] = last;
+		}
+		photoExtinctionTextureDirty = true;
+		return;
+	}
 	const double extraDepth = photoAerosol.depth - photoAerosol.baseDepth;
 	const double extraRgb[3] = {extraDepth*std::pow(0.610/0.55, -photoAerosol.angstrom), extraDepth,
 	                            extraDepth*std::pow(0.465/0.55, -photoAerosol.angstrom)};
@@ -283,7 +309,6 @@ void StelSkyDrawer::updatePhotoExtinction()
 	const double depthScale = zenith > 1e-4 ? k/zenith : 1.;
 	const double sinMin = atmosphereTransmission.horizonSine(altitude);
 	photoExtinctionSinMin = static_cast<float>(sinMin);
-	constexpr int size = 256;
 	photoExtinctionTints.assign(size, Vec3f(1.f));
 	// From the zenith down: very close to the horizon of the observer hardly any light passes;
 	// there the last good color is kept.

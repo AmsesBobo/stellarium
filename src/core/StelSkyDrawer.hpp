@@ -215,6 +215,8 @@ class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 	//! The pressure (mbar) and temperature (deg C) at the observer in use: the set ones, or those of the standard atmosphere
 	Q_PROPERTY(double effectiveAtmospherePressure READ getEffectiveAtmospherePressure NOTIFY effectiveAtmosphereChanged)
 	Q_PROPERTY(double effectiveAtmosphereTemperature READ getEffectiveAtmosphereTemperature NOTIFY effectiveAtmosphereChanged)
+	//! The extinction towards the zenith at the observer (magnitudes) in use
+	Q_PROPERTY(double effectiveExtinctionCoefficient READ getEffectiveExtinctionCoefficient NOTIFY effectiveAtmosphereChanged)
 
 	Q_PROPERTY(bool flagDrawSunAfterAtmosphere READ getFlagDrawSunAfterAtmosphere WRITE setFlagDrawSunAfterAtmosphere NOTIFY flagDrawSunAfterAtmosphereChanged)
 	Q_PROPERTY(bool flagEarlySunHalo READ getFlagEarlySunHalo WRITE setFlagEarlySunHalo NOTIFY flagEarlySunHaloChanged)
@@ -1196,6 +1198,8 @@ public slots:
 	double getEffectiveAtmospherePressure() const {return static_cast<double>(refraction.getPressure());}
 	//! Temperature (deg C) at the observer in use for refraction and extinction
 	double getEffectiveAtmosphereTemperature() const {return static_cast<double>(refraction.getTemperature());}
+	//! Extinction towards the zenith at the observer (magnitudes) in use
+	double getEffectiveExtinctionCoefficient() const {return static_cast<double>(extinction.getZenithExtinction());}
 
 	void setPhotoHumidity(double percent);
 	double getPhotoHumidity() const {return photoHumidity;}
@@ -1400,6 +1404,7 @@ private:
 	double atmosphereTemperatureSet = 15.;
 	bool flagAtmosphereFromAltitude = true;
 	bool flagRefractionRayTraced = true;
+	float lastZenithExtinction = -1.f;
 	//! Set pressure and temperature of the refraction from the settings or the altitude of the observer
 	void updateEffectiveAtmosphere();
 
@@ -1729,6 +1734,7 @@ private:
 	double photoExtinctionAltitude = -1e9;
 	double photoExtinctionCoefficient = -1.;
 	double photoExtinctionInUse = -1.;
+	int photoExtinctionModelVersion = -2;
 	unsigned int photoExtinctionTexture = 0;
 	bool photoExtinctionTextureDirty = true;
 	void updatePhotoExtinction();

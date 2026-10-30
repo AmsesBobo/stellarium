@@ -332,9 +332,11 @@ float StelObject::getAirmass(const StelCore *core) const
 	double az_app, alt_app;
 	StelUtils::rectToSphe(&az_app, &alt_app, getAltAzPosApparent(core));
 	Q_UNUSED(az_app)
+	const Extinction &extinction=core->getSkyDrawer()->getExtinction();
+	if (core->getSkyDrawer()->getFlagHasAtmosphere() && extinction.isModelInUse())
+		return extinction.relativeAirmass(alt_app); // along the refracted ray, -1 behind the Earth
 	if (core->getSkyDrawer()->getFlagHasAtmosphere() && (alt_app>-2.0*M_PI_180)) // Don't compute extinction much below horizon where model is meaningless.
 	{
-		const Extinction &extinction=core->getSkyDrawer()->getExtinction();
 		return extinction.airmass(static_cast<float>(std::cos(M_PI_2-alt_app)), true);
 	}
 	else

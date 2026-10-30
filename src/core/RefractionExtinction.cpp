@@ -27,12 +27,175 @@
 
 #include <QOpenGLShaderProgram>
 #include <QElapsedTimer>
+#include <QVector3D>
 #include <QVector4D>
 #include <algorithm>
 #include <QDebug>
 
 Extinction::Extinction() : ext_coeff(50), undergroundExtinctionMode(UndergroundExtinctionZero)
 {
+}
+
+namespace
+{
+	// The sRGB channels at their effective wavelengths (micrometers) and the weights of the luminance
+	constexpr double CHANNEL_WAVELENGTH[3] = {0.610, 0.550, 0.465};
+	constexpr double CHANNEL_LUMINANCE[3] = {0.2126, 0.7152, 0.0722};
+	// Zenith optical depth of the ozone layer (300 Dobson units) in the Chappuis band, with absorption cross sections
+	// of about 4.8e-21, 3.3e-21 and 0.65e-21 cm^2 at the three wavelengths
+	constexpr double OZONE_ZENITH_DEPTH[3] = {0.0387, 0.0266, 0.0052};
+	constexpr int EXTINCTION_TABLE_SIZE = 96;
+
+	// Zenith optical depth of the air at sea level (1013.25 hPa) for Rayleigh scattering (Bodhaine et al. 1999)
+	double rayleighZenithDepth(double wavelength)
+	{
+		const double l2 = 1./(wavelength*wavelength);
+		return 0.008569*l2*l2*(1. + 0.0113*l2 + 0.00013*l2*l2);
+	}
+}
+
+double Extinction::columnMagnitude(const StelRefractionModel::Columns& c) const
+{
+	const Vec3d t = columnTransmission(c);
+	const double y = CHANNEL_LUMINANCE[0]*t[0] + CHANNEL_LUMINANCE[1]*t[1] + CHANNEL_LUMINANCE[2]*t[2];
+	return -2.5*std::log10(std::max(y, 1e-30));
+}
+
+Vec3d Extinction::columnTransmission(const StelRefractionModel::Columns& c) const
+{
+	Vec3d t;
+	for (int i = 0; i < 3; ++i)
+		t[i] = std::exp(-(depthRayleigh[i]*c.rayleigh + depthOzone[i]*c.ozone + depthAerosol[i]*c.aerosol));
+	return t;
+}
+
+void Extinction::setModel(std::shared_ptr<const StelRefractionModel> m, bool atSeaLevel)
+{
+	model = std::move(m);
+	coefficientAtSeaLevel = atSeaLevel;
+	if (!model)
+		table.clear();
+}
+
+void Extinction::updateModel()
+{
+	if (!model)
+	{
+		table.clear();
+		builtModel.reset();
+		return;
+	}
+	if (model == builtModel && ext_coeff == builtCoefficient && angstrom == builtAngstrom
+	    && coefficientAtSeaLevel == builtAtSeaLevel && !table.empty())
+		return;
+	builtModel = model;
+	builtCoefficient = ext_coeff;
+	builtAngstrom = angstrom;
+	builtAtSeaLevel = coefficientAtSeaLevel;
+
+	// Split k (the luminance extinction towards the zenith, at sea level or at the observer) into the air, the
+	// ozone and the aerosols. If k is smaller than air and ozone alone, both are scaled down to it.
+	StelRefractionModel::Columns zenith;
+	if (coefficientAtSeaLevel)
+		zenith.rayleigh = zenith.aerosol = zenith.ozone = 1.;
+	else
+		zenith = model->getZenithColumns();
+	const double k = static_cast<double>(std::max(ext_coeff, 0.f));
+	auto setDepths = [this](double scale, double aerosol) {
+		for (int i = 0; i < 3; ++i)
+		{
+			depthRayleigh[i] = scale*rayleighZenithDepth(CHANNEL_WAVELENGTH[i]);
+			depthOzone[i] = scale*OZONE_ZENITH_DEPTH[i];
+			depthAerosol[i] = aerosol*std::pow(CHANNEL_WAVELENGTH[i]/0.55, -static_cast<double>(angstrom));
+		}
+	};
+	setDepths(1., 0.);
+	if (columnMagnitude(zenith) >= k)
+	{
+		double lo = 0., hi = 1.;
+		for (int it = 0; it < 50; ++it)
+		{
+			const double mid = 0.5*(lo + hi);
+			setDepths(mid, 0.);
+			(columnMagnitude(zenith) > k ? hi : lo) = mid;
+		}
+		setDepths(0.5*(lo + hi), 0.);
+	}
+	else
+	{
+		// the aerosol column above sea level is 1 in these units; above an observer it is less
+		double lo = 0., hi = 50.;
+		for (int it = 0; it < 60; ++it)
+		{
+			const double mid = 0.5*(lo + hi);
+			setDepths(1., mid);
+			(columnMagnitude(zenith) > k ? hi : lo) = mid;
+		}
+		setDepths(1., 0.5*(lo + hi));
+	}
+	zenithExtinction = static_cast<float>(columnMagnitude(model->getZenithColumns()));
+
+	// The extinction along the rays, against the geometric altitude (densest near the true horizon)
+	table.resize(EXTINCTION_TABLE_SIZE);
+	tableLimb = static_cast<float>(model->getHorizonGeometric());
+	tableSpan = static_cast<float>(M_PI_2 - model->getHorizonGeometric());
+	for (int i = 0; i < EXTINCTION_TABLE_SIZE; ++i)
+	{
+		const double u = static_cast<double>(i)/(EXTINCTION_TABLE_SIZE - 1);
+		const double g = model->getHorizonGeometric() + (M_PI_2 - model->getHorizonGeometric())*u*u*u;
+		const double a = i == 0 ? model->getHorizonApparent() : model->toApparent(g);
+		table[static_cast<size_t>(i)] = static_cast<float>(columnMagnitude(model->columns(a)));
+	}
+	++modelVersion;
+}
+
+float Extinction::magnitude(float sinGeo) const
+{
+	if (!isModelInUse())
+		return airmass(sinGeo, false) * ext_coeff;
+	float x = std::asin(std::clamp(sinGeo, -1.f, 1.f)) - tableLimb;
+	if (x < 0.f)
+	{
+		// behind the Earth: hidden by the ground, which may not be drawn
+		switch (undergroundExtinctionMode)
+		{
+			case UndergroundExtinctionZero:
+				return 0.f;
+			case UndergroundExtinctionMax:
+				return std::max(42.f*ext_coeff, table.front());
+			case UndergroundExtinctionMirror:
+				x = -x;
+		}
+	}
+	const float f = std::cbrt(std::min(x/tableSpan, 1.f))*static_cast<float>(EXTINCTION_TABLE_SIZE - 1);
+	const int i = std::min(static_cast<int>(f), EXTINCTION_TABLE_SIZE - 2);
+	const float t = f - static_cast<float>(i);
+	return table[static_cast<size_t>(i)] + t*(table[static_cast<size_t>(i+1)] - table[static_cast<size_t>(i)]);
+}
+
+float Extinction::getZenithExtinction() const
+{
+	return isModelInUse() ? zenithExtinction : ext_coeff;
+}
+
+Vec3d Extinction::transmission(double geometricAltitude) const
+{
+	if (!isModelInUse())
+		return Vec3d(1.);
+	return columnTransmission(model->columns(std::max(model->toApparent(geometricAltitude), model->getHorizonApparent())));
+}
+
+float Extinction::relativeAirmass(double apparentAltitude) const
+{
+	if (!isModelInUse() || apparentAltitude < model->getHorizonApparent())
+		return -1.f;
+	const double zenith = model->getZenithColumns().rayleigh;
+	return zenith > 0. ? static_cast<float>(model->columns(apparentAltitude).rayleigh/zenith) : -1.f;
+}
+
+double Extinction::getHorizonSineGeometric() const
+{
+	return isModelInUse() ? std::sin(static_cast<double>(tableLimb)) : -0.035;
 }
 
 // airmass computation for cosine of zenith angle z
@@ -96,19 +259,57 @@ float EXTINCTION_airmass(float cosZ, bool apparent_z)
 }
 
 uniform float EXTINCTION_ext_coeff;
+// The extinction along the rays of the ray-traced refraction model (see Extinction::updateModel())
+uniform bool EXTINCTION_useTable;
+uniform highp vec4 EXTINCTION_table[@VECTORS@];
+uniform highp vec3 EXTINCTION_tableLimits; // geometric altitude of the true horizon, span to the zenith (radians), maximum
+highp float EXTINCTION_tableEntry(int i)
+{
+	int v = i/4;
+	int c = i - 4*v;
+	highp vec4 e = EXTINCTION_table[v];
+	return c == 0 ? e.x : (c == 1 ? e.y : (c == 2 ? e.z : e.w));
+}
 float extinctionMagnitude(vec3 altAzPos)
 {
+	if (EXTINCTION_useTable)
+	{
+		highp float x = asin(clamp(altAzPos[2], -1., 1.)) - EXTINCTION_tableLimits.x;
+		if (x < 0.)
+		{
+			if (EXTINCTION_undergroundExtinctionMode == UndergroundExtinctionZero)
+				return 0.;
+			else if (EXTINCTION_undergroundExtinctionMode == UndergroundExtinctionMax)
+				return EXTINCTION_tableLimits.z;
+			x = -x;
+		}
+		highp float f = pow(clamp(x/EXTINCTION_tableLimits.y, 0., 1.), 1./3.)*float(@SIZE@ - 1);
+		int i = int(min(floor(f), float(@SIZE@ - 2)));
+		return mix(EXTINCTION_tableEntry(i), EXTINCTION_tableEntry(i + 1), f - float(i));
+	}
 	return EXTINCTION_airmass(altAzPos[2], false) * EXTINCTION_ext_coeff;
 }
 )").replace("UndergroundExtinctionZero", std::to_string(int(UndergroundExtinctionZero)).c_str())
    .replace("UndergroundExtinctionMax", std::to_string(int(UndergroundExtinctionMax)).c_str())
-   .replace("UndergroundExtinctionMirror", std::to_string(int(UndergroundExtinctionMirror)).c_str());
+   .replace("UndergroundExtinctionMirror", std::to_string(int(UndergroundExtinctionMirror)).c_str())
+   .replace("@VECTORS@", std::to_string(EXTINCTION_TABLE_SIZE/4).c_str())
+   .replace("@SIZE@", std::to_string(EXTINCTION_TABLE_SIZE).c_str());
 }
 
 void Extinction::setForwardTransformUniforms(QOpenGLShaderProgram& program) const
 {
 	program.setUniformValue("EXTINCTION_undergroundExtinctionMode", int(undergroundExtinctionMode));
 	program.setUniformValue("EXTINCTION_ext_coeff", GLfloat(ext_coeff));
+	const bool use = isModelInUse();
+	program.setUniformValue("EXTINCTION_useTable", use);
+	if (!use)
+		return;
+	QVector4D vectors[EXTINCTION_TABLE_SIZE/4];
+	for (int i = 0; i < EXTINCTION_TABLE_SIZE/4; ++i)
+		vectors[i] = QVector4D(table[static_cast<size_t>(4*i)], table[static_cast<size_t>(4*i+1)],
+		                       table[static_cast<size_t>(4*i+2)], table[static_cast<size_t>(4*i+3)]);
+	program.setUniformValueArray("EXTINCTION_table", vectors, EXTINCTION_TABLE_SIZE/4);
+	program.setUniformValue("EXTINCTION_tableLimits", QVector3D(tableLimb, tableSpan, std::max(42.f*ext_coeff, table.front())));
 }
 
 /* ***************************************************************************************************** */

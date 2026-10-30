@@ -280,10 +280,10 @@
       <item>
        <widget class="QCheckBox" name="atmosphereFromAltitudeCheckBox">
         <property name="toolTip">
-         <string>Take the pressure and temperature at the observer from the U.S. Standard Atmosphere 1976 at the altitude of the location, instead of the values below</string>
+         <string>Take the pressure and temperature at the observer from the U.S. Standard Atmosphere 1976 at the altitude of the location, instead of the values below. The extinction coefficient is then the one at sea level: from altitude there is less air and fewer aerosols above the observer.</string>
         </property>
         <property name="text">
-         <string>Pressure and temperature from the altitude (standard atmosphere)</string>
+         <string>Pressure, temperature and extinction from the altitude (standard atmosphere)</string>
         </property>
        </widget>
       </item>
@@ -375,10 +375,10 @@
       <item>
        <widget class="QCheckBox" name="refractionRayTracedCheckBox">
         <property name="toolTip">
-         <string>Refraction from rays traced through a standard atmosphere: correct also from high altitudes, down to the true horizon. Off: the formulas of Saemundsson and Bennett, made for an observer at sea level</string>
+         <string>Refraction and extinction from rays traced through a standard atmosphere: correct also from high altitudes, down to the true horizon. Off: the refraction formulas of Saemundsson and Bennett and the airmass formulas of Young and Rozenberg, made for an observer at sea level</string>
         </property>
         <property name="text">
-         <string>Ray-traced refraction (valid at any altitude)</string>
+         <string>Ray-traced refraction and extinction (valid at any altitude)</string>
         </property>
        </widget>
       </item>

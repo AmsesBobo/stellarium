@@ -484,6 +484,17 @@ void StelSkyDrawer::update(double)
 	}
 
 	updatePhotoHumidity();
+	// The extinction along the rays of the refraction model (on Earth, with the ray-traced refraction). With the
+	// standard atmosphere from the altitude the coefficient is the one at sea level; above it there is less air
+	// and fewer aerosols.
+	extinction.setModel(refraction.isModelInUse() ? refraction.getModel() : nullptr, flagAtmosphereFromAltitude);
+	extinction.setAngstrom(static_cast<float>(photoAerosol.angstrom));
+	extinction.updateModel();
+	if (extinction.getZenithExtinction() != lastZenithExtinction)
+	{
+		lastZenithExtinction = extinction.getZenithExtinction();
+		emit effectiveAtmosphereChanged();
+	}
 	updatePhotoExtinction();
 	// A new realization of the sensor noise every frame, as in the live view of a camera
 	photoNoiseFrame = (photoNoiseFrame + 1u) % 4093u;
