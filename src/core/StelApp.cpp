@@ -1686,7 +1686,8 @@ void StelApp::highGraphicsModeDraw()
 	}
 
 	// Photographic mode: the sky quality meter of the information line (the zenith), a few times per second
-	if (photoMode && skyDrawer->getFlagPhotoInfoLine())
+	// (in the naked eye mode always: the visibility of the stars uses the light of the segments)
+	if (photoMode && (skyDrawer->getFlagPhotoInfoLine() || skyDrawer->getFlagNakedEyeModeActive()))
 	{
 		if (!photoSqmMeter)
 			photoSqmMeter.reset(new StelPhotoMeter(StelPhotoMeter::AreaMeans));

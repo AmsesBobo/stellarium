@@ -260,6 +260,16 @@
              </widget>
             </item>
             <item>
+             <widget class="QCheckBox" name="avertedVisionCheckBox">
+              <property name="toolTip">
+               <string>Look a little beside the faint stars, where the rods are (about 1 magnitude fainter than looking straight at them). The visibility of the stars follows Crumey (2014).</string>
+              </property>
+              <property name="text">
+               <string>Averted vision</string>
+              </property>
+             </widget>
+            </item>
+            <item>
              <widget class="QCheckBox" name="glareCheckBox">
               <property name="toolTip">
                <string>The light scattered in the eye around bright sources (Spencer et al. 1995): a halo that grows with the brightness, and at night the ring of the lenticular halo. It grows with the age (Vos 1984).</string>

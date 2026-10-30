@@ -849,6 +849,21 @@ bool StelSkyDrawer::drawPhotoPointSource(StelPainter* sPainter, const Vec3d& v, 
 	if (!(checkInScreen ? sPainter->getProjector()->projectCheck(v, win) : sPainter->getProjector()->project(v, win)))
 		return false;
 
+	// The naked eye: the stars fainter than the eye sees on the sky behind them fade out (see getEyeLimitingMagnitude())
+	if (getFlagNakedEyeModeActive() && photoFluxMag0 > 0.f)
+	{
+		double sky = getEyeSkyLuminanceAt(static_cast<float>(win[0]), static_cast<float>(win[1]));
+		if (sky < 0.)
+			sky = getEyeZenithSkyLuminance();
+		const double mag = -2.5*std::log10(static_cast<double>(rcMag.luminance*dim/photoFluxMag0));
+		const double above = getEyeLimitingMagnitude(sky) - mag;
+		const double t = qBound(0., (above + EYE_FADE_BELOW)/(EYE_FADE_ABOVE + EYE_FADE_BELOW), 1.);
+		const float visible = static_cast<float>(t*t*(3. - 2.*t));
+		if (!(visible > 0.f))
+			return false;
+		dim *= visible;
+	}
+
 	// No twinkling: a photo integrates over the exposure
 	PhotoStarInstance& star = photoInstances[nbPhotoPointSources];
 	star.center.set(static_cast<float>(win[0]), static_cast<float>(win[1]));

@@ -70,6 +70,7 @@ void NakedEyeDialog::createDialogContent()
 	connectBoolProperty(ui->acuityCheckBox, "StelSkyDrawer.flagEyeAcuity");
 	connectBoolProperty(ui->noiseCheckBox, "StelSkyDrawer.flagEyeNoise");
 	connectBoolProperty(ui->glareCheckBox, "StelSkyDrawer.flagEyeGlare");
+	connectBoolProperty(ui->avertedVisionCheckBox, "StelSkyDrawer.flagEyeAvertedVision");
 	StelSkyDrawer* drawer = StelApp::getInstance().getCore()->getSkyDrawer();
 	connect(ui->adaptNowPushButton, &QPushButton::clicked, drawer, &StelSkyDrawer::resetEyeAdaptation);
 
@@ -111,6 +112,10 @@ void NakedEyeDialog::updateAdaptationInfo()
 	ui->pupilInfoLabel->setText(q_("Pupil: %1 mm.").arg(locale.toString(drawer->getEyePupilDiameter(), 'f', 1)));
 	// The finest detail: one period of the highest resolved frequency, in minutes of arc
 	const double limit = drawer->getEyeAcuityLimit();
-	ui->acuityInfoLabel->setText(q_("Acuity: %1 cycles per degree (the finest detail is %2 arc minutes).")
-	                             .arg(locale.toString(limit, 'f', 1), locale.toString(60./limit, 'f', 1)));
+	QString acuity = q_("Acuity: %1 cycles per degree (the finest detail is %2 arc minutes).")
+	                     .arg(locale.toString(limit, 'f', 1), locale.toString(60./limit, 'f', 1));
+	const double zenith = drawer->getEyeZenithSkyLuminance();
+	if (zenith > 0.)
+		acuity += QStringLiteral(" ") + q_("Faintest star at the zenith: %1 mag.").arg(locale.toString(drawer->getEyeLimitingMagnitude(zenith), 'f', 1));
+	ui->acuityInfoLabel->setText(acuity);
 }

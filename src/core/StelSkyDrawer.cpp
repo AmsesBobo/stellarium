@@ -118,6 +118,7 @@ StelSkyDrawer::StelSkyDrawer(StelCore* acore) :
 	flagEyeAcuity = conf->value("viewing/flag_naked_eye_acuity", true).toBool();
 	flagEyeNoise = conf->value("viewing/flag_naked_eye_noise", true).toBool();
 	flagEyeGlare = conf->value("viewing/flag_naked_eye_glare", true).toBool();
+	flagEyeAvertedVision = conf->value("viewing/flag_naked_eye_averted_vision", true).toBool();
 	eyeDisplayLuminance = qBound(EYE_MIN_DISPLAY_LUMINANCE, conf->value("viewing/naked_eye_display_luminance", EYE_STANDARD_DISPLAY_LUMINANCE).toDouble(),
 	                             EYE_MAX_DISPLAY_LUMINANCE);
 	photoExposureEV = qBound(-12., conf->value("viewing/photographic_exposure_ev", 0.0).toDouble(), 12.);
@@ -538,6 +539,17 @@ void StelSkyDrawer::update(double)
 // Compute the current limit magnitude by dichotomy
 float StelSkyDrawer::computeLimitMagnitude() const
 {
+	// The naked eye: the faintest star it sees anywhere in the view (on the darkest sky), and the fading below it
+	if (getFlagNakedEyeModeActive())
+	{
+		double sky = -1.;
+		for (const float c : eyeSkyCells)
+			if (c > 0.f && (sky < 0. || static_cast<double>(c) < sky))
+				sky = static_cast<double>(c);
+		if (sky < 0.)
+			sky = getEyeZenithSkyLuminance();
+		return static_cast<float>(getEyeLimitingMagnitude(sky) + EYE_FADE_BELOW);
+	}
 	float a=-26.f;
 	float b=30.f;
 	RCMag rcmag;

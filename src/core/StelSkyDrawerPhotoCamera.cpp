@@ -102,6 +102,48 @@ double StelSkyDrawer::getEyePixelsPerDegree(const StelProjector& prj) const
 	return static_cast<double>(prj.getPixelPerRadAtCenter())*(M_PI/180.)*viewFov/eyeScreenFov;
 }
 
+void StelSkyDrawer::setFlagEyeAvertedVision(bool b)
+{
+	if (b == flagEyeAvertedVision)
+		return;
+	flagEyeAvertedVision = b;
+	StelApp::immediateSave("viewing/flag_naked_eye_averted_vision", b);
+	emit flagEyeAvertedVisionChanged(b);
+}
+
+double StelSkyDrawer::getEyeLimitingMagnitude(double skyLuminance) const
+{
+	// The retina gets the light through the pupil of the observer: the light factor relative to the reference observer
+	const double r = qMax(1e-6, eyeLightFactor);
+	const double b0 = 10.8e4*std::pow(10., -0.4*EYE_CRUMEY_SKY_KNEE);
+	const double b = qMax(0., skyLuminance)*r;
+	// the threshold relative to I0, at the retina; then for the star outside the eye
+	double threshold = std::pow(1. + std::sqrt(b/b0), 2.);
+	threshold *= std::pow(10., eyeAdaptation.getThresholdElevation());
+	threshold /= r;
+	double limit = EYE_CRUMEY_DARK_LIMIT - 2.5*std::log10(threshold);
+	if (!flagEyeAvertedVision)
+		limit -= EYE_DIRECT_VISION_LOSS;
+	return limit;
+}
+
+double StelSkyDrawer::getEyeSkyLuminanceAt(float x, float y) const
+{
+	const int grid = StelPhotoMeter::GRID;
+	if (eyeSkyCells.size() != static_cast<size_t>(grid*grid) || eyeSkyCellsWidth <= 0 || eyeSkyCellsHeight <= 0)
+		return -1.;
+	const int i = qBound(0, static_cast<int>(std::floor(x*grid/static_cast<float>(eyeSkyCellsWidth))), grid - 1);
+	const int j = qBound(0, static_cast<int>(std::floor(y*grid/static_cast<float>(eyeSkyCellsHeight))), grid - 1);
+	return static_cast<double>(eyeSkyCells[static_cast<size_t>(j*grid + i)]);
+}
+
+double StelSkyDrawer::getEyeZenithSkyLuminance() const
+{
+	if (photoSqmLuminance > 0.)
+		return photoSqmLuminance;
+	return getPhotoZenithBackgroundLuminance();
+}
+
 double StelSkyDrawer::getEyeLuminancePerSceneValue(const StelProjector& prj) const
 {
 	Q_UNUSED(prj)
@@ -932,6 +974,7 @@ void StelSkyDrawer::savePhotoSettings(QSettings* conf) const
 	conf->setValue("viewing/flag_naked_eye_acuity", getFlagEyeAcuity());
 	conf->setValue("viewing/flag_naked_eye_noise", getFlagEyeNoise());
 	conf->setValue("viewing/flag_naked_eye_glare", getFlagEyeGlare());
+	conf->setValue("viewing/flag_naked_eye_averted_vision", getFlagEyeAvertedVision());
 	conf->setValue("viewing/photographic_exposure_ev", getPhotoExposureEV());
 	conf->setValue("viewing/photographic_exposure_time", getPhotoExposureTime());
 	conf->setValue("viewing/photographic_aperture", photoProgramRunning ? photoUserAperture : photoAperture);

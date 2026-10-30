@@ -109,6 +109,8 @@ class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 	Q_PROPERTY(bool flagEyeNoise READ getFlagEyeNoise WRITE setFlagEyeNoise NOTIFY flagEyeNoiseChanged)
 	//! Naked eye mode: the glare of bright light, scattered in the eye (see getEyeGlareParams())
 	Q_PROPERTY(bool flagEyeGlare READ getFlagEyeGlare WRITE setFlagEyeGlare NOTIFY flagEyeGlareChanged)
+	//! Naked eye mode: the observer looks a little beside the faint stars (averted vision): about 1 magnitude fainter
+	Q_PROPERTY(bool flagEyeAvertedVision READ getFlagEyeAvertedVision WRITE setFlagEyeAvertedVision NOTIFY flagEyeAvertedVisionChanged)
 	//! Exposure correction of the photographic mode, in photographic stops (EV). 0 is the neutral exposure.
 	Q_PROPERTY(double photoExposureEV READ getPhotoExposureEV WRITE setPhotoExposureEV NOTIFY photoExposureEVChanged)
 	//! Exposure time of the virtual camera in the photographic mode, in seconds.
@@ -276,6 +278,27 @@ public:
 	//! Naked eye mode: the luminance (cd/m^2, reference) of a scene value after the exposure compensation, for the
 	//! colors of the cones
 	double getEyeLuminancePerSceneValue(const StelProjector& prj) const;
+	//! Naked eye mode: the faintest star the eye sees on a sky of the luminance (cd/m^2): the threshold of Crumey
+	//! (2014, "Human contrast threshold and astronomical visibility", MNRAS 442, 2600) for point sources,
+	//! I = I0 (1 + sqrt(B/B0))^2, with I0 a star of EYE_CRUMEY_DARK_LIMIT and B0 a sky of EYE_CRUMEY_SKY_KNEE
+	//! mag/arcsec^2: the limit m = 7.93 - 5 log10(10^(4.316 - S/5) + 1) for the sky brightness S (6.6 at 22
+	//! mag/arcsec^2, 6.1 at 21, 4.0 at 18). That is for averted vision (the rods around the fovea); looking straight
+	//! at the star costs EYE_DIRECT_VISION_LOSS. The eye of the observer counts: an eye still adapting to the dark
+	//! sees less (the elevation of its threshold, see StelEyeAdaptation), and so does a small pupil (the light
+	//! factor of the pupil, see StelEyePupil).
+	double getEyeLimitingMagnitude(double skyLuminance) const;
+	static constexpr double EYE_CRUMEY_DARK_LIMIT = 7.93;
+	static constexpr double EYE_CRUMEY_SKY_KNEE = 21.58;
+	static constexpr double EYE_DIRECT_VISION_LOSS = 1.0;
+	//! Naked eye mode: the stars fade out from this much above the limit (magnitudes) to this much below it
+	static constexpr double EYE_FADE_ABOVE = 0.7;
+	static constexpr double EYE_FADE_BELOW = 0.3;
+	//! Naked eye mode: the luminance of the sky behind the point (pixels of the scene, from the lower left), from the
+	//! segments of the meter (cd/m^2); -1 when not known
+	double getEyeSkyLuminanceAt(float x, float y) const;
+	//! Naked eye mode: the luminance of the sky at the zenith (cd/m^2): as a sky quality meter reads it, or the
+	//! model of the night sky when the zenith is not in view
+	double getEyeZenithSkyLuminance() const;
 	//! Naked eye mode: the glare of the eye, the point spread function of Spencer, Shirley, Zimmerman & Greenberg
 	//! (1995, "Physically-based glare effects for digital images", SIGGRAPH 95), in degrees for the eye:
 	//!   f0 = exp(-(theta/0.02)^2)       the core (it stays the image itself)
@@ -1034,6 +1057,8 @@ public slots:
 	bool getFlagEyeNoise() const {return flagEyeNoise;}
 	void setFlagEyeGlare(bool b);
 	bool getFlagEyeGlare() const {return flagEyeGlare;}
+	void setFlagEyeAvertedVision(bool b);
+	bool getFlagEyeAvertedVision() const {return flagEyeAvertedVision;}
 
 	//! Set the exposure time of the virtual camera, in seconds (limited to 1/8000 s ... 3600 s).
 	void setPhotoExposureTime(double seconds);
@@ -1405,6 +1430,7 @@ signals:
 	void flagEyeAcuityChanged(bool b);
 	void flagEyeNoiseChanged(bool b);
 	void flagEyeGlareChanged(bool b);
+	void flagEyeAvertedVisionChanged(bool b);
 	//! Emitted when the exposure correction of the photographic mode is changed
 	void photoExposureEVChanged(double ev);
 	//! Emitted when the exposure time of the virtual camera is changed
@@ -1809,6 +1835,11 @@ private:
 	bool flagEyeAcuity = true;
 	bool flagEyeNoise = true;
 	bool flagEyeGlare = true;
+	bool flagEyeAvertedVision = true;
+	//! Naked eye mode: the luminance of the segments of the meter (cd/m^2, scene), GRID x GRID from the lower left,
+	//! and the size of the measured image (pixels)
+	std::vector<float> eyeSkyCells;
+	int eyeSkyCellsWidth = 0, eyeSkyCellsHeight = 0;
 	double eyeLightFactor = 1.;
 	//! The halo of the stars in the picture (the camera's, none for the eye)
 	float getPhotoHaloFractionActive() const {return getFlagPhotoCameraActive() ? photoHaloFraction : 0.f;}

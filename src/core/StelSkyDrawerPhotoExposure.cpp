@@ -526,8 +526,15 @@ void StelSkyDrawer::applyPhotoSqmReading(const StelPhotoMeter::Reading& reading)
 	if (reading.cells.size() != static_cast<size_t>(grid)*grid || reading.width <= 0 || reading.height <= 0 || !(reading.sceneScale > 0.))
 	{
 		photoSqmLuminance = -1.;
+		eyeSkyCells.clear();
 		return;
 	}
+	// The naked eye mode: the light of the sky behind the stars (the threshold of their visibility)
+	eyeSkyCells.resize(reading.cells.size());
+	for (size_t i=0; i<reading.cells.size(); ++i)
+		eyeSkyCells[i] = static_cast<float>(static_cast<double>(reading.cells[i])/reading.sceneScale);
+	eyeSkyCellsWidth = reading.width;
+	eyeSkyCellsHeight = reading.height;
 	// The field of a SQM-L: about 20 degrees full width at half maximum, as a Gaussian of the angle from its axis
 	constexpr double SIGMA = 20./2.3548*M_PI/180.;
 	static const double fullWeight = []() {
@@ -629,6 +636,10 @@ void StelSkyDrawer::drawPhotoInfoLine(StelCore* core) const
 			parts << QString("%1 +%2 mag").arg(qc_("dark adaptation", "eye: how much brighter the faintest visible star is than when adapted"),
 			                                    locale.toString(elevation, 'f', 1));
 		parts << QString("%1 %2 mm").arg(qc_("pupil", "eye: diameter of the pupil"), locale.toString(eyePupil.getDiameter(), 'f', 1));
+		// The faintest star the eye sees at the zenith now
+		const double zenith = getEyeZenithSkyLuminance();
+		if (zenith > 0.)
+			parts << QString("%1 %2").arg(qc_("NELM", "naked eye limiting magnitude"), locale.toString(getEyeLimitingMagnitude(zenith), 'f', 1));
 		if (std::fabs(photoExposureEV) > 0.01)
 			parts << QString("%1 EV").arg(QString::asprintf("%+.1f", photoExposureEV));
 	}
