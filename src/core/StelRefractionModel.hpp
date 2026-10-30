@@ -112,6 +112,11 @@ public:
 	const std::vector<double>& getApparentSamples() const {return apparent;}
 	const std::vector<double>& getGeometricSamples() const {return geometric;}
 
+	//! Fraction of the boundary layer with the given top (m) at the altitude h (m): 1 inside, 0 above, a smooth top
+	static double boundaryLayerFraction(double h, double top);
+	//! Density of the aerosols at the altitude h (m) at the normal humidity, against the density in the boundary layer
+	//! with the given top (m): 1 in the layer, the rest of the free troposphere above
+	static double aerosolShape(double h, double top);
 	//! Pressure (hPa) of the U.S. Standard Atmosphere 1976 at the given altitude (m)
 	static double standardPressure(double altitude);
 	//! Temperature (degrees Celsius) of the U.S. Standard Atmosphere 1976 at the given altitude (m)
@@ -134,9 +139,8 @@ private:
 	std::vector<Columns> lineColumns;
 	Columns zenith, zenithNormal;
 	double aerosolNorm = 1.;
-	//! Fraction of the boundary layer at the altitude (1 inside, 0 above, a smooth top)
-	double boundaryLayerFraction(double h) const;
-	double aerosolShape(double h) const;
+	double boundaryLayerFraction(double h) const {return boundaryLayerFraction(h, conditions.aerosolLayerTop);}
+	double aerosolShape(double h) const {return aerosolShape(h, conditions.aerosolLayerTop);}
 
 	void buildAtmosphere();
 	void traceRays();

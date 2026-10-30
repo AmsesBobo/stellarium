@@ -29,6 +29,7 @@
 #include "StelPainter.hpp"
 #include "StelProjector.hpp"
 #include "StelUtils.hpp"
+#include "StelRefractionModel.hpp"
 
 #include <QSettings>
 #include <QDir>
@@ -66,11 +67,74 @@ constexpr double RAYLEIGH_SCALE_HEIGHT = 8., AEROSOL_SCALE_HEIGHT = 1.2;
 // Garstang's emission function: G of the light that falls on the ground is reflected, F goes directly upwards
 constexpr double GARSTANG_G = 0.15, GARSTANG_F = 0.15;
 
-double rowAltitude(int row)
+// The altitude of a row of the map: from the horizon (limb: the sea-level horizon of an elevated observer, below
+// 0 degrees) to the zenith, denser near the horizon
+double rowAltitude(int row, double limb = 0.)
 {
 	const double v = static_cast<double>(row)/(LightDomes::MAP_ALTITUDES - 1);
-	return 0.5*M_PI*v*v;
+	return limb + (0.5*M_PI - limb)*v*v;
 }
+
+// The geometric depression of the sea-level horizon for an observer at the altitude h (km)
+double horizonDip(double h)
+{
+	return h > 0. ? -std::acos(EARTH_RADIUS_KM/(EARTH_RADIUS_KM + h)) : 0.;
+}
+
+// The vertical profile of the aerosols: the boundary layer of the ray-traced model (StelRefractionModel, with the
+// growth of its aerosols by the humidity), or an exponential with a scale height of 1.2 km (top 0)
+struct AerosolProfile
+{
+	double top = 0.;      // km; 0: the exponential
+	double growth = 1.;
+	static constexpr double STEP = 0.01, MAX_HEIGHT = 50.;  // km
+	std::vector<double> cumulative;  // column of the relative density from sea level (km)
+	double density0 = 1.;
+	explicit AerosolProfile(double topKm = 0., double g = 1.) : top(topKm), growth(g)
+	{
+		if (top <= 0.)
+			return;
+		density0 = absolute(0.);
+		const int n = static_cast<int>(MAX_HEIGHT/STEP) + 1;
+		cumulative.resize(static_cast<size_t>(n));
+		cumulative[0] = 0.;
+		for (int i = 1; i < n; ++i)
+			cumulative[static_cast<size_t>(i)] = cumulative[static_cast<size_t>(i-1)] + relative((i - 0.5)*STEP)*STEP;
+	}
+	double absolute(double h) const
+	{
+		const double m = 1000.*h, t = 1000.*top;
+		return StelRefractionModel::aerosolShape(m, t)*(1. + (growth - 1.)*StelRefractionModel::boundaryLayerFraction(m, t));
+	}
+	// density against the one at sea level
+	double relative(double h) const
+	{
+		if (top <= 0.)
+			return std::exp(-qMax(0., h)/AEROSOL_SCALE_HEIGHT);
+		return absolute(qMax(0., h))/density0;
+	}
+	double cumulativeAt(double h) const
+	{
+		const double f = qBound(0., h/STEP, static_cast<double>(cumulative.size() - 1));
+		const size_t i = qMin(static_cast<size_t>(f), cumulative.size() - 2);
+		const double t = f - static_cast<double>(i);
+		return cumulative[i] + t*(cumulative[i+1] - cumulative[i]);
+	}
+	// the column of the relative density between the heights h1 and h2 (km), signed
+	double column(double h1, double h2) const
+	{
+		h1 = qMax(0., h1);
+		h2 = qMax(0., h2);
+		if (top <= 0.)
+			return AEROSOL_SCALE_HEIGHT*(std::exp(-h1/AEROSOL_SCALE_HEIGHT) - std::exp(-h2/AEROSOL_SCALE_HEIGHT));
+		return cumulativeAt(h2) - cumulativeAt(h1);
+	}
+	// the vertical column above sea level (km): the thickness of a uniform layer of the density at sea level
+	double thickness() const
+	{
+		return top <= 0. ? AEROSOL_SCALE_HEIGHT : cumulative.back();
+	}
+};
 
 double kernelDistance(int i)
 {
@@ -79,7 +143,7 @@ double kernelDistance(int i)
 
 // The optical depths of the two kinds of scatterers between the heights h1 and h2 (km) over a straight path of the
 // length L (km), the height changing linearly along it: per unit of their scattering coefficient at sea level
-inline void columns(double h1, double h2, double L, double& rayleigh, double& aerosol)
+inline void columns(const AerosolProfile& profile, double h1, double h2, double L, double& rayleigh, double& aerosol)
 {
 	h1 = qMax(0., h1);
 	h2 = qMax(0., h2);
@@ -90,7 +154,7 @@ inline void columns(double h1, double h2, double L, double& rayleigh, double& ae
 		return H*L/dh*(std::exp(-h1/H) - std::exp(-h2/H));
 	};
 	rayleigh = column(RAYLEIGH_SCALE_HEIGHT);
-	aerosol = column(AEROSOL_SCALE_HEIGHT);
+	aerosol = std::fabs(dh) < 1e-3 ? profile.relative(0.5*(h1 + h2))*L : profile.column(h1, h2)*L/dh;
 }
 
 struct Air
@@ -99,6 +163,7 @@ struct Air
 	Vec3d aerosol;   // extinction coefficients of the aerosols at sea level (1/km), delta-M scaled (see makeAir())
 	Vec3d aerosolScattering;  // their scattering coefficients (delta-M scaled)
 	double g = 0.7;  // asymmetry of the aerosol scattering (delta-M scaled)
+	const AerosolProfile* profile = nullptr;  // the vertical profile of the aerosols
 	Vec3d depth(double rayleighColumn, double aerosolColumn) const
 	{
 		return rayleigh*rayleighColumn + aerosol*aerosolColumn;
@@ -113,15 +178,16 @@ inline double height(const Vec3d& p) { return p.norm() - EARTH_RADIUS_KM; }
 // optical depth says). The delta-M approximation (Wiscombe 1977) treats the forward peak (the fraction g^2 of the
 // scattered light) as not scattered: the extinction becomes beta (1 - albedo g^2), the scattering beta albedo (1 - g^2)
 // with the asymmetry g/(1 + g).
-Air makeAir(double aerosolDepth, double angstrom, double g, double albedo)
+Air makeAir(double aerosolDepth, double angstrom, double g, double albedo, const AerosolProfile& profile)
 {
 	Air air;
+	air.profile = &profile;
 	const double f = g*g;
 	for (int c=0; c<3; ++c)
 	{
 		const double lambda = WAVELENGTHS[c];
 		air.rayleigh[c] = 0.0088*std::pow(lambda, -4.05)/RAYLEIGH_SCALE_HEIGHT;
-		const double extinction = aerosolDepth*std::pow(lambda/0.55, -angstrom)/AEROSOL_SCALE_HEIGHT;
+		const double extinction = aerosolDepth*std::pow(lambda/0.55, -angstrom)/profile.thickness();
 		air.aerosol[c] = extinction*(1. - albedo*f);
 		air.aerosolScattering[c] = extinction*albedo*(1. - f);
 	}
@@ -155,7 +221,7 @@ Vec3d scatteredLight(const Air& air, double h0, double d, double z, double a)
 		if (h < 0. || h > 50.)
 			break;
 		double cr, ca;
-		columns(hPrev, h, s - sPrev, cr, ca);
+		columns(*air.profile, hPrev, h, s - sPrev, cr, ca);
 		toObserver += air.depth(cr, ca);
 		hPrev = h;
 		sPrev = s;
@@ -169,15 +235,15 @@ Vec3d scatteredLight(const Air& air, double h0, double d, double z, double a)
 		// from the town up to P: two straight pieces (the path curves over the Earth)
 		const double hMid = height(0.5*(S + P));
 		double r1, a1, r2, a2;
-		columns(0., hMid, 0.5*r, r1, a1);
-		columns(hMid, h, 0.5*r, r2, a2);
+		columns(*air.profile, 0., hMid, 0.5*r, r1, a1);
+		columns(*air.profile, hMid, h, 0.5*r, r2, a2);
 		const Vec3d fromTown = air.depth(r1 + r2, a1 + a2);
 		const double c = -(SP*u)/r;  // cosine of the scattering angle (from S->P towards P->O)
 		const double rayleighPhase = 3./(16.*M_PI)*(1. + c*c);
 		const double q = 1. + g*g - 2.*g*c;
 		const double hgPhase = (1. - g*g)/(4.*M_PI*q*std::sqrt(q));
 		const double wR = std::exp(-h/RAYLEIGH_SCALE_HEIGHT)*rayleighPhase;
-		const double wA = std::exp(-h/AEROSOL_SCALE_HEIGHT)*hgPhase;
+		const double wA = air.profile->relative(h)*hgPhase;
 		const double base = emission/(r*r*1e6)*ds;  // lux per scattering coefficient
 		for (int k=0; k<3; ++k)
 			total[k] += base*(air.rayleigh[k]*wR + air.aerosolScattering[k]*wA)*std::exp(-fromTown[k] - toObserver[k]);
@@ -397,8 +463,9 @@ double LightDomes::nearbyLightRatio(double depth, double angstrom, double g, dou
 	// The lamps around the observer as an even carpet of light from 0.25 to 20 km, seen at the zenith (green); the
 	// optical depths at the observer taken back to sea level
 	const double toSeaLevel = std::exp(altitudeKm/AEROSOL_SCALE_HEIGHT);
-	const Air now = makeAir(depth*toSeaLevel, angstrom, g, albedo);
-	const Air normal = makeAir(normalDepth*toSeaLevel, normalAngstrom, normalG, normalAlbedo);
+	const AerosolProfile exponential;
+	const Air now = makeAir(depth*toSeaLevel, angstrom, g, albedo, exponential);
+	const Air normal = makeAir(normalDepth*toSeaLevel, normalAngstrom, normalG, normalAlbedo, exponential);
 	double a = 0., b = 0.;
 	constexpr int N = 24;
 	const double ratio = std::pow(20./0.25, 1./N);
@@ -535,7 +602,22 @@ LightDomes::AtmosphereKey LightDomes::currentAtmosphere() const
 	// The haze of the sky settings (the extinction coefficient and the humidity), at the observer, taken back to sea
 	// level; quantized, so that small changes need no new table
 	const StelSkyDrawer::PhotoAerosol& haze = core->getSkyDrawer()->getPhotoAerosol();
-	key.aerosolDepth = std::round(qMin(3., haze.depth*std::exp(key.altitude/AEROSOL_SCALE_HEIGHT))*200.)/200.;
+	const Extinction& extinction = core->getSkyDrawer()->getExtinction();
+	const StelRefractionModel* model = extinction.getModel();
+	if (model)
+	{
+		// The boundary layer of the ray-traced model: its top, the growth of its aerosols by the humidity, and the
+		// vertical depth of all aerosols above sea level (with the growth)
+		const auto& c = model->getConditions();
+		key.layerTop = qMax(0.05, std::round(c.aerosolLayerTop/50.)*0.05);
+		key.growth = std::round(c.aerosolLayerGrowth*20.)/20.;
+		double column = 0.;
+		for (double m = 5.; m < 20000.; m += 10.)
+			column += model->aerosolDensity(m)*10.;
+		key.aerosolDepth = std::round(qMin(3., extinction.getAerosolSeaLevelDepth()*column)*200.)/200.;
+	}
+	else
+		key.aerosolDepth = std::round(qMin(3., haze.depth*std::exp(key.altitude/AEROSOL_SCALE_HEIGHT))*200.)/200.;
 	key.angstrom = std::round(haze.angstrom*20.)/20.;
 	key.asymmetry = std::round(haze.asymmetry*100.)/100.;
 	key.albedo = std::round(haze.albedo*100.)/100.;
@@ -545,17 +627,17 @@ LightDomes::AtmosphereKey LightDomes::currentAtmosphere() const
 namespace
 {
 // The table only depends on the atmosphere: it is kept in the cache directory (a few seconds to compute)
-QString kernelCacheFile(double aerosolDepth, double altitude, double angstrom, double g, double albedo)
+QString kernelCacheFile(double aerosolDepth, double altitude, double angstrom, double g, double albedo, double layerTop, double growth)
 {
-	return QString("%1/lightdomes/kernel-v3-%2-%3-%4-%5-%6.bin").arg(StelFileMgr::getCacheDir()).arg(qRound(aerosolDepth*1000.)).arg(qRound(altitude*1000.))
-	        .arg(qRound(angstrom*100.)).arg(qRound(g*100.)).arg(qRound(albedo*100.));
+	return QString("%1/lightdomes/kernel-v4-%2-%3-%4-%5-%6-%7-%8.bin").arg(StelFileMgr::getCacheDir()).arg(qRound(aerosolDepth*1000.)).arg(qRound(altitude*1000.))
+	        .arg(qRound(angstrom*100.)).arg(qRound(g*100.)).arg(qRound(albedo*100.)).arg(qRound(layerTop*1000.)).arg(qRound(growth*100.));
 }
 }
 
 std::shared_ptr<LightDomes::Kernel> LightDomes::computeKernel(const AtmosphereKey& key)
 {
 	const size_t count = static_cast<size_t>(3)*KERNEL_DISTANCES*MAP_ALTITUDES*KERNEL_AZIMUTHS;
-	const QString cacheFile = kernelCacheFile(key.aerosolDepth, key.altitude, key.angstrom, key.asymmetry, key.albedo);
+	const QString cacheFile = kernelCacheFile(key.aerosolDepth, key.altitude, key.angstrom, key.asymmetry, key.albedo, key.layerTop, key.growth);
 	{
 		QFile f(cacheFile);
 		if (f.open(QIODevice::ReadOnly) && f.size() == static_cast<qint64>(count*sizeof(float)))
@@ -573,12 +655,15 @@ std::shared_ptr<LightDomes::Kernel> LightDomes::computeKernel(const AtmosphereKe
 	std::vector<int> jobs(KERNEL_DISTANCES*MAP_ALTITUDES);
 	std::iota(jobs.begin(), jobs.end(), 0);
 	Kernel* k = kern.get();
-	const Air air = makeAir(key.aerosolDepth, key.angstrom, key.asymmetry, key.albedo);
-	QtConcurrent::blockingMap(jobs, [k, key, air](int job)
+	const AerosolProfile profile(key.layerTop, key.growth);
+	const Air air = makeAir(key.aerosolDepth, key.angstrom, key.asymmetry, key.albedo, profile);
+	// From altitude the rows reach down to the sea-level horizon (the rays below it hit the ground)
+	const double limb = horizonDip(key.altitude);
+	QtConcurrent::blockingMap(jobs, [k, key, air, limb](int job)
 	{
 		const int d = job / MAP_ALTITUDES, row = job % MAP_ALTITUDES;
 		const double dist = kernelDistance(d);
-		const double z = 0.5*M_PI - qMax(rowAltitude(row), 0.002);  // the horizon itself: just above it
+		const double z = 0.5*M_PI - qMax(rowAltitude(row, limb), limb + 0.002);  // the horizon itself: just above it
 		for (int a=0; a<KERNEL_AZIMUTHS; ++a)
 		{
 			const Vec3d L = scatteredLight(air, key.altitude, dist, z, a*KERNEL_AZIMUTH_STEP*M_PI/180.);
@@ -810,11 +895,13 @@ std::shared_ptr<LightDomes::Result> LightDomes::computeMap(std::shared_ptr<Kerne
 	// The zenith, and the light on level ground: the integral of L sin(alt) over the sky
 	double zenith = 0.;
 	Vec3d E(0.);
+	// (rows below 0 degrees, seen from altitude, do not light level ground)
+	const double limb = horizonDip(kern->key.altitude);
 	for (int row=0; row<MAP_ALTITUDES; ++row)
 	{
-		const double alt = rowAltitude(row);
-		const double lo = row > 0 ? 0.5*(rowAltitude(row - 1) + alt) : 0.;
-		const double hi = row < MAP_ALTITUDES - 1 ? 0.5*(alt + rowAltitude(row + 1)) : 0.5*M_PI;
+		const double alt = rowAltitude(row, limb);
+		const double lo = qMax(0., row > 0 ? 0.5*(rowAltitude(row - 1, limb) + alt) : limb);
+		const double hi = qMax(0., row < MAP_ALTITUDES - 1 ? 0.5*(alt + rowAltitude(row + 1, limb)) : 0.5*M_PI);
 		const double weight = (std::sin(hi)*std::sin(hi) - std::sin(lo)*std::sin(lo))*0.5*(2.*M_PI/MAP_AZIMUTHS);  // sin(alt) cos(alt) dalt daz
 		for (int col=0; col<MAP_AZIMUTHS; ++col)
 		{

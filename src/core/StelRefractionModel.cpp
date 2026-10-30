@@ -205,18 +205,17 @@ void StelRefractionModel::refractivity(double h, double& nm1, double& dnm1) cons
 	dnm1 = nm1*(b - a)/gridStep;
 }
 
-double StelRefractionModel::boundaryLayerFraction(double h) const
+double StelRefractionModel::boundaryLayerFraction(double h, double top)
 {
-	const double top = conditions.aerosolLayerTop;
 	const double width = std::max(50., 0.1*top);
 	const double x = (h - top)/width;
 	return x > 40. ? 0. : 1./(1. + std::exp(x));
 }
 
-double StelRefractionModel::aerosolShape(double h) const
+double StelRefractionModel::aerosolShape(double h, double top)
 {
-	const double s = boundaryLayerFraction(h);
-	const double above = FREE_TROPOSPHERE_FRACTION*std::exp(-std::max(h - conditions.aerosolLayerTop, 0.)/FREE_TROPOSPHERE_SCALE_HEIGHT);
+	const double s = boundaryLayerFraction(h, top);
+	const double above = FREE_TROPOSPHERE_FRACTION*std::exp(-std::max(h - top, 0.)/FREE_TROPOSPHERE_SCALE_HEIGHT);
 	return s + (1. - s)*above;
 }
 

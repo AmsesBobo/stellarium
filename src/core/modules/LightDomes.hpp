@@ -193,10 +193,12 @@ private:
 		double aerosolDepth = -1.; //!< vertical aerosol optical depth at sea level, 550 nm
 		double altitude = -1.;     //!< of the observer, km
 		double angstrom = 1.3, asymmetry = 0.7, albedo = 0.9;  //!< of the aerosols (the humidity)
+		double layerTop = 0.;      //!< top of the boundary layer that holds the aerosols, km (0: exponential, 1.2 km)
+		double growth = 1.;        //!< growth of its aerosols by the humidity
 		bool operator==(const AtmosphereKey& o) const
 		{
 			return aerosolDepth == o.aerosolDepth && altitude == o.altitude && angstrom == o.angstrom
-			       && asymmetry == o.asymmetry && albedo == o.albedo;
+			       && asymmetry == o.asymmetry && albedo == o.albedo && layerTop == o.layerTop && growth == o.growth;
 		}
 	};
 	AtmosphereKey currentAtmosphere() const;
