@@ -31,6 +31,7 @@
 #include "StelLocation.hpp"
 #include "StelObserver.hpp"
 #include "SolarSystem.hpp"
+#include "Planet.hpp"
 #include "StelModuleMgr.hpp"
 #include "LandscapeMgr.hpp"
 #include "SpecificTimeMgr.hpp"
@@ -146,6 +147,19 @@ float StelObject::getVMagnitude(const StelCore* core) const
 {
 	Q_UNUSED(core)
 	return 99.f;
+}
+
+// The ray-traced refraction model when it puts the true horizon (the sea-level surface) clearly below 0 degrees: an
+// elevated observer on Earth with the atmosphere
+static std::shared_ptr<const StelRefractionModel> trueHorizonModel(const StelCore* core)
+{
+	const StelSkyDrawer* drawer = core->getSkyDrawer();
+	if (!drawer->getFlagHasAtmosphere() || !drawer->getRefraction().isModelInUse())
+		return nullptr;
+	auto model = drawer->getRefraction().getModel();
+	if (!model || model->getHorizonApparent() > -0.005*M_PI_180)
+		return nullptr;
+	return model;
 }
 
 Vec4d StelObject::getRTSTime(const StelCore *core, const double altitude) const
@@ -592,7 +606,20 @@ QString StelObject::getCommonInfoString(const StelCore *core, const InfoStringGr
 		az = direction*M_PI - az;
 		if (az > M_PI*2)
 			az -= M_PI*2;
-		if (withAtmosphere && (alt_app>-2.0*M_PI/180.0)) // Don't show refracted altitude much below horizon where model is meaningless.
+		// From altitude: the altitude above the true horizon (the sea-level surface), after the apparent altitude
+		const auto horizonModel = trueHorizonModel(core);
+		QString trueHorizonNote;
+		if (horizonModel && alt_app > horizonModel->getHorizonApparent())
+		{
+			const double h = alt_app - horizonModel->getHorizonApparent();
+			// (the altitudes are given with their sign)
+			const QString value = withDecimalDegreeCoords ? StelUtils::radToDecDegStr(h) : StelUtils::radToDmsStr(h, true);
+			// TRANSLATORS: the altitude above the true horizon (the sea-level horizon seen from an elevated observer), e.g. "(true horizon +1°12')"
+			trueHorizonNote = QString(" (%1)").arg(q_("true horizon %1").arg(value));
+		}
+		// Don't show refracted altitude much below horizon where model is meaningless (with the ray-traced model: below the true horizon)
+		const double minAltitude = horizonModel ? horizonModel->getHorizonApparent() : -2.0*M_PI/180.0;
+		if (withAtmosphere && (alt_app>minAltitude))
 		{
 			if (withDecimalDegreeCoords)
 			{
@@ -632,9 +659,9 @@ QString StelObject::getCommonInfoString(const StelCore *core, const InfoStringGr
 		}
 
 		if (withTables)
-			res += QString("<tr><td>%1:</td><td style='text-align:right;'>%2/</td><td style='text-align:right;'>%3</td><td>%4</td></tr>").arg(AzAlt, firstCoordinate, secondCoordinate, apparent);
+			res += QString("<tr><td>%1:</td><td style='text-align:right;'>%2/</td><td style='text-align:right;'>%3</td><td>%4</td></tr>").arg(AzAlt, firstCoordinate, secondCoordinate, apparent + trueHorizonNote);
 		else
-			res += QString("%1: %2/%3 %4<br/>").arg(AzAlt, firstCoordinate, secondCoordinate, apparent);
+			res += QString("%1: %2/%3 %4<br/>").arg(AzAlt, firstCoordinate, secondCoordinate, apparent + trueHorizonNote);
 		res += getExtraInfoStrings(AltAzi).join("");
 	}
 
@@ -862,10 +889,35 @@ QString StelObject::getCommonInfoString(const StelCore *core, const InfoStringGr
 		}
 
 		// Avoid frequent RTS recalculation
-		if ((currentObjStr != prevObjStr) || (currentPlanet != prevPlanet) || dayChanged || locationChanged)
+		const bool rtsChanged = (currentObjStr != prevObjStr) || (currentPlanet != prevPlanet) || dayChanged || locationChanged;
+		if (rtsChanged)
 		{
 			rts = getRTSTime(core);
 		}
+		// From altitude also the rise and set at the true horizon (the sea-level surface): the upper limb at the
+		// geometric altitude of the ray that grazes it
+		static Vec4d rtsTrue;
+		static double prevTrueHorizon = 0.;
+		const auto horizonModel = trueHorizonModel(core);
+		const double trueHorizon = horizonModel ? horizonModel->getHorizonGeometric() : 0.;
+		if (horizonModel && (rtsChanged || trueHorizon != prevTrueHorizon))
+		{
+			const Planet* planet = dynamic_cast<const Planet*>(this);
+			const double semidiameter = planet ? planet->getAngularRadiusNoScale(core) : 0.;  // degrees
+			rtsTrue = getRTSTime(core, trueHorizon*M_180_PI - semidiameter);
+		}
+		prevTrueHorizon = trueHorizon;
+		// " (true horizon 06:41:30)" after a rise (0) or set (2), or nothing
+		auto trueHorizonTime = [&](int i) -> QString {
+			if (!horizonModel)
+				return QString();
+			int y, m, d;
+			StelUtils::getDateFromJulianDay(rtsTrue[i]+utcShift, &y, &m, &d);
+			const bool none = rtsTrue[3]<0 || rtsTrue[3]>50 || (i==0 && rtsTrue[3]==30) || (i==2 && rtsTrue[3]==40) || d != currentDay;
+			const QString time = none ? dash : StelUtils::hoursToHmsStr(StelUtils::getHoursFromJulianDay(rtsTrue[i]+utcShift), true);
+			// TRANSLATORS: rise or set at the true horizon (the sea-level horizon seen from an elevated observer), e.g. "(true horizon 06:41:30)"
+			return QString(" (%1)").arg(q_("true horizon %1").arg(time));
+		};
 		QString sTransit = qc_("Transit", "celestial event; passage across a meridian");
 		QString sRise = qc_("Rise", "celestial event");
 		QString sSet = qc_("Set", "celestial event");
@@ -882,17 +934,17 @@ QString StelObject::getCommonInfoString(const StelCore *core, const InfoStringGr
 		if (rts[3]==30 || rts[3]<0 || rts[3]>50 || day != currentDay) // no rise
 		{
 			if (withTables)
-				res += QString("<tr><td>%1:</td><td style='text-align:right;'>%2</td></tr>").arg(sRise, dash);
+				res += QString("<tr><td>%1:</td><td style='text-align:right;'>%2</td><td>%3</td></tr>").arg(sRise, dash, trueHorizonTime(0));
 			else
-				res += QString("%1: %2<br/>").arg(sRise, dash);
+				res += QString("%1: %2%3<br/>").arg(sRise, dash, trueHorizonTime(0));
 		}
 		else
 		{
 			hour = StelUtils::getHoursFromJulianDay(rts[0]+utcShift);
 			if (withTables)
-				res += QString("<tr><td>%1:</td><td style='text-align:right;'>%2</td></tr>").arg(sRise, StelUtils::hoursToHmsStr(hour, true));
+				res += QString("<tr><td>%1:</td><td style='text-align:right;'>%2</td><td>%3</td></tr>").arg(sRise, StelUtils::hoursToHmsStr(hour, true), trueHorizonTime(0));
 			else
-				res += QString("%1: %2<br/>").arg(sRise, StelUtils::hoursToHmsStr(hour, true));
+				res += QString("%1: %2%3<br/>").arg(sRise, StelUtils::hoursToHmsStr(hour, true), trueHorizonTime(0));
 
 			sunrise = hour;
 		}
@@ -920,16 +972,16 @@ QString StelObject::getCommonInfoString(const StelCore *core, const InfoStringGr
 		if (rts[3]==40 || rts[3]<0 || rts[3]>50 || day != currentDay) // no set
 		{
 			if (withTables)
-				res += QString("<tr><td>%1:</td><td style='text-align:right;'>%2</td></tr>").arg(sSet, dash);
+				res += QString("<tr><td>%1:</td><td style='text-align:right;'>%2</td><td>%3</td></tr>").arg(sSet, dash, trueHorizonTime(2));
 			else
-				res += QString("%1: %2<br/>").arg(sSet, dash);
+				res += QString("%1: %2%3<br/>").arg(sSet, dash, trueHorizonTime(2));
 		}
 		else {
 			hour = StelUtils::getHoursFromJulianDay(rts[2]+utcShift);
 			if (withTables)
-				res += QString("<tr><td>%1:</td><td style='text-align:right;'>%2</td></tr>").arg(sSet, StelUtils::hoursToHmsStr(hour, true));
+				res += QString("<tr><td>%1:</td><td style='text-align:right;'>%2</td><td>%3</td></tr>").arg(sSet, StelUtils::hoursToHmsStr(hour, true), trueHorizonTime(2));
 			else
-				res += QString("%1: %2<br/>").arg(sSet, StelUtils::hoursToHmsStr(hour, true));
+				res += QString("%1: %2%3<br/>").arg(sSet, StelUtils::hoursToHmsStr(hour, true), trueHorizonTime(2));
 
 			sunset = hour;
 		}
