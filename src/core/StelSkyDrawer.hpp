@@ -209,6 +209,9 @@ class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 	//! On Earth: take the pressure and temperature at the observer from the U.S. Standard Atmosphere 1976 at the
 	//! altitude of the observer instead of the set values (atmospherePressure, atmosphereTemperature)
 	Q_PROPERTY(bool flagAtmosphereFromAltitude READ getFlagAtmosphereFromAltitude WRITE setFlagAtmosphereFromAltitude NOTIFY flagAtmosphereFromAltitudeChanged)
+	//! On Earth: refraction from rays traced through a standard atmosphere (valid for observers at any altitude, down to
+	//! the true horizon) instead of the formulas of Saemundsson and Bennett (made for a horizon at 0 degrees)
+	Q_PROPERTY(bool flagRefractionRayTraced READ getFlagRefractionRayTraced WRITE setFlagRefractionRayTraced NOTIFY flagRefractionRayTracedChanged)
 	//! The pressure (mbar) and temperature (deg C) at the observer in use: the set ones, or those of the standard atmosphere
 	Q_PROPERTY(double effectiveAtmospherePressure READ getEffectiveAtmospherePressure NOTIFY effectiveAtmosphereChanged)
 	Q_PROPERTY(double effectiveAtmosphereTemperature READ getEffectiveAtmosphereTemperature NOTIFY effectiveAtmosphereChanged)
@@ -1186,6 +1189,9 @@ public slots:
 	//! Take pressure and temperature from the standard atmosphere at the altitude of the observer (on Earth)
 	void setFlagAtmosphereFromAltitude(bool b);
 	bool getFlagAtmosphereFromAltitude() const {return flagAtmosphereFromAltitude;}
+	//! Use the ray-traced refraction (on Earth)
+	void setFlagRefractionRayTraced(bool b);
+	bool getFlagRefractionRayTraced() const {return flagRefractionRayTraced;}
 	//! Pressure (mbar) at the observer in use for refraction and extinction
 	double getEffectiveAtmospherePressure() const {return static_cast<double>(refraction.getPressure());}
 	//! Temperature (deg C) at the observer in use for refraction and extinction
@@ -1316,6 +1322,7 @@ signals:
 	void atmosphereTemperatureChanged(double celsius);
 	void atmospherePressureChanged(double mbar);
 	void flagAtmosphereFromAltitudeChanged(bool b);
+	void flagRefractionRayTracedChanged(bool b);
 	void effectiveAtmosphereChanged();
 
 	void flagTfromKChanged(bool b);
@@ -1392,6 +1399,7 @@ private:
 	double atmospherePressureSet = 1013.25;
 	double atmosphereTemperatureSet = 15.;
 	bool flagAtmosphereFromAltitude = true;
+	bool flagRefractionRayTraced = true;
 	//! Set pressure and temperature of the refraction from the settings or the altitude of the observer
 	void updateEffectiveAtmosphere();
 

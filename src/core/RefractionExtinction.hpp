@@ -119,8 +119,10 @@ private:
 //! @class Refraction
 //! This class performs refraction computations, following literature from atmospheric optics and astronomy.
 //! Refraction solutions can only be approximate, given the turbulent, unpredictable real atmosphere.
-//! Typical horizons do not go down below -1, so strange effects (distortion) between -2 and -5 should be covered.
-//! Note that forward/backward are no absolute reverse operations!
+//! By default the refraction comes from rays traced through a standard atmosphere (StelRefractionModel), which holds
+//! for observers at any altitude, down to the true horizon (the sea-level surface seen from above). The classic
+//! formulas (Saemundsson and Bennett) assume a horizon at 0 degrees; with them forward/backward are no absolute
+//! reverse operations.
 //! All the computations should be in effect
 //! (1) only if atmosphere effects are true
 //! (2) only for celestial objects, never for landscape images
@@ -182,6 +184,32 @@ public:
 	//! The ray-traced refraction model for the current conditions (shared between the copies of this object).
 	//! Null until updateModel() has been called.
 	std::shared_ptr<const StelRefractionModel> getModel() const {return model;}
+	//! Use the ray-traced model (true, the default) or the formulas of Saemundsson and Bennett (false).
+	//! The model is only used once updateModel() has built it.
+	void setUseModel(bool b) {useModel=b;}
+	bool getUseModel() const {return useModel;}
+	//! True if the transformations use the ray-traced model
+	bool isModelInUse() const {return useModel && table;}
+
+	//! The refraction of the ray-traced model, resampled for the transformations (the same on the CPU and in the
+	//! shaders). Index i of a table holds the refraction (radians) at the altitude limb + span*(i/(SIZE-1))^3 above the
+	//! true horizon: geometric altitudes for the forward table, apparent ones for the backward table. Below the true
+	//! horizon (behind the Earth) the refraction falls off linearly to 0 over FADE radians.
+	struct Table
+	{
+		static constexpr int SIZE = 96;
+		static constexpr float FADE = 0.08726646f; // 5 degrees
+		float geometricLimb = 0.f, geometricSpan = 1.f;
+		float apparentLimb = 0.f, apparentSpan = 1.f;
+		float horizonRefraction = 0.f;
+		float forward[SIZE] = {};
+		float backward[SIZE] = {};
+		//! Refraction at the given geometric altitude (radians)
+		float forwardRefraction(float geometricAltitude) const;
+		//! Refraction at the given apparent altitude (radians)
+		float backwardRefraction(float apparentAltitude) const;
+	};
+	std::shared_ptr<const Table> getTable() const {return table;}
 
 	//! Set the transformation matrices used to transform input vector to AltAz frame.
 	void setPreTransfoMat(const Mat4d& m);
@@ -193,6 +221,7 @@ private:
 
 	void innerRefractionForward(Vec3d& altAzPos) const;
 	void innerRefractionBackward(Vec3d& altAzPos) const;
+	void setTableUniforms(QOpenGLShaderProgram& program) const;
 	
 	//! These 3 Atmosphere parameters can be controlled by GUI.
 	//! Pressure[mbar] (1013)
@@ -205,6 +234,9 @@ private:
 	double observerAltitude = 0.;
 	//! Ray-traced refraction model for the current conditions (immutable, shared between copies)
 	std::shared_ptr<const StelRefractionModel> model;
+	//! Its refraction resampled for the transformations
+	std::shared_ptr<const Table> table;
+	bool useModel = true;
 
 	//! Used to pretransform coordinates into AltAz frame.
 	Mat4d preTransfoMat;

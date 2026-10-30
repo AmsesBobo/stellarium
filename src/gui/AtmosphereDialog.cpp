@@ -71,6 +71,7 @@ void AtmosphereDialog::createDialogContent()
 	connectDoubleProperty(ui->temperatureDoubleSpinBox,"StelSkyDrawer.atmosphereTemperature");
 	connectDoubleProperty(ui->extinctionDoubleSpinBox,"StelSkyDrawer.extinctionCoefficient");
 	connectBoolProperty(ui->atmosphereFromAltitudeCheckBox, "StelSkyDrawer.flagAtmosphereFromAltitude");
+	connectBoolProperty(ui->refractionRayTracedCheckBox, "StelSkyDrawer.flagRefractionRayTraced");
 	// With the standard atmosphere the set values are not used
 	connect(ui->atmosphereFromAltitudeCheckBox, &QCheckBox::toggled, this, [this](bool b){
 		ui->pressureDoubleSpinBox->setDisabled(b);

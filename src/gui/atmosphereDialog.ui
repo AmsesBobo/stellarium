@@ -373,6 +373,16 @@
        </layout>
       </item>
       <item>
+       <widget class="QCheckBox" name="refractionRayTracedCheckBox">
+        <property name="toolTip">
+         <string>Refraction from rays traced through a standard atmosphere: correct also from high altitudes, down to the true horizon. Off: the formulas of Saemundsson and Bennett, made for an observer at sea level</string>
+        </property>
+        <property name="text">
+         <string>Ray-traced refraction (valid at any altitude)</string>
+        </property>
+       </widget>
+      </item>
+      <item>
        <widget class="QLabel" name="effectiveAtmosphereLabel">
         <property name="text">
          <string notr="true">-</string>
@@ -474,6 +484,7 @@
   <tabstop>showMySky_multipleScatteringEnabled</tabstop>
   <tabstop>atmosphereFromAltitudeCheckBox</tabstop>
   <tabstop>pressureDoubleSpinBox</tabstop>
+  <tabstop>refractionRayTracedCheckBox</tabstop>
   <tabstop>temperatureDoubleSpinBox</tabstop>
   <tabstop>extinctionDoubleSpinBox</tabstop>
   <tabstop>standardAtmosphereButton</tabstop>

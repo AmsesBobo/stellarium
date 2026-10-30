@@ -204,6 +204,7 @@ StelSkyDrawer::StelSkyDrawer(StelCore* acore) :
 	setAtmosphereTemperature(conf->value("landscape/temperature_C", 15.0).toDouble());
 	setAtmospherePressure(conf->value("landscape/pressure_mbar", 1013.0).toDouble());
 	setFlagAtmosphereFromAltitude(conf->value("landscape/flag_atmosphere_from_altitude", true).toBool());
+	setFlagRefractionRayTraced(conf->value("landscape/flag_refraction_ray_traced", true).toBool());
 
 	// four extras for finetuning
 	setFlagDrawSunAfterAtmosphere(conf->value("landscape/draw_sun_after_atmosphere",false).toBool());
@@ -361,6 +362,8 @@ void StelSkyDrawer::update(double)
 	updateEffectiveAtmosphere();
 	refraction.setObserverAltitude(static_cast<double>(core->getCurrentLocation().altitude));
 	refraction.updateModel();
+	// The model is the Earth's atmosphere; elsewhere the classic formulas (scaled with pressure and temperature) are kept
+	refraction.setUseModel(flagRefractionRayTraced && core->getCurrentLocation().planetName == QStringLiteral("Earth"));
 
 	float fov = static_cast<float>(core->getMovementMgr()->getCurrentFov());
 	if (fov > maxAdaptFov)
@@ -1419,6 +1422,15 @@ void StelSkyDrawer::setFlagAtmosphereFromAltitude(bool b)
 	StelApp::immediateSave("landscape/flag_atmosphere_from_altitude", b);
 	updateEffectiveAtmosphere();
 	emit flagAtmosphereFromAltitudeChanged(b);
+}
+
+void StelSkyDrawer::setFlagRefractionRayTraced(bool b)
+{
+	if (b == flagRefractionRayTraced)
+		return;
+	flagRefractionRayTraced = b;
+	StelApp::immediateSave("landscape/flag_refraction_ray_traced", b);
+	emit flagRefractionRayTracedChanged(b);
 }
 
 void StelSkyDrawer::updateEffectiveAtmosphere()

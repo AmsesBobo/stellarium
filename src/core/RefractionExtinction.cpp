@@ -27,6 +27,8 @@
 
 #include <QOpenGLShaderProgram>
 #include <QElapsedTimer>
+#include <QVector4D>
+#include <algorithm>
 #include <QDebug>
 
 Extinction::Extinction() : ext_coeff(50), undergroundExtinctionMode(UndergroundExtinctionZero)
@@ -168,6 +170,20 @@ void Refraction::innerRefractionForward(Vec3d& altAzPos) const
 	const double sinGeo = altAzPos[2]/length;
 	Q_ASSERT(fabs(sinGeo)<=1.0);
 	double geom_alt_rad = std::asin(sinGeo);
+	if (isModelInUse())
+	{
+		// ray-traced model (see StelRefractionModel), resampled in the table
+		const double r = static_cast<double>(table->forwardRefraction(static_cast<float>(geom_alt_rad)));
+		if (r == 0.)
+			return;
+		const double refr_alt_rad = std::min(geom_alt_rad + r, M_PI_2);
+		const double sinRef = std::sin(refr_alt_rad);
+		const double shortenxy = ((fabs(sinGeo)>=1.0) ? 1.0 : std::sqrt((1.-sinRef*sinRef)/(1.-sinGeo*sinGeo)));
+		altAzPos[0]*=shortenxy;
+		altAzPos[1]*=shortenxy;
+		altAzPos[2]=sinRef*length;
+		return;
+	}
 	double geom_alt_deg = M_180_PI*geom_alt_rad;
 	if (geom_alt_deg > MIN_GEO_ALTITUDE_DEG)
 	{
@@ -210,6 +226,20 @@ void Refraction::innerRefractionBackward(Vec3d& altAzPos) const
 	Q_ASSERT(length>0.0);
 	const double sinObs = altAzPos[2]/length;
 	Q_ASSERT(fabs(sinObs)<=1.0);
+	if (isModelInUse())
+	{
+		// ray-traced model (see StelRefractionModel), resampled in the table
+		const double obs_alt_rad = std::asin(sinObs);
+		const double r = static_cast<double>(table->backwardRefraction(static_cast<float>(obs_alt_rad)));
+		if (r == 0.)
+			return;
+		const double sinGeo = std::sin(obs_alt_rad - r);
+		const double longerxy = ((fabs(sinObs)>=1.0) ? 1.0 : std::sqrt((1.-sinGeo*sinGeo)/(1.-sinObs*sinObs)));
+		altAzPos[0]*=longerxy;
+		altAzPos[1]*=longerxy;
+		altAzPos[2]=sinGeo*length;
+		return;
+	}
 	float obs_alt_deg=static_cast<float>(M_180_PI*std::asin(sinObs));
 	if (obs_alt_deg > 0.22879f)
 	{
@@ -280,9 +310,63 @@ void Refraction::backward(Vec3f& altAzPos) const
 	altAzPos.transfo4d(invertPreTransfoMatf);
 }
 
+static QByteArray refractionTableShader()
+{
+	return QByteArray(R"(
+#ifndef REFRACTION_TABLE_DEFINED
+#define REFRACTION_TABLE_DEFINED
+// The ray-traced refraction (see Refraction::Table): forward table in the first @QUARTER@ vectors, backward table in the next ones
+uniform bool REFRACTION_useTable;
+uniform highp vec4 REFRACTION_table[@VECTORS@];
+uniform highp vec4 REFRACTION_tableLimits; // geometric limb, geometric span, apparent limb, apparent span (radians)
+uniform highp float REFRACTION_horizonRefraction;
+highp float REFRACTION_tableEntry(int i)
+{
+	int v = i/4;
+	int c = i - 4*v;
+	highp vec4 e = REFRACTION_table[v];
+	return c == 0 ? e.x : (c == 1 ? e.y : (c == 2 ? e.z : e.w));
+}
+highp float REFRACTION_tableLookup(int base, highp float x, highp float span)
+{
+	highp float f = pow(clamp(x/span, 0., 1.), 1./3.)*float(@SIZE@ - 1);
+	int i = int(min(floor(f), float(@SIZE@ - 2)));
+	highp float t = f - float(i);
+	return mix(REFRACTION_tableEntry(base + i), REFRACTION_tableEntry(base + i + 1), t);
+}
+// Refraction (radians) of an object at the given geometric altitude
+highp float REFRACTION_forwardRefraction(highp float geo)
+{
+	highp float x = geo - REFRACTION_tableLimits.x;
+	if (x < 0.)
+		return REFRACTION_horizonRefraction*max(0., (x + @FADE@)/@FADE@);
+	return REFRACTION_tableLookup(0, x, REFRACTION_tableLimits.y);
+}
+// Refraction (radians) at the given apparent altitude
+highp float REFRACTION_backwardRefraction(highp float app)
+{
+	highp float x = app - REFRACTION_tableLimits.z;
+	if (x < 0.)
+	{
+		highp float r0 = REFRACTION_horizonRefraction;
+		highp float lower = REFRACTION_tableLimits.x - @FADE@;
+		if (app <= lower)
+			return 0.;
+		highp float geo = (app + r0*lower/@FADE@)/(1. + r0/@FADE@);
+		return app - geo;
+	}
+	return REFRACTION_tableLookup(@SIZE@, x, REFRACTION_tableLimits.w);
+}
+#endif
+)").replace("@QUARTER@", QByteArray::number(Refraction::Table::SIZE/4))
+	        .replace("@VECTORS@", QByteArray::number(Refraction::Table::SIZE/2))
+	        .replace("@SIZE@", QByteArray::number(Refraction::Table::SIZE))
+	        .replace("@FADE@", QByteArray::number(static_cast<double>(Refraction::Table::FADE), 'g', 9));
+}
+
 QByteArray Refraction::getForwardTransformShader() const
 {
-	return QByteArray(1+R"(
+	return refractionTableShader() + QByteArray(1+R"(
 uniform float REFRACTION_press_temp_corr;
 // Workaround for Intel's unusable implementation of sin & cos, which leads to broken geometry of the Moon every 0.9° of elevation.
 highp float REFRACTION_sin(highp float x)
@@ -320,6 +404,18 @@ highp vec3 innerRefractionForward(highp vec3 altAzPos)
 
 	highp float sinGeo = altAzPos[2]/len;
 	highp float geom_alt_rad = REFRACTION_asin(sinGeo);
+	if (REFRACTION_useTable)
+	{
+		highp float r = REFRACTION_forwardRefraction(geom_alt_rad);
+		if (r == 0.)
+			return altAzPos;
+		highp float sinRefT = REFRACTION_sin(min(geom_alt_rad + r, 0.5*PI));
+		highp float shortenxyT = abs(sinGeo)>=1.0 ? 1.0 : sqrt((1.-sinRefT*sinRefT)/(1.-sinGeo*sinGeo));
+		altAzPos[0]*=shortenxyT;
+		altAzPos[1]*=shortenxyT;
+		altAzPos[2]=sinRefT*len;
+		return altAzPos;
+	}
 	highp float geom_alt_deg = M_180_PI*geom_alt_rad;
 	if (geom_alt_deg > MIN_GEO_ALTITUDE_DEG)
 	{
@@ -374,7 +470,7 @@ highp vec3 modelViewForwardTransform(highp vec3 v)
 
 QByteArray Refraction::getBackwardTransformShader() const
 {
-	return QByteArray(1+R"(
+	return refractionTableShader() + QByteArray(1+R"(
 uniform float REFRACTION_press_temp_corr;
 
 vec3 innerRefractionBackward(vec3 altAzPos)
@@ -393,6 +489,19 @@ vec3 innerRefractionBackward(vec3 altAzPos)
 		return altAzPos;
 	}
 	float sinObs = altAzPos[2]/len;
+	if (REFRACTION_useTable)
+	{
+		highp float obsRad = asin(sinObs);
+		highp float r = REFRACTION_backwardRefraction(obsRad);
+		if (r == 0.)
+			return altAzPos;
+		highp float sinGeoT = sin(obsRad - r);
+		highp float longerxyT = abs(sinObs)>=1.0 ? 1.0 : sqrt((1.-sinGeoT*sinGeoT)/(1.-sinObs*sinObs));
+		altAzPos[0]*=longerxyT;
+		altAzPos[1]*=longerxyT;
+		altAzPos[2]=sinGeoT*len;
+		return altAzPos;
+	}
 	float obs_alt_deg=M_180_PI*asin(sinObs);
 	if (obs_alt_deg > 0.22879)
 	{
@@ -449,8 +558,26 @@ vec3 modelViewBackwardTransform(vec3 worldPos)
    .replace("@TRANSITION_WIDTH_APP_DEG@", std::to_string(TRANSITION_WIDTH_APP_DEG).c_str());
 }
 
+void Refraction::setTableUniforms(QOpenGLShaderProgram& program) const
+{
+	const bool use = isModelInUse();
+	program.setUniformValue("REFRACTION_useTable", use);
+	if (!use)
+		return;
+	QVector4D vectors[Table::SIZE/2];
+	for (int i = 0; i < Table::SIZE/4; ++i)
+	{
+		vectors[i] = QVector4D(table->forward[4*i], table->forward[4*i+1], table->forward[4*i+2], table->forward[4*i+3]);
+		vectors[i + Table::SIZE/4] = QVector4D(table->backward[4*i], table->backward[4*i+1], table->backward[4*i+2], table->backward[4*i+3]);
+	}
+	program.setUniformValueArray("REFRACTION_table", vectors, Table::SIZE/2);
+	program.setUniformValue("REFRACTION_tableLimits", QVector4D(table->geometricLimb, table->geometricSpan, table->apparentLimb, table->apparentSpan));
+	program.setUniformValue("REFRACTION_horizonRefraction", table->horizonRefraction);
+}
+
 void Refraction::setForwardTransformUniforms(QOpenGLShaderProgram& program) const
 {
+	setTableUniforms(program);
 	program.setUniformValue("REFRACTION_press_temp_corr", GLfloat(press_temp_corr));
 	program.setUniformValue("REFRACTION_preTransfoMat", preTransfoMatf.toQMatrix());
 	program.setUniformValue("REFRACTION_postTransfoMat", postTransfoMatf.toQMatrix());
@@ -458,6 +585,7 @@ void Refraction::setForwardTransformUniforms(QOpenGLShaderProgram& program) cons
 
 void Refraction::setBackwardTransformUniforms(QOpenGLShaderProgram& program) const
 {
+	setTableUniforms(program);
 	program.setUniformValue("REFRACTION_press_temp_corr", GLfloat(press_temp_corr));
 	program.setUniformValue("REFRACTION_inversePreTransfoMat", invertPreTransfoMatf.toQMatrix());
 	program.setUniformValue("REFRACTION_inversePostTransfoMat", invertPostTransfoMatf.toQMatrix());
@@ -475,6 +603,35 @@ void Refraction::setTemperature(float t)
 	updatePrecomputed();
 }
 
+float Refraction::Table::forwardRefraction(float g) const
+{
+	const float x = g - geometricLimb;
+	if (x < 0.f)
+		return horizonRefraction*std::max(0.f, (x + FADE)/FADE);
+	const float f = std::cbrt(std::min(x/geometricSpan, 1.f))*static_cast<float>(SIZE - 1);
+	const int i = std::min(static_cast<int>(f), SIZE - 2);
+	const float t = f - static_cast<float>(i);
+	return forward[i] + t*(forward[i+1] - forward[i]);
+}
+
+float Refraction::Table::backwardRefraction(float a) const
+{
+	const float x = a - apparentLimb;
+	if (x < 0.f)
+	{
+		// the inverse of forwardRefraction() below the true horizon
+		const float lower = geometricLimb - FADE;
+		if (a <= lower)
+			return 0.f;
+		const float g = (a + horizonRefraction*lower/FADE)/(1.f + horizonRefraction/FADE);
+		return a - g;
+	}
+	const float f = std::cbrt(std::min(x/apparentSpan, 1.f))*static_cast<float>(SIZE - 1);
+	const int i = std::min(static_cast<int>(f), SIZE - 2);
+	const float t = f - static_cast<float>(i);
+	return backward[i] + t*(backward[i+1] - backward[i]);
+}
+
 void Refraction::updateModel()
 {
 	StelRefractionModel::Conditions c;
@@ -486,6 +643,25 @@ void Refraction::updateModel()
 	QElapsedTimer timer;
 	timer.start();
 	model = std::make_shared<const StelRefractionModel>(c);
+
+	// Resample the model for the transformations: denser near the true horizon, where the refraction changes fast
+	auto t = std::make_shared<Table>();
+	t->geometricLimb = static_cast<float>(model->getHorizonGeometric());
+	t->geometricSpan = static_cast<float>(M_PI_2 - model->getHorizonGeometric());
+	t->apparentLimb = static_cast<float>(model->getHorizonApparent());
+	t->apparentSpan = static_cast<float>(M_PI_2 - model->getHorizonApparent());
+	t->horizonRefraction = static_cast<float>(model->getHorizonRefraction());
+	for (int i = 0; i < Table::SIZE; ++i)
+	{
+		const double u = static_cast<double>(i)/(Table::SIZE - 1);
+		const double g = model->getHorizonGeometric() + (M_PI_2 - model->getHorizonGeometric())*u*u*u;
+		const double a = model->getHorizonApparent() + (M_PI_2 - model->getHorizonApparent())*u*u*u;
+		t->forward[i] = static_cast<float>(model->toApparent(g) - g);
+		t->backward[i] = static_cast<float>(a - model->toGeometric(a));
+	}
+	t->forward[0] = t->backward[0] = t->horizonRefraction;
+	t->forward[Table::SIZE-1] = t->backward[Table::SIZE-1] = 0.f;
+	table = t;
 	const double toArcmin = 60.*M_180_PI;
 	qInfo().noquote() << QString("Refraction model: observer at %1 m, %2 hPa, %3 C: true horizon at %4 deg (geometric dip %5 deg), "
 	                             "refraction there %6', at 0 deg %7', at 5 deg %8' (%9 ms)")
