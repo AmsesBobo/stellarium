@@ -138,6 +138,13 @@ StelProjector::ModelViewTranformP Landscape::getAltAzTransform(const StelCore* c
 	return core->getAltAzModelViewTransform(StelCore::RefractionOff);
 }
 
+double Landscape::getSinMinAltitudeLimit() const
+{
+	if (horizonFollowsAltitude && horizonDip > 0.)
+		return std::sin(StelHorizonDipTransform::dipAltitude(std::asin(qBound(-1., sinMinAltitudeLimit, 1.)), horizonDip));
+	return sinMinAltitudeLimit;
+}
+
 void Landscape::undipDirection(Vec3d& azalt) const
 {
 	if (horizonFollowsAltitude && horizonDip > 0.)

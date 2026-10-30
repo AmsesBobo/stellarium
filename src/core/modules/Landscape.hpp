@@ -182,7 +182,8 @@ public:
 	//! Get whether the landscape is currently fully visible (i.e. opaque).
 	bool getIsFullyVisible() const {return landFader.getInterstate() >= 0.999f;}
 	//! Get the sine of the limiting altitude (can be used to short-cut drawing below horizon, like star fields). There is no set here, value is only from landscape.ini
-	double getSinMinAltitudeLimit() const {return sinMinAltitudeLimit;}
+	//! The sine of the lowest altitude the landscape covers (lowered with the horizon dip, see setHorizonDip())
+	double getSinMinAltitudeLimit() const;
 
 	static void setTransparency(const double f) { landscapeTransparency=f; }
 	//! Photographic mode, star tracker: the landscape is drawn into an offscreen image that is then blurred (see

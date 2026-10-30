@@ -1298,8 +1298,17 @@ double LandscapeMgr::getLandscapeSinMinAltitudeLimit() const
 {
 	if (flagLandscapeUseTransparency && landscapeTransparency>0.)
 		return -1.;
-	else
-		return landscape->getSinMinAltitudeLimit();
+	double s = landscape->getSinMinAltitudeLimit();
+	// From altitude the landscape (lowered to the true horizon) covers apparent altitudes down there, while the stars
+	// are culled by their geometric altitude: below the horizon they are lifted by up to the refraction at the horizon
+	if (landscape->getHorizonDip() > 0.)
+	{
+		const StelSkyDrawer* drawer = StelApp::getInstance().getCore()->getSkyDrawer();
+		const auto model = drawer->getRefraction().getModel();
+		if (model && drawer->getFlagHasAtmosphere())
+			s = std::sin(model->toGeometric(std::asin(qBound(-1., s, 1.))));
+	}
+	return s;
 }
 
 bool LandscapeMgr::getFlagUseLightPollutionFromDatabase() const
