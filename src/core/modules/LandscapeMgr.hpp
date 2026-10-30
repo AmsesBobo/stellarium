@@ -866,6 +866,10 @@ private:
 	double landscapeTransparency;
 	//! Color tint to draw the landscape in. Can be useful for sunrise/sunset scenes.
 	Vec3f landscapeTint;
+	//! Illuminance (lux, linear RGB) on the ground from the Sun, the Moon (with the colors of their extinction) and the sky
+	Vec3d groundLight(StelCore* core, const class Planet* sun, const class Planet* moon, bool currentIsEarth, bool withAtmosphere) const;
+	//! The color of that light at unit luminance, as tint for the landscape shaders
+	Vec3f groundLightTint(StelCore* core, const class Planet* sun, const class Planet* moon, bool currentIsEarth, bool withAtmosphere) const;
 
 	//! The ID of the currently loaded landscape
 	QString currentLandscapeID;

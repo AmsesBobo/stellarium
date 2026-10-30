@@ -75,6 +75,10 @@ const float* StelSkyDrawer::getPhotoWhiteBalanceMatrix() const
 
 void StelSkyDrawer::setPhotoFilmSkyUniforms(QOpenGLShaderProgram& program) const
 {
+	// The true horizon (from altitude below 0 degrees), for the airglow, the haze and the light domes
+	const auto model = refraction.getModel();
+	const bool trueHorizon = model && refraction.isModelInUse() && getFlagHasAtmosphere();
+	program.setUniformValue("photoHorizonAltitude", trueHorizon ? static_cast<GLfloat>(model->getHorizonApparent()) : 0.f);
 	const float* m = (getFlagPhotographicModeActive() && flagPhotoFilmSpectralSky) ? getPhotoFilmSkyMatrix() : nullptr;
 	program.setUniformValue("photoFilmSky", m != nullptr);
 	if (!m)

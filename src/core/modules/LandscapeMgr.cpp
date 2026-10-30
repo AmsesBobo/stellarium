@@ -616,10 +616,12 @@ void LandscapeMgr::update(double deltaTime)
 	// With atmosphere on, we define the solar brightness contribution zero when the sun is 8 degrees below the horizon.
 	// The multiplier of 1.5 just looks better, it somehow represents illumination by scattered sunlight.
 	// Else, we should account for sun's diameter but else just apply Lambertian Cos-rule and check with landscape opacity.
+	// From altitude the Sun sets at the true horizon, below 0 degrees: the twilight is measured from there
+	const double horizonOffset = (atmosphere->getFlagShow() && currentIsEarth) ? dip : 0.;
 	double sinSunAngle = 0.0;
 	if(atmosphere->getFlagShow())
 	{
-		sinSunAngle=sin(qMin(M_PI_2, asin(sunPos[2])+8.*M_PI/180.));
+		sinSunAngle=sin(qMin(M_PI_2, asin(sunPos[2])+horizonOffset+8.*M_PI/180.));
 		if(sinSunAngle > -0.1/1.5 )
 			landscapeBrightness +=  1.5*(sinSunAngle+0.1/1.5);
 	}
@@ -661,7 +663,7 @@ void LandscapeMgr::update(double deltaTime)
 	// contains light smog of a city, it should also be shown if atmosphere is switched off.
 	// (Configure another landscape without light smog to avoid, or just switch off lightscape.)
 	double lightscapeBrightness=0.0;
-	const double sinSunAlt = sunPos[2];
+	const double sinSunAlt = std::sin(std::asin(qBound(-1., sunPos[2], 1.)) + horizonOffset);
 	if (atmosphere->getFlagShow())
 	{
 		// light pollution layer is mixed in at -3...-8 degrees.
@@ -677,7 +679,15 @@ void LandscapeMgr::update(double deltaTime)
 	}
 	landscape->setBrightness(landscapeBrightness, lightscapeBrightness);
 
-	// extra colorful sunrise/sunset management.
+	// Extra colorful sunrise/sunset management. With the extinction along the rays (on Earth, with the atmosphere) the
+	// tint is the color of the light on the ground: the sunlight through the air towards the Sun (the same
+	// extinction colors as of the Sun itself) and the blue sky light, mixed by their illuminance. Otherwise the
+	// Sun sets an empirical tint (Planet::draw()).
+	const Extinction& extinction = drawer->getExtinction();
+	if (currentIsEarth && atmosphere->getFlagShow() && extinction.isModelInUse())
+		landscapeTint = groundLightTint(core, sun.data(), moon.data(), currentIsEarth, true);
+	else if (extinction.isModelInUse())
+		landscapeTint = Vec3f(1.f); // (the Sun does not set a tint then)
 	landscape->setTint(landscapeTint);
 	landscape->setPhotoFogBrightness(-1.f);
 
@@ -692,37 +702,7 @@ void LandscapeMgr::update(double deltaTime)
 	{
 		const double sceneScale = static_cast<double>(drawer->getPhotoSceneScale());
 		const bool withAtmosphere = atmosphere->getFlagShow();
-		// illuminance (lux) of a source of the given magnitude: 2.54e-6 lux for V = 0
-		auto illuminance = [](double mag) { return 2.54e-6 * std::pow(10., -0.4*mag); };
-		// Faces in all directions: about 0.6 sin(h) + 0.3 cos(h) of the light on a surface facing the source
-		auto exposure = [](double sinAlt) {
-			return sinAlt > 0. ? 0.6*sinAlt + 0.3*std::sqrt(1. - sinAlt*sinAlt) : 0.;
-		};
-		Vec3d light(0.);
-		{
-			const double eclipseFactor = ssystem->getSolarEclipseFactor(core).first;
-			const float mag = sun->getVMagnitudeWithExtinction(core, sun->getVMagnitude(core, eclipseFactor));
-			const double direct = illuminance(static_cast<double>(mag)) * exposure(sunPos[2])
-			                      * (1. - static_cast<double>(landscape->getOpacity(sunPos)));
-			const Vec3f tint = drawer->getPhotoExtinctionTint(sunPos);
-			light += Vec3d(tint[0], tint[1], tint[2]) * direct;
-		}
-		if (currentIsEarth)
-		{
-			const float mag = moon->getVMagnitudeWithExtinction(core);
-			const double direct = illuminance(static_cast<double>(mag)) * exposure(moonPos[2])
-			                      * (1. - static_cast<double>(landscape->getOpacity(moonPos)));
-			const Vec3f tint = drawer->getPhotoExtinctionTint(moonPos);
-			light += Vec3d(tint[0], tint[1], tint[2]) * direct;
-		}
-		double skyLight = 0.;
-		if (withAtmosphere)
-		{
-			skyLight = M_PI * static_cast<double>(atmosphere->getAverageLuminance());
-			// blue sky light by day (blue shadows), neutral at night
-			const Vec3d skyTint = sunPos[2] > -0.1 ? Vec3d(0.86, 1.0, 1.26) : Vec3d(1.);
-			light += skyTint * skyLight;
-		}
+		Vec3d light = groundLight(core, sun.data(), moon.data(), currentIsEarth, withAtmosphere);
 		// the light domes of towns (LightDomes): their glow lights the ground from the side of the towns
 		static LightDomes* lightDomes = GETSTELMODULE(LightDomes);
 		if (lightDomes)
@@ -753,6 +733,91 @@ void LandscapeMgr::update(double deltaTime)
 	}
 
 	messageFader.update(static_cast<int>(deltaTime*1000));
+}
+
+Vec3d LandscapeMgr::groundLight(StelCore* core, const Planet* sun, const Planet* moon, bool currentIsEarth, bool withAtmosphere) const
+{
+	// Illuminance (lux) on the ground from
+	// - the Sun and the Moon: their light (magnitude with extinction, color of the extinction), on the upright and
+	//   sloping faces of a landscape, not only on level ground; none when they stand behind it or below the true
+	//   horizon (from altitude below 0 degrees; the disk sets over its diameter),
+	// - the sky: luminance x pi (this includes twilight, moonlit sky, airglow and light pollution).
+	const StelSkyDrawer* drawer = core->getSkyDrawer();
+	const Extinction& extinction = drawer->getExtinction();
+	const bool fromModel = withAtmosphere && extinction.isModelInUse();
+	const double horizon = (withAtmosphere && currentIsEarth) ? -landscape->getHorizonDip() : 0.;
+	// illuminance (lux) of a source of the given magnitude: 2.54e-6 lux for V = 0
+	auto illuminance = [](double mag) { return 2.54e-6 * std::pow(10., -0.4*mag); };
+	// Faces in all directions: about 0.6 sin(h) + 0.3 cos(h) of the light on a surface facing the source; a source
+	// below 0 degrees (from altitude) still lights the upright faces
+	auto exposure = [](double sinAlt) {
+		return 0.6*qMax(0., sinAlt) + 0.3*std::sqrt(qMax(0., 1. - sinAlt*sinAlt));
+	};
+	// the visible part of a disk of radius 0.27 degrees at the true horizon (linear across its diameter)
+	auto aboveHorizon = [horizon](double sinAlt) {
+		const double h = std::asin(qBound(-1., sinAlt, 1.)) - horizon;
+		return qBound(0., h/(0.53*M_PI_180) + 0.5, 1.);
+	};
+	// The color of the extinction (at unit luminance): along the rays of the model, or the photographic table
+	auto extinctionTint = [&](const Planet* body) -> Vec3d {
+		if (fromModel)
+		{
+			Vec3d g = body->getAltAzPosGeometric(core);
+			g.normalize();
+			const Vec3d t = extinction.transmission(std::asin(qBound(-1., g[2], 1.)));
+			const double y = 0.2126*t[0] + 0.7152*t[1] + 0.0722*t[2];
+			return y > 1e-12 ? t/y : Vec3d(1.);
+		}
+		Vec3d g = body->getAltAzPosGeometric(core);
+		g.normalize();
+		const Vec3f tint = drawer->getPhotoExtinctionTint(g);
+		return Vec3d(static_cast<double>(tint[0]), static_cast<double>(tint[1]), static_cast<double>(tint[2]));
+	};
+	Vec3d light(0.);
+	Vec3d sunPos = sun->getAltAzPosAuto(core);
+	sunPos.normalize();
+	{
+		static SolarSystem* ssystem = GETSTELMODULE(SolarSystem);
+		const double eclipseFactor = ssystem->getSolarEclipseFactor(core).first;
+		const float mag = sun->getVMagnitudeWithExtinction(core, sun->getVMagnitude(core, eclipseFactor));
+		const double visible = (1. - static_cast<double>(landscape->getOpacity(sunPos))) * (withAtmosphere ? aboveHorizon(sunPos[2]) : 1.);
+		const double direct = illuminance(static_cast<double>(mag)) * exposure(sunPos[2]) * visible;
+		light += extinctionTint(sun) * direct;
+	}
+	if (currentIsEarth && moon)
+	{
+		Vec3d moonPos = moon->getAltAzPosAuto(core);
+		moonPos.normalize();
+		const float mag = moon->getVMagnitudeWithExtinction(core);
+		const double visible = (1. - static_cast<double>(landscape->getOpacity(moonPos))) * (withAtmosphere ? aboveHorizon(moonPos[2]) : 1.);
+		const double direct = illuminance(static_cast<double>(mag)) * exposure(moonPos[2]) * visible;
+		light += extinctionTint(moon) * direct;
+	}
+	if (withAtmosphere)
+	{
+		const double skyLight = M_PI * static_cast<double>(atmosphere->getAverageLuminance());
+		// blue sky light by day (blue shadows), neutral at night (the Sun 5.7 degrees below the true horizon)
+		const Vec3d skyTint = std::asin(qBound(-1., sunPos[2], 1.)) - horizon > -0.1 ? Vec3d(0.86, 1.0, 1.26) : Vec3d(1.);
+		light += skyTint * skyLight;
+	}
+	return light;
+}
+
+Vec3f LandscapeMgr::groundLightTint(StelCore* core, const Planet* sun, const Planet* moon, bool currentIsEarth, bool withAtmosphere) const
+{
+	// The tint for the shaders (they take sRGB-encoded values, see Landscape::colorToShader()): the color of the
+	// light at unit luminance
+	const Vec3d light = groundLight(core, sun, moon, currentIsEarth, withAtmosphere);
+	const double luminance = 0.2126*light[0] + 0.7152*light[1] + 0.0722*light[2];
+	if (!(luminance > 0.))
+		return Vec3f(1.f);
+	auto encode = [](double x) {
+		x = qMax(0., x);
+		return x <= 0.0031308 ? 12.92*x : 1.055*std::pow(x, 1./2.4) - 0.055;
+	};
+	const double b = encode(1.);
+	return Vec3f(static_cast<float>(encode(light[0]/luminance)/b), static_cast<float>(encode(light[1]/luminance)/b),
+	             static_cast<float>(encode(light[2]/luminance)/b));
 }
 
 void LandscapeMgr::draw(StelCore* core)

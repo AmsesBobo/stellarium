@@ -65,6 +65,20 @@ highp float photoSkyScotopicRatio(highp vec3 XYZ)
 	return clamp(0.71408 + 2.46953*a + 1.25660*b - 1.86276*a*a - 0.16285*a*b + 0.01493*b*b, 0.6, 10.);
 }
 
+// Photographic mode: the apparent altitude (radians) of the true horizon: below 0 degrees for an elevated observer
+// (see StelRefractionModel), 0 at sea level
+uniform highp float photoHorizonAltitude;
+// The sine of the altitude above the true horizon, stretched so that the zenith stays at 90 degrees: the layers seen
+// against the horizon (airglow, haze, light domes of towns) meet it at the true horizon, not at 0 degrees
+highp float photoHorizonSine(highp float sinElev)
+{
+	highp float h = photoHorizonAltitude;
+	if (h >= 0.)
+		return sinElev;
+	highp float a = asin(clamp(sinElev, -1., 1.));
+	return sin((a - h) * 1.5707963 / (1.5707963 - h));
+}
+
 // Photographic mode: the airglow towards a direction at the sine of the altitude sinElev (below the horizon: as
 // above, like the sky). It shines from a layer about 90 km high: looking lower, the line of sight runs longer
 // through it (van Rhijn), so it brightens towards the horizon until the extinction takes over, about 10 degrees
@@ -74,7 +88,7 @@ highp vec3 photoAirglowLight(highp float sinElev)
 	if (!photoMode)
 		return vec3(0.);
 	const highp float r = 6371. / (6371. + 90.);
-	highp float cosZ = clamp(abs(sinElev), 0., 1.);
+	highp float cosZ = clamp(abs(photoHorizonSine(sinElev)), 0., 1.);
 	highp float vanRhijn = 1. / sqrt(max(1e-4, 1. - r*r*(1. - cosZ*cosZ)));
 	highp float airmass = 1. / (cosZ + 0.025*exp(-11.*cosZ));
 	return photoAirglow * vanRhijn * exp(-0.921034 * photoAirglowExtinction * airmass) * brightnessScale;
@@ -90,7 +104,7 @@ highp vec3 photoLightDomeLight(highp vec3 viewDir)
 {
 	if (!photoMode || !photoLightDomes)
 		return vec3(0.);
-	highp float alt = asin(clamp(abs(viewDir.z), 0., 1.));
+	highp float alt = asin(clamp(abs(photoHorizonSine(viewDir.z)), 0., 1.));
 	highp float az = atan(viewDir.y, -viewDir.x);  // the alt-azimuthal frame: north is -x, east +y
 	highp vec2 tc = vec2(az / 6.28318531, (sqrt(alt / 1.57079633) * (PHOTO_LIGHT_DOME_ROWS - 1.) + 0.5) / PHOTO_LIGHT_DOME_ROWS);
 	return texture2D(photoLightDomeMap, tc).rgb * photoScale * brightnessScale;
@@ -115,7 +129,7 @@ uniform highp vec3 photoHazeDiffuse;    // mean luminance of the sky that lights
 highp float photoHazeAirmass(highp float sinElev)
 {
 	const highp float RH = 6371. / 1.2;
-	highp float s = clamp(abs(sinElev), 0., 1.);
+	highp float s = clamp(abs(photoHorizonSine(sinElev)), 0., 1.);
 	return sqrt(RH*s*RH*s + 2.*RH + 1.) - RH*s;
 }
 

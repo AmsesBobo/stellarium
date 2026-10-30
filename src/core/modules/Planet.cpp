@@ -3897,7 +3897,8 @@ void Planet::draw(StelCore* core, float maxMagLabels, const QFont& planetNameFon
 	static SolarSystem* ssm = GETSTELMODULE(SolarSystem);
 	const bool isSun  = this==ssm->getSun();
 	const bool currentLocationIsEarth = core->getCurrentLocation().planetName == L1S("Earth");
-	if (isSun && currentLocationIsEarth)
+	// (With the extinction along the rays the LandscapeMgr takes the tint from the colors of the extinction itself)
+	if (isSun && currentLocationIsEarth && !core->getSkyDrawer()->getExtinction().isModelInUse())
 	{
 		static LandscapeMgr* lmgr = GETSTELMODULE(LandscapeMgr);
 		Vec3f posAltAz = getAltAzPosAuto(core).toVec3f();
