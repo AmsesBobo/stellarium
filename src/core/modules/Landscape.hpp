@@ -27,6 +27,7 @@
 #include "StelTextureTypes.hpp"
 #include "StelLocation.hpp"
 #include "StelProjectorType.hpp"
+#include "StelProjector.hpp"
 #include "StelSphereGeometry.hpp"
 
 #include <memory>
@@ -99,6 +100,14 @@ public:
 		landFader.update(static_cast<int>(deltaTime*1000));
 		fogFader.update(static_cast<int>(deltaTime*1000));
 	}
+
+	//! True if the landscape is lowered to the true horizon of an elevated observer
+	//! (landscape.ini: [landscape] horizon_follows_altitude = true; for generated landscapes like a sea)
+	bool getHorizonFollowsAltitude() const {return horizonFollowsAltitude;}
+	//! Set the depression of the true horizon below 0 degrees (radians, set by the LandscapeMgr each frame).
+	//! It is only used if the landscape follows the altitude.
+	void setHorizonDip(double dip) {horizonDip = dip;}
+	double getHorizonDip() const {return horizonFollowsAltitude ? horizonDip : 0.;}
 
 	//! Set the brightness of the landscape plus brightness of optional add-on night lightscape.
 	//! This is called in each draw().
@@ -205,6 +214,14 @@ public:
 	bool hasLandscapePolygon() const {return !horizonPolygon.isNull();}
 
 protected:
+	//! The AltAz model-view transformation for the landscape: the core's, or one that lowers the landscape to the
+	//! true horizon (StelHorizonDipTransform)
+	StelProjector::ModelViewTranformP getAltAzTransform(const StelCore* core) const;
+	//! For getOpacity(): the direction in the landscape of a direction in the sky (undoes the horizon dip)
+	void undipDirection(Vec3d& azalt) const;
+	bool horizonFollowsAltitude = false;
+	double horizonDip = 0.;
+
 	void setupCurrentVAO();
 	void bindVAO();
 	void releaseVAO();

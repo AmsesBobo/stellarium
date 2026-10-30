@@ -516,6 +516,18 @@ void LandscapeMgr::update(double deltaTime)
 			}
 		}
 	}
+	// Generated landscapes (a sea) meet the sky at the true horizon of an elevated observer: the apparent altitude
+	// of the ray grazing the sea-level surface (with the atmosphere), else the geometric dip
+	double dip = 0.;
+	if (core->getCurrentLocation().planetName == QStringLiteral("Earth"))
+	{
+		const auto model = drawer->getRefraction().getModel();
+		if (model)
+			dip = -(drawer->getFlagHasAtmosphere() ? model->getHorizonApparent() : model->getGeometricDip());
+	}
+	landscape->setHorizonDip(dip);
+	if (oldLandscape)
+		oldLandscape->setHorizonDip(dip);
 	landscape->update(deltaTime);
 	cardinalPoints->update(deltaTime);
 	Landscape::illumFader.update(static_cast<int>(deltaTime*1000));

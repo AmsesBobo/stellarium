@@ -55,6 +55,8 @@ SET(stellarium_lib_SRCS
      core/StelAtmosphereTransmission.cpp
      core/StelRefractionModel.hpp
      core/StelRefractionModel.cpp
+     core/StelHorizonDipTransform.hpp
+     core/StelHorizonDipTransform.cpp
      core/StelSkyDrawer.hpp
      core/StelPainter.hpp
      core/StelPainter.cpp

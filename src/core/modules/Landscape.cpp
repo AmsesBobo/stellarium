@@ -20,6 +20,7 @@
  */
 
 #include "Landscape.hpp"
+#include "StelHorizonDipTransform.hpp"
 #include "StelApp.hpp"
 #include "StelSRGB.hpp"
 #include "StelTextureMgr.hpp"
@@ -129,11 +130,27 @@ void Landscape::releaseVAO()
 	}
 }
 
+StelProjector::ModelViewTranformP Landscape::getAltAzTransform(const StelCore* core) const
+{
+	if (horizonFollowsAltitude && horizonDip > 0.)
+		return StelProjector::ModelViewTranformP(new StelHorizonDipTransform(
+			core->getAltAzModelViewTransform(StelCore::RefractionOff)->getApproximateLinearTransfo(), horizonDip));
+	return core->getAltAzModelViewTransform(StelCore::RefractionOff);
+}
+
+void Landscape::undipDirection(Vec3d& azalt) const
+{
+	if (horizonFollowsAltitude && horizonDip > 0.)
+		StelHorizonDipTransform::undipVector(azalt, horizonDip);
+}
+
 // Load attributes common to all landscapes
 void Landscape::loadCommon(const QSettings& landscapeIni, const QString& landscapeId)
 {
 	static const QRegularExpression spaceRe("\\\\n\\s*\\\\n");
 	id = landscapeId;
+	// A generated landscape (a sea, a flat ground) can follow the true horizon of an elevated observer
+	horizonFollowsAltitude = landscapeIni.value("landscape/horizon_follows_altitude", false).toBool();
 	name = landscapeIni.value("landscape/name").toString();
 	author = landscapeIni.value("landscape/author").toString();
 	description = landscapeIni.value("landscape/description").toString();
@@ -326,7 +343,7 @@ void Landscape::drawHorizonLine(StelCore* core, StelPainter& painter)
 	if (!horizonPolygon || horizonPolygonLineThickness<1 || photoGroundCapture)
 		return;
 
-	StelProjector::ModelViewTranformP transfo = core->getAltAzModelViewTransform(StelCore::RefractionOff);
+	StelProjector::ModelViewTranformP transfo = getAltAzTransform(core);
 	transfo->combine(Mat4d::zrotation(static_cast<double>(-angleRotateZOffset)));
 	const StelProjectorP prj = core->getProjection(transfo);
 	painter.setProjector(prj);
@@ -428,7 +445,7 @@ void Landscape::drawLabels(StelCore* core, StelPainter *painter)
 		return;
 
 	// We must reset painter to pure altaz coordinates without pano-based rotation
-	const StelProjectorP prj = core->getProjection(StelCore::FrameAltAz, StelCore::RefractionOff);
+	const StelProjectorP prj = core->getProjection(getAltAzTransform(core));
 	const float ppx = static_cast<float>(core->getCurrentStelProjectorParams().devicePixelsPerPixel);
 	painter->setProjector(prj);
 	QFont font=QGuiApplication::font();
@@ -776,7 +793,7 @@ void LandscapeOldStyle::draw(StelCore* core, bool onlyPolygon)
 	if(!validLandscape) return;
 	if(landFader.getInterstate()==0.f) return;
 
-	StelProjector::ModelViewTranformP transfo = core->getAltAzModelViewTransform(StelCore::RefractionOff);
+	StelProjector::ModelViewTranformP transfo = getAltAzTransform(core);
 	transfo->combine(Mat4d::zrotation(-static_cast<double>(angleRotateZ+angleRotateZOffset)));
 	const StelProjectorP prj = core->getProjection(transfo);
 
@@ -1076,7 +1093,7 @@ void LandscapeOldStyle::drawFog(StelCore*const core, const int firstFreeTexSampl
 		return;
 
 	const float vpos = tanMode || calibrated ? std::tan(fogAngleShift*M_PI_180f) : std::sin(fogAngleShift*M_PI_180f);
-	StelProjector::ModelViewTranformP transfo = core->getAltAzModelViewTransform(StelCore::RefractionOff);
+	StelProjector::ModelViewTranformP transfo = getAltAzTransform(core);
 
 	if (calibrated) // new in V0.13: take proper care of the fog layer. This will work perfectly only for calibrated&&tanMode.
 		transfo->combine(Mat4d::zrotation(-static_cast<double>(angleRotateZ+angleRotateZOffset)));
@@ -1112,7 +1129,7 @@ void LandscapeOldStyle::drawDecor(StelCore*const core, const int firstFreeTexSam
 	if (landFader.getInterstate()==0.f)
 		return;
 
-	StelProjector::ModelViewTranformP transfo = core->getAltAzModelViewTransform(StelCore::RefractionOff);
+	StelProjector::ModelViewTranformP transfo = getAltAzTransform(core);
 	transfo->combine(Mat4d::zrotation(-static_cast<double>(angleRotateZ+angleRotateZOffset)));
 	const StelProjectorP prj = core->getProjection(transfo);
 
@@ -1219,7 +1236,7 @@ void LandscapeOldStyle::drawGround(StelCore*const core, const int firstFreeTexSa
 	}
 
 	const float vshift = (tanMode || calibrated) ? std::tan(groundAngleShift) : std::sin(groundAngleShift);
-	StelProjector::ModelViewTranformP transfo = core->getAltAzModelViewTransform(StelCore::RefractionOff);
+	StelProjector::ModelViewTranformP transfo = getAltAzTransform(core);
 	transfo->combine(Mat4d::zrotation(groundAngleRotateZ-static_cast<double>(angleRotateZOffset)));
 	const StelProjectorP prj = core->getProjection(transfo);
 
@@ -1252,7 +1269,7 @@ void LandscapeOldStyle::drawLowGL(StelCore* core, bool onlyPolygon)
 	if (!validLandscape)
 		return;
 
-	StelPainter painter(core->getProjection(StelCore::FrameAltAz, StelCore::RefractionOff));
+	StelPainter painter(core->getProjection(getAltAzTransform(core)));
 	painter.setBlending(true);
 	painter.setCullFace(true);
 
@@ -1301,7 +1318,7 @@ void LandscapeOldStyle::drawFogLowGL(StelCore* core, StelPainter& sPainter) cons
 		return;
 
 	const float vpos = static_cast<float>(radius) * ((tanMode||calibrated) ? std::tan(fogAngleShift*M_PI_180f) : std::sin(fogAngleShift*M_PI_180f));
-	StelProjector::ModelViewTranformP transfo = core->getAltAzModelViewTransform(StelCore::RefractionOff);
+	StelProjector::ModelViewTranformP transfo = getAltAzTransform(core);
 
 	if (calibrated) // new in V0.13: take proper care of the fog layer. This will work perfectly only for calibrated&&tanMode.
 		transfo->combine(Mat4d::zrotation(-static_cast<double>(angleRotateZ+angleRotateZOffset)));
@@ -1324,7 +1341,7 @@ void LandscapeOldStyle::drawFogLowGL(StelCore* core, StelPainter& sPainter) cons
 // Draw the side textures
 void LandscapeOldStyle::drawDecorLowGL(StelCore* core, StelPainter& sPainter, const bool drawLight) const
 {
-	StelProjector::ModelViewTranformP transfo = core->getAltAzModelViewTransform(StelCore::RefractionOff);
+	StelProjector::ModelViewTranformP transfo = getAltAzTransform(core);
 	transfo->combine(Mat4d::zrotation(-static_cast<double>(angleRotateZ+angleRotateZOffset)));
 	sPainter.setProjector(core->getProjection(transfo));
 
@@ -1353,7 +1370,7 @@ void LandscapeOldStyle::drawGroundLowGL(StelCore* core, StelPainter& sPainter) c
 		return;
 	const float vshift = static_cast<float>(radius) * ((tanMode || calibrated) ? std::tan(groundAngleShift)
 							   			   : std::sin(groundAngleShift));
-	StelProjector::ModelViewTranformP transfo = core->getAltAzModelViewTransform(StelCore::RefractionOff);
+	StelProjector::ModelViewTranformP transfo = getAltAzTransform(core);
 	transfo->combine(Mat4d::zrotation(groundAngleRotateZ-static_cast<double>(angleRotateZOffset)) *
 			  Mat4d::translation(Vec3d(0,0,static_cast<double>(vshift))));
 
@@ -1377,6 +1394,7 @@ void LandscapeOldStyle::drawGroundLowGL(StelCore* core, StelPainter& sPainter) c
 
 float LandscapeOldStyle::getOpacity(Vec3d azalt) const
 {
+	undipDirection(azalt);
 	if(!validLandscape) return (azalt[2]>0.0 ? 0.0f : 1.0f);
 
 	// in case we also have a horizon polygon defined, this is trivial and fast.
@@ -1479,7 +1497,7 @@ void LandscapePolygonal::draw(StelCore* core, bool onlyPolygon)
 	if(!validLandscape) return;
 	if(landFader.getInterstate()==0.f) return;
 
-	StelProjector::ModelViewTranformP transfo = core->getAltAzModelViewTransform(StelCore::RefractionOff);
+	StelProjector::ModelViewTranformP transfo = getAltAzTransform(core);
 	transfo->combine(Mat4d::zrotation(-static_cast<double>(angleRotateZOffset)));
 	const StelProjectorP prj = core->getProjection(transfo);
 	StelPainter sPainter(prj);
@@ -1527,6 +1545,7 @@ void LandscapePolygonal::draw(StelCore* core, bool onlyPolygon)
 
 float LandscapePolygonal::getOpacity(Vec3d azalt) const
 {
+	undipDirection(azalt);
 	if(!validLandscape) return (azalt[2]>0.0 ? 0.0f : 1.0f);
 	if (angleRotateZOffset!=0.0f)
 		azalt.transfo4d(Mat4d::zrotation(static_cast<double>(angleRotateZOffset)));
@@ -1624,7 +1643,7 @@ void LandscapeFisheye::draw(StelCore* core, bool onlyPolygon)
 	if(!validLandscape) return;
 	if(landFader.getInterstate()==0.f) return;
 
-	StelProjector::ModelViewTranformP transfo = core->getAltAzModelViewTransform(StelCore::RefractionOff);
+	StelProjector::ModelViewTranformP transfo = getAltAzTransform(core);
 	transfo->combine(Mat4d::zrotation(-static_cast<double>(angleRotateZ+angleRotateZOffset)));
 	const StelProjectorP prj = core->getProjection(transfo);
 
@@ -1774,6 +1793,7 @@ void main(void)
 
 float LandscapeFisheye::getOpacity(Vec3d azalt) const
 {
+	undipDirection(azalt);
 	if(!validLandscape || (!horizonPolygon && (!mapImage || mapImage->isNull())))
 		return (azalt[2]>0.0 ? 0.0f : 1.0f); // can happen if image is misconfigured and failed to load.
 
@@ -1953,7 +1973,7 @@ void LandscapeSpherical::draw(StelCore* core, bool onlyPolygon)
 	if(!validLandscape) return;
 	if(landFader.getInterstate()==0.f) return;
 
-	StelProjector::ModelViewTranformP transfo = core->getAltAzModelViewTransform(StelCore::RefractionOff);
+	StelProjector::ModelViewTranformP transfo = getAltAzTransform(core);
 	transfo->combine(Mat4d::zrotation(-(static_cast<double>(angleRotateZ+angleRotateZOffset))));
 	const StelProjectorP prj = core->getProjection(transfo);
 
@@ -2152,6 +2172,7 @@ void main(void)
 //! @retval alpha (0..1), where 0=fully transparent.
 float LandscapeSpherical::getOpacity(Vec3d azalt) const
 {
+	undipDirection(azalt);
 	if(!validLandscape || (!horizonPolygon && (!mapImage || mapImage->isNull())))
 		return (azalt[2]>0.0 ? 0.0f : 1.0f); // can happen if image is misconfigured and failed to load.
 
@@ -2229,7 +2250,7 @@ void Landscape::drawOverlays(StelCore* core)
 {
 	if (!validLandscape || landFader.getInterstate()==0.f)
 		return;
-	StelPainter painter(core->getProjection(StelCore::FrameAltAz, StelCore::RefractionOff));
+	StelPainter painter(core->getProjection(getAltAzTransform(core)));
 	drawHorizonLine(core, painter);
 	drawLabels(core, &painter);
 }
