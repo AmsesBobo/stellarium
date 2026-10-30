@@ -205,6 +205,8 @@ StelSkyDrawer::StelSkyDrawer(StelCore* acore) :
 	setAtmospherePressure(conf->value("landscape/pressure_mbar", 1013.0).toDouble());
 	setFlagAtmosphereFromAltitude(conf->value("landscape/flag_atmosphere_from_altitude", true).toBool());
 	setFlagRefractionRayTraced(conf->value("landscape/flag_refraction_ray_traced", true).toBool());
+	setHazeLayerHeight(conf->value("landscape/haze_layer_height", 1500.).toDouble());
+	setHazeLayerPreset(conf->value("landscape/haze_layer_preset", 1).toInt());
 
 	// four extras for finetuning
 	setFlagDrawSunAfterAtmosphere(conf->value("landscape/draw_sun_after_atmosphere",false).toBool());
@@ -361,6 +363,7 @@ void StelSkyDrawer::update(double)
 	// The ray-traced refraction model follows the altitude of the observer (rebuilt only when something changed)
 	updateEffectiveAtmosphere();
 	refraction.setObserverAltitude(static_cast<double>(core->getCurrentLocation().altitude));
+	refraction.setAerosolLayer(getEffectiveHazeLayerHeight(), getHumidityGrowth());
 	refraction.updateModel();
 	// The model is the Earth's atmosphere; elsewhere the classic formulas (scaled with pressure and temperature) are kept
 	refraction.setUseModel(flagRefractionRayTraced && core->getCurrentLocation().planetName == QStringLiteral("Earth"));
@@ -490,6 +493,13 @@ void StelSkyDrawer::update(double)
 	extinction.setModel(refraction.isModelInUse() ? refraction.getModel() : nullptr, flagAtmosphereFromAltitude);
 	extinction.setAngstrom(static_cast<float>(photoAerosol.angstrom));
 	extinction.updateModel();
+	if (extinction.isModelInUse())
+	{
+		// the haze above the observer from the boundary layer of the model (for the haze of the sky, the aureole and
+		// the light domes)
+		photoAerosol.depth = qMax(1e-6, extinction.getAerosolDepth(false));
+		photoAerosol.baseDepth = qMax(1e-6, extinction.getAerosolDepth(true));
+	}
 	if (extinction.getZenithExtinction() != lastZenithExtinction)
 	{
 		lastZenithExtinction = extinction.getZenithExtinction();
@@ -1433,6 +1443,43 @@ void StelSkyDrawer::setFlagAtmosphereFromAltitude(bool b)
 	StelApp::immediateSave("landscape/flag_atmosphere_from_altitude", b);
 	updateEffectiveAtmosphere();
 	emit flagAtmosphereFromAltitudeChanged(b);
+}
+
+void StelSkyDrawer::setHazeLayerPreset(int preset)
+{
+	preset = qBound(0, preset, 3);
+	if (preset == hazeLayerPreset)
+		return;
+	hazeLayerPreset = preset;
+	StelApp::immediateSave("landscape/haze_layer_preset", preset);
+	emit hazeLayerPresetChanged(preset);
+}
+
+void StelSkyDrawer::setHazeLayerHeight(double meters)
+{
+	meters = qBound(100., meters, 3000.);
+	if (qFuzzyCompare(meters, hazeLayerHeight))
+		return;
+	hazeLayerHeight = meters;
+	StelApp::immediateSave("landscape/haze_layer_height", meters);
+	emit hazeLayerHeightChanged(meters);
+}
+
+double StelSkyDrawer::getEffectiveHazeLayerHeight() const
+{
+	// typical tops of the boundary layer: a calm night or winter day under an inversion, a normal day, a summer
+	// afternoon over land
+	static const double presets[3] = {300., 1500., 2500.};
+	return hazeLayerPreset < 3 ? presets[hazeLayerPreset] : hazeLayerHeight;
+}
+
+double StelSkyDrawer::getHumidityGrowth() const
+{
+	// as in updatePhotoHumidity() (Hanel 1976), up to 95%: the swelling of the aerosols in the boundary layer
+	const bool active = flagPhotoHumidity && getFlagPhotographicModeActive() && core->getCurrentLocation().planetName == QStringLiteral("Earth");
+	const double rh = qMin(0.95, (active ? photoHumidity : PHOTO_NORMAL_HUMIDITY)/100.);
+	const double rh0 = PHOTO_NORMAL_HUMIDITY/100.;
+	return std::pow((1. - rh)/(1. - rh0), -0.5);
 }
 
 void StelSkyDrawer::setFlagRefractionRayTraced(bool b)

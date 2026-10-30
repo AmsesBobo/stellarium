@@ -212,6 +212,11 @@ class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 	//! On Earth: refraction from rays traced through a standard atmosphere (valid for observers at any altitude, down to
 	//! the true horizon) instead of the formulas of Saemundsson and Bennett (made for a horizon at 0 degrees)
 	Q_PROPERTY(bool flagRefractionRayTraced READ getFlagRefractionRayTraced WRITE setFlagRefractionRayTraced NOTIFY flagRefractionRayTracedChanged)
+	//! The boundary layer that holds the aerosols (haze): 0 night or winter (0.3 km), 1 normal (1.5 km), 2 summer
+	//! afternoon (2.5 km), 3 custom (hazeLayerHeight)
+	Q_PROPERTY(int hazeLayerPreset READ getHazeLayerPreset WRITE setHazeLayerPreset NOTIFY hazeLayerPresetChanged)
+	//! Top of the boundary layer for the custom setting, m above sea level
+	Q_PROPERTY(double hazeLayerHeight READ getHazeLayerHeight WRITE setHazeLayerHeight NOTIFY hazeLayerHeightChanged)
 	//! The pressure (mbar) and temperature (deg C) at the observer in use: the set ones, or those of the standard atmosphere
 	Q_PROPERTY(double effectiveAtmospherePressure READ getEffectiveAtmospherePressure NOTIFY effectiveAtmosphereChanged)
 	Q_PROPERTY(double effectiveAtmosphereTemperature READ getEffectiveAtmosphereTemperature NOTIFY effectiveAtmosphereChanged)
@@ -1191,6 +1196,13 @@ public slots:
 	//! Take pressure and temperature from the standard atmosphere at the altitude of the observer (on Earth)
 	void setFlagAtmosphereFromAltitude(bool b);
 	bool getFlagAtmosphereFromAltitude() const {return flagAtmosphereFromAltitude;}
+	//! The boundary layer (haze layer): a preset or custom, and the height of the custom one (m)
+	void setHazeLayerPreset(int preset);
+	int getHazeLayerPreset() const {return hazeLayerPreset;}
+	void setHazeLayerHeight(double meters);
+	double getHazeLayerHeight() const {return hazeLayerHeight;}
+	//! Top of the boundary layer in use (m above sea level)
+	double getEffectiveHazeLayerHeight() const;
 	//! Use the ray-traced refraction (on Earth)
 	void setFlagRefractionRayTraced(bool b);
 	bool getFlagRefractionRayTraced() const {return flagRefractionRayTraced;}
@@ -1327,6 +1339,8 @@ signals:
 	void atmospherePressureChanged(double mbar);
 	void flagAtmosphereFromAltitudeChanged(bool b);
 	void flagRefractionRayTracedChanged(bool b);
+	void hazeLayerPresetChanged(int preset);
+	void hazeLayerHeightChanged(double meters);
 	void effectiveAtmosphereChanged();
 
 	void flagTfromKChanged(bool b);
@@ -1404,6 +1418,10 @@ private:
 	double atmosphereTemperatureSet = 15.;
 	bool flagAtmosphereFromAltitude = true;
 	bool flagRefractionRayTraced = true;
+	int hazeLayerPreset = 1;
+	double hazeLayerHeight = 1500.;
+	//! The extinction of the aerosols in the boundary layer against the normal humidity (hygroscopic growth)
+	double getHumidityGrowth() const;
 	float lastZenithExtinction = -1.f;
 	//! Set pressure and temperature of the refraction from the settings or the altitude of the observer
 	void updateEffectiveAtmosphere();
@@ -1726,7 +1744,7 @@ private:
 	double photoHazeLightFactor = 1.;
 	//! The extinction in use and the aerosols from the coefficient as set and the humidity (each frame)
 	void updatePhotoHumidity();
-	double photoHumidityInputs[4] = {-1., -1., -1., -1.};  //!< what the last update was for
+	double photoHumidityInputs[5] = {-1., -1., -1., -1., -1.};  //!< what the last update was for
 	bool photoExtinctionActive = false;
 	StelAtmosphereTransmission atmosphereTransmission;
 	std::vector<Vec3f> photoExtinctionTints;

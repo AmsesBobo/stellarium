@@ -96,10 +96,11 @@ void Extinction::updateModel()
 	// Split k (the luminance extinction towards the zenith, at sea level or at the observer) into the air, the
 	// ozone and the aerosols. If k is smaller than air and ozone alone, both are scaled down to it.
 	StelRefractionModel::Columns zenith;
+	// (k is given at the normal humidity: the humidity of the boundary layer changes the extinction in use)
 	if (coefficientAtSeaLevel)
 		zenith.rayleigh = zenith.aerosol = zenith.ozone = 1.;
 	else
-		zenith = model->getZenithColumns();
+		zenith = model->getZenithColumnsNormal();
 	const double k = static_cast<double>(std::max(ext_coeff, 0.f));
 	auto setDepths = [this](double scale, double aerosol) {
 		for (int i = 0; i < 3; ++i)
@@ -171,6 +172,14 @@ float Extinction::magnitude(float sinGeo) const
 	const int i = std::min(static_cast<int>(f), EXTINCTION_TABLE_SIZE - 2);
 	const float t = f - static_cast<float>(i);
 	return table[static_cast<size_t>(i)] + t*(table[static_cast<size_t>(i+1)] - table[static_cast<size_t>(i)]);
+}
+
+double Extinction::getAerosolDepth(bool normalHumidity) const
+{
+	if (!isModelInUse())
+		return 0.;
+	const auto& zenith = normalHumidity ? model->getZenithColumnsNormal() : model->getZenithColumns();
+	return depthAerosol[1]*zenith.aerosol;
 }
 
 float Extinction::getZenithExtinction() const
@@ -839,6 +848,8 @@ void Refraction::updateModel()
 	c.altitude = observerAltitude;
 	c.pressure = static_cast<double>(pressure);
 	c.temperature = static_cast<double>(temperature);
+	c.aerosolLayerTop = aerosolLayerTop;
+	c.aerosolLayerGrowth = aerosolLayerGrowth;
 	if (model && model->getConditions() == c)
 		return;
 	QElapsedTimer timer;

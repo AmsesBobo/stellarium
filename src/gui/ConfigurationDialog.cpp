@@ -1405,6 +1405,8 @@ void ConfigurationDialog::saveAllSettings()
 	conf->setValue("landscape/pressure_mbar",			propMgr->getStelPropertyValue("StelSkyDrawer.atmospherePressure").toFloat());
 	conf->setValue("landscape/temperature_C",			propMgr->getStelPropertyValue("StelSkyDrawer.atmosphereTemperature").toFloat());
 	conf->setValue("landscape/flag_atmosphere_from_altitude",	propMgr->getStelPropertyValue("StelSkyDrawer.flagAtmosphereFromAltitude").toBool());
+	conf->setValue("landscape/haze_layer_preset",	propMgr->getStelPropertyValue("StelSkyDrawer.hazeLayerPreset").toInt());
+	conf->setValue("landscape/haze_layer_height",	propMgr->getStelPropertyValue("StelSkyDrawer.hazeLayerHeight").toDouble());
 	conf->setValue("landscape/flag_refraction_ray_traced",	propMgr->getStelPropertyValue("StelSkyDrawer.flagRefractionRayTraced").toBool());
 
 	// view dialog / sky culture tab

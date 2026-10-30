@@ -120,6 +120,8 @@ public:
 	void setModel(std::shared_ptr<const StelRefractionModel> model, bool coefficientAtSeaLevel);
 	//! Angstrom exponent of the aerosols (their optical depth falls with the wavelength as lambda^-alpha), default 1.3
 	void setAngstrom(float alpha) {angstrom=alpha;}
+	//! Vertical optical depth (550 nm) of the aerosols above the observer, with the humidity or at the normal humidity
+	double getAerosolDepth(bool normalHumidity) const;
 	//! Rebuild the extinction along the rays if model, coefficient or aerosols changed (call once per frame)
 	void updateModel();
 	//! True if the extinction comes from the ray-traced model
@@ -228,6 +230,9 @@ public:
 
 	//! Set the altitude of the observer above sea level (m), for the ray-traced refraction model
 	void setObserverAltitude(double altitude_m) {observerAltitude=altitude_m;}
+	//! Set the top of the boundary layer that holds the aerosols (m above sea level) and the growth of its aerosols by
+	//! the humidity (extinction against the normal humidity), for the columns of the model
+	void setAerosolLayer(double top_m, double growth) {aerosolLayerTop=top_m; aerosolLayerGrowth=growth;}
 	double getObserverAltitude() const {return observerAltitude;}
 	//! Rebuild the ray-traced refraction model if the observer altitude, pressure or temperature changed
 	//! (a few milliseconds; call it once per frame, not per projection)
@@ -283,6 +288,7 @@ private:
 	float press_temp_corr;
 	//! Altitude of the observer above sea level [m]
 	double observerAltitude = 0.;
+	double aerosolLayerTop = 1500., aerosolLayerGrowth = 1.;
 	//! Ray-traced refraction model for the current conditions (immutable, shared between copies)
 	std::shared_ptr<const StelRefractionModel> model;
 	//! Its refraction resampled for the transformations

@@ -34,9 +34,12 @@
 //! larger than at sea level, while the refraction at 0 degrees is smaller.
 //!
 //! Along each ray the columns of three components are integrated: the air (Rayleigh scattering), the
-//! aerosols (exponential with a scale height of 1.2 km above sea level) and the ozone (a layer between
-//! 10 and 40 km, densest at 25 km). They are given in units of their vertical column above sea level,
-//! so they can be multiplied with sea-level zenith optical depths.
+//! aerosols and the ozone (a layer between 10 and 40 km, densest at 25 km). The aerosols fill the boundary
+//! layer, well mixed up to its top (the inversion that caps it, from about 0.3 km on a calm night to 2.5 km on
+//! a summer afternoon); above it the free troposphere holds a thin rest (7% of the density, scale height 2 km).
+//! The humidity of the boundary layer makes its aerosols swell (aerosolLayerGrowth). The columns are given in
+//! units of the vertical column above sea level (aerosols: at the normal humidity), so they can be multiplied
+//! with sea-level zenith optical depths.
 //!
 //! An object is immutable: build a new one for new conditions. Building takes a few milliseconds.
 //! All angles are in radians, altitudes above the astronomical horizon of the observer.
@@ -49,9 +52,12 @@ public:
 		double pressure = 1013.25;   //!< at the observer, hPa (mbar)
 		double temperature = 15.;    //!< at the observer, degrees Celsius
 		double wavelength = 0.55;    //!< micrometers (0.55: the visual band)
+		double aerosolLayerTop = 1500.; //!< top of the boundary layer that holds the aerosols, m above sea level
+		double aerosolLayerGrowth = 1.; //!< extinction of its aerosols against the normal humidity (hygroscopic growth)
 		bool operator==(const Conditions& o) const
 		{
-			return altitude == o.altitude && pressure == o.pressure && temperature == o.temperature && wavelength == o.wavelength;
+			return altitude == o.altitude && pressure == o.pressure && temperature == o.temperature && wavelength == o.wavelength
+			       && aerosolLayerTop == o.aerosolLayerTop && aerosolLayerGrowth == o.aerosolLayerGrowth;
 		}
 		bool operator!=(const Conditions& o) const {return !(*this == o);}
 	};
@@ -88,6 +94,13 @@ public:
 	Columns columns(double apparentAltitude) const;
 	//! Columns above the observer, straight up
 	const Columns& getZenithColumns() const {return zenith;}
+	//! The same at the normal humidity (no growth of the aerosols)
+	const Columns& getZenithColumnsNormal() const {return zenithNormal;}
+	//! Density of the aerosols at the given altitude (m) at the normal humidity, per m, so that the vertical column
+	//! from sea level is 1
+	double aerosolDensityNormal(double altitude) const;
+	//! The same with the growth of the humidity in the boundary layer
+	double aerosolDensity(double altitude) const;
 
 	//! Refractivity n-1 of the air at the observer
 	double getRefractivityAtObserver() const {return refractivityObserver;}
@@ -119,7 +132,11 @@ private:
 	double horizonApparent = 0., horizonGeometric = 0.;
 	std::vector<double> apparent, geometric;
 	std::vector<Columns> lineColumns;
-	Columns zenith;
+	Columns zenith, zenithNormal;
+	double aerosolNorm = 1.;
+	//! Fraction of the boundary layer at the altitude (1 inside, 0 above, a smooth top)
+	double boundaryLayerFraction(double h) const;
+	double aerosolShape(double h) const;
 
 	void buildAtmosphere();
 	void traceRays();

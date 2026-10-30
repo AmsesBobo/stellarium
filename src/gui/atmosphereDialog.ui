@@ -370,6 +370,69 @@
           </property>
          </widget>
         </item>
+        <item row="3" column="0">
+         <widget class="QLabel" name="hazeLayerLabel">
+          <property name="toolTip">
+           <string>The boundary layer near the ground that holds the haze (aerosols and their humidity). Above its top the air is clear and dry: from a mountain or an aircraft above it the haze lies below as a band along the horizon.</string>
+          </property>
+          <property name="text">
+           <string>Haze layer:</string>
+          </property>
+         </widget>
+        </item>
+        <item row="3" column="1">
+         <widget class="QComboBox" name="hazeLayerComboBox">
+          <item>
+           <property name="text">
+            <string>Night or winter (0.3 km)</string>
+           </property>
+          </item>
+          <item>
+           <property name="text">
+            <string>Normal (1.5 km)</string>
+           </property>
+          </item>
+          <item>
+           <property name="text">
+            <string>Summer afternoon (2.5 km)</string>
+           </property>
+          </item>
+          <item>
+           <property name="text">
+            <string>Custom</string>
+           </property>
+          </item>
+         </widget>
+        </item>
+        <item row="4" column="0">
+         <widget class="QLabel" name="hazeLayerHeightLabel">
+          <property name="text">
+           <string>Haze layer top (m):</string>
+          </property>
+         </widget>
+        </item>
+        <item row="4" column="1">
+         <widget class="QDoubleSpinBox" name="hazeLayerHeightDoubleSpinBox">
+          <property name="alignment">
+           <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+          </property>
+          <property name="decimals">
+           <number>0</number>
+          </property>
+          <property name="minimum">
+           <double>100.000000000000000</double>
+          </property>
+          <property name="maximum">
+           <double>3000.000000000000000</double>
+          </property>
+          <property name="singleStep">
+           <double>100.000000000000000</double>
+          </property>
+          <property name="value">
+           <double>1500.000000000000000</double>
+          </property>
+         </widget>
+        </item>
        </layout>
       </item>
       <item>
@@ -484,6 +547,8 @@
   <tabstop>showMySky_multipleScatteringEnabled</tabstop>
   <tabstop>atmosphereFromAltitudeCheckBox</tabstop>
   <tabstop>pressureDoubleSpinBox</tabstop>
+  <tabstop>hazeLayerComboBox</tabstop>
+  <tabstop>hazeLayerHeightDoubleSpinBox</tabstop>
   <tabstop>refractionRayTracedCheckBox</tabstop>
   <tabstop>temperatureDoubleSpinBox</tabstop>
   <tabstop>extinctionDoubleSpinBox</tabstop>

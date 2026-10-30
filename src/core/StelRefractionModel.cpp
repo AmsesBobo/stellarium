@@ -28,7 +28,8 @@ namespace
 	constexpr double G0 = 9.80665;          // m/s^2
 	constexpr double GMR = G0*0.0289644/8.3144598;  // g0*M/R* (K/m), the hydrostatic constant of the 1976 standard
 	constexpr double KELVIN = 273.15;
-	constexpr double AEROSOL_SCALE_HEIGHT = 1200.;     // m
+	// The free troposphere above the boundary layer: a rest of aerosols, thinning out
+	constexpr double FREE_TROPOSPHERE_FRACTION = 0.07, FREE_TROPOSPHERE_SCALE_HEIGHT = 2000.; // -, m
 	constexpr double OZONE_PEAK = 25000., OZONE_HALF_WIDTH = 15000.; // m: a tent from 10 to 40 km
 	constexpr int SAMPLES = 256;
 
@@ -108,6 +109,16 @@ StelRefractionModel::StelRefractionModel(const Conditions& c)
 	conditions.pressure = std::max(conditions.pressure, 0.);
 	conditions.temperature = std::clamp(conditions.temperature, -120., 80.);
 	conditions.wavelength = std::clamp(conditions.wavelength, 0.3, 2.);
+	conditions.aerosolLayerTop = std::clamp(conditions.aerosolLayerTop, 50., 10000.);
+	conditions.aerosolLayerGrowth = std::clamp(conditions.aerosolLayerGrowth, 0.1, 20.);
+	// the aerosol column above sea level at the normal humidity (the unit of the columns)
+	{
+		double sum = 0.;
+		const double step = 5.;
+		for (double h = 0.5*step; h < AtmosphereTop; h += step)
+			sum += aerosolShape(h)*step;
+		aerosolNorm = sum;
+	}
 	buildAtmosphere();
 	traceRays();
 }
@@ -194,6 +205,33 @@ void StelRefractionModel::refractivity(double h, double& nm1, double& dnm1) cons
 	dnm1 = nm1*(b - a)/gridStep;
 }
 
+double StelRefractionModel::boundaryLayerFraction(double h) const
+{
+	const double top = conditions.aerosolLayerTop;
+	const double width = std::max(50., 0.1*top);
+	const double x = (h - top)/width;
+	return x > 40. ? 0. : 1./(1. + std::exp(x));
+}
+
+double StelRefractionModel::aerosolShape(double h) const
+{
+	const double s = boundaryLayerFraction(h);
+	const double above = FREE_TROPOSPHERE_FRACTION*std::exp(-std::max(h - conditions.aerosolLayerTop, 0.)/FREE_TROPOSPHERE_SCALE_HEIGHT);
+	return s + (1. - s)*above;
+}
+
+double StelRefractionModel::aerosolDensityNormal(double h) const
+{
+	return aerosolShape(h)/aerosolNorm;
+}
+
+double StelRefractionModel::aerosolDensity(double h) const
+{
+	// the swelling of the humidity in the boundary layer; the free troposphere above stays dry
+	const double s = boundaryLayerFraction(h);
+	return aerosolShape(h)*(1. + (conditions.aerosolLayerGrowth - 1.)*s)/aerosolNorm;
+}
+
 StelRefractionModel::Columns StelRefractionModel::density(double h) const
 {
 	Columns d;
@@ -201,7 +239,7 @@ StelRefractionModel::Columns StelRefractionModel::density(double h) const
 	const size_t i = std::min(static_cast<size_t>(f), gridDensity.size() - 2);
 	const double t = f - static_cast<double>(i);
 	d.rayleigh = ((1.-t)*gridDensity[i] + t*gridDensity[i+1])/standardRayleighColumn();
-	d.aerosol = std::exp(-std::max(h, 0.)/AEROSOL_SCALE_HEIGHT)/AEROSOL_SCALE_HEIGHT;
+	d.aerosol = aerosolDensity(h);
 	d.ozone = std::max(0., 1. - std::fabs(h - OZONE_PEAK)/OZONE_HALF_WIDTH)/OZONE_HALF_WIDTH;
 	return d;
 }
@@ -308,6 +346,14 @@ void StelRefractionModel::traceRays()
 		geometric[k] = std::max(geometric[k], geometric[k-1] + 1e-12);
 	horizonGeometric = geometric.front();
 	zenith = lineColumns.back();
+	// the aerosols above the observer at the normal humidity
+	zenithNormal = zenith;
+	zenithNormal.aerosol = 0.;
+	{
+		const double step = 5.;
+		for (double h = conditions.altitude + 0.5*step; h < AtmosphereTop; h += step)
+			zenithNormal.aerosol += aerosolDensityNormal(h)*step;
+	}
 }
 
 double StelRefractionModel::getGeometricDip() const

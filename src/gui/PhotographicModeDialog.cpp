@@ -902,7 +902,7 @@ void PhotographicModeDialog::updateCameraWidgets()
 		const QSignalBlocker blocker(ui->humiditySpinBox);
 		ui->humiditySpinBox->setValue(qRound(drawer->getPhotoHumidity()));
 		// the extinction coefficient it gives (the one set is for 60%)
-		ui->humiditySpinBox->setSuffix(QString(" %   (k = %1)").arg(QLocale().toString(static_cast<double>(drawer->getExtinction().getExtinctionCoefficient()), 'f', 2)));
+		ui->humiditySpinBox->setSuffix(QString(" %   (k = %1)").arg(QLocale().toString(static_cast<double>(drawer->getExtinction().getZenithExtinction()), 'f', 2)));
 		ui->humiditySpinBox->setEnabled(drawer->getFlagPhotoHumidity());
 		ui->aureoleCheckBox->setEnabled(drawer->getFlagPhotoHumidity());
 	}

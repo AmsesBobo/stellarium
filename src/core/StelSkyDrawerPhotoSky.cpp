@@ -396,9 +396,13 @@ void StelSkyDrawer::updatePhotoHumidity()
 	// With the standard atmosphere from the altitude the coefficient is the one at sea level (see
 	// Extinction::setModel()): then the air of the whole column belongs to it, not only the air above the observer
 	const double coefficientAltitude = (flagAtmosphereFromAltitude && core->getCurrentLocation().planetName == QStringLiteral("Earth")) ? 0. : altitude;
+	// With the ray-traced extinction the humidity acts in the boundary layer of the model (StelRefractionModel):
+	// the coefficient stays the one at the normal humidity
+	const bool fromModel = refraction.isModelInUse() && getFlagHasAtmosphere();
 	if (humidity == photoHumidityInputs[0] && base == photoHumidityInputs[1] && altitude == photoHumidityInputs[2]
-	    && coefficientAltitude == photoHumidityInputs[3])
+	    && coefficientAltitude == photoHumidityInputs[3] && (fromModel ? 1. : 0.) == photoHumidityInputs[4])
 		return;
+	photoHumidityInputs[4] = fromModel ? 1. : 0.;
 	photoHumidityInputs[0] = humidity;
 	photoHumidityInputs[1] = base;
 	photoHumidityInputs[2] = altitude;
@@ -426,7 +430,7 @@ void StelSkyDrawer::updatePhotoHumidity()
 	a.albedo = qBound(0.8, 1. - 0.1*std::pow(growth, -0.9), 0.98);
 	photoAerosol = a;
 	// The extinction in use: the coefficient as set (where it is set), with the change of the aerosols there
-	const double k = qMax(0., base + 1.0857*coefficientDepth*(growth - 1.));
+	const double k = fromModel ? base : qMax(0., base + 1.0857*coefficientDepth*(growth - 1.));
 	extinction.setExtinctionCoefficient(static_cast<float>(k));
 	// The light of lamps nearby scattered towards the zenith, against the normal humidity (single scattering)
 	PhotoAerosol normal;

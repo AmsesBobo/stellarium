@@ -72,6 +72,16 @@ void AtmosphereDialog::createDialogContent()
 	connectDoubleProperty(ui->extinctionDoubleSpinBox,"StelSkyDrawer.extinctionCoefficient");
 	connectBoolProperty(ui->atmosphereFromAltitudeCheckBox, "StelSkyDrawer.flagAtmosphereFromAltitude");
 	connectBoolProperty(ui->refractionRayTracedCheckBox, "StelSkyDrawer.flagRefractionRayTraced");
+	// The haze layer: presets, or a custom height
+	connectIntProperty(ui->hazeLayerComboBox, "StelSkyDrawer.hazeLayerPreset");
+	connectDoubleProperty(ui->hazeLayerHeightDoubleSpinBox, "StelSkyDrawer.hazeLayerHeight");
+	auto updateHazeLayer = [this](){
+		const bool custom = ui->hazeLayerComboBox->currentIndex() == 3;
+		ui->hazeLayerHeightDoubleSpinBox->setEnabled(custom);
+		ui->hazeLayerHeightLabel->setEnabled(custom);
+	};
+	connect(ui->hazeLayerComboBox, qOverload<int>(&QComboBox::currentIndexChanged), this, updateHazeLayer);
+	updateHazeLayer();
 	// With the standard atmosphere the set values are not used
 	connect(ui->atmosphereFromAltitudeCheckBox, &QCheckBox::toggled, this, [this](bool b){
 		ui->pressureDoubleSpinBox->setDisabled(b);
