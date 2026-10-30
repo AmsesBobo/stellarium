@@ -126,8 +126,31 @@ uniform highp vec3 photoHazeSunLight;   // illuminance on the haze (lux, linear 
 uniform highp vec3 photoHazeMoonLight;
 uniform highp vec3 photoHazeDiffuse;    // mean luminance of the sky that lights the haze (cd/m^2, linear sRGB)
 
+// With the ray-traced extinction: the aerosol column of the line of sight against the apparent altitude (in units of
+// the vertical column above sea level, with the humidity of the boundary layer), from the true horizon to the zenith at
+// the altitudes limb + span*(i/63)^3; photoHazeExtinction is then the vertical optical depth above sea level
+uniform bool photoHazeUseTable;
+uniform highp vec4 photoHazeTable[16];
+uniform highp vec2 photoHazeTableLimits;
+// The haze layer as a slab of R/H (radius of the Earth over its thickness), for the light of the Sun and the Moon on it
+uniform highp float photoHazeSlab;
+highp float photoHazeTableEntry(int i)
+{
+	int v = i/4;
+	int c = i - 4*v;
+	highp vec4 e = photoHazeTable[v];
+	return c == 0 ? e.x : (c == 1 ? e.y : (c == 2 ? e.z : e.w));
+}
+
 highp float photoHazeAirmass(highp float sinElev)
 {
+	if (photoHazeUseTable)
+	{
+		highp float x = max(asin(clamp(sinElev, -1., 1.)) - photoHazeTableLimits.x, 0.);
+		highp float f = pow(clamp(x/photoHazeTableLimits.y, 0., 1.), 1./3.)*63.;
+		int i = int(min(floor(f), 62.));
+		return mix(photoHazeTableEntry(i), photoHazeTableEntry(i + 1), f - float(i));
+	}
 	const highp float RH = 6371. / 1.2;
 	highp float s = clamp(abs(photoHorizonSine(sinElev)), 0., 1.);
 	return sqrt(RH*s*RH*s + 2.*RH + 1.) - RH*s;
@@ -137,7 +160,16 @@ highp vec3 photoHazeSource(highp vec3 viewDir, highp float X, highp vec3 dir, hi
 {
 	if (dot(E, E) <= 0.)
 		return vec3(0.);
-	highp float X0 = photoHazeAirmass(dir.z);
+	// the light of the Sun or the Moon reaches the haze through the layer above it
+	highp float X0;
+	if (photoHazeUseTable)
+	{
+		highp float RH = photoHazeSlab;
+		highp float s = clamp(dir.z, 0., 1.);
+		X0 = sqrt(RH*s*RH*s + 2.*RH + 1.) - RH*s;
+	}
+	else
+		X0 = photoHazeAirmass(dir.z);
 	highp float g = photoHazeG;
 	highp float q = 1. + g*g - 2.*g*dot(viewDir, dir);
 	highp float P = (1. - g*g) / (12.5663706 * q * sqrt(q));

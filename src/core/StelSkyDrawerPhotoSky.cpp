@@ -31,6 +31,7 @@
 
 #include <QOpenGLContext>
 #include <QOpenGLShaderProgram>
+#include <QVector4D>
 #include <QtGlobal>
 #include <array>
 
@@ -477,7 +478,9 @@ bool StelSkyDrawer::getFlagPhotoAureoleActive() const
 	if (!flagPhotoHumidity || !flagPhotoAureole || !getFlagPhotographicModeActive() || !getFlagHasAtmosphere()
 	    || core->getCurrentLocation().planetName != QStringLiteral("Earth"))
 		return false;
-	return photoAerosol.depth*photoAerosol.albedo*photoAerosol.asymmetry*photoAerosol.asymmetry > 0.002;
+	// (with the ray-traced extinction: the haze of the boundary layer, which may lie below the observer)
+	const double depth = extinction.isModelInUse() ? extinction.getAerosolSeaLevelDepth() : photoAerosol.depth;
+	return depth*photoAerosol.albedo*photoAerosol.asymmetry*photoAerosol.asymmetry > 0.002;
 }
 
 void StelSkyDrawer::getPhotoAureoleSize(const StelProjector& prj, float& coreSize, float& extent) const
@@ -493,6 +496,26 @@ std::vector<float> StelSkyDrawer::getPhotoAureoleMap(int gw, int gh, int w, int 
 	const double forward = photoAerosol.depth*photoAerosol.albedo*photoAerosol.asymmetry*photoAerosol.asymmetry;
 	const StelProjectorP prj = core->getProjection(StelCore::FrameAltAz, StelCore::RefractionOff);
 	constexpr double RH = 6371./1.2;
+	// With the ray-traced extinction: the aerosols along the line of sight of the boundary layer of the model, down to
+	// the true horizon
+	const StelRefractionModel* model = extinction.getModel();
+	if (model)
+	{
+		const double perColumn = extinction.getAerosolSeaLevelDepth()*photoAerosol.albedo*photoAerosol.asymmetry*photoAerosol.asymmetry;
+		for (int j=0; j<gh; ++j)
+			for (int i=0; i<gw; ++i)
+			{
+				Vec3d v;
+				prj->unProject((i + 0.5)*w/gw, (j + 0.5)*h/gh, v);
+				v.normalize();
+				const double a = std::asin(qBound(-1., v[2], 1.));
+				if (a < model->getHorizonApparent())
+					continue;  // the ground
+				const double depth = perColumn*model->columns(a).aerosol;
+				map[static_cast<size_t>(j)*gw + i] = qMin(AUREOLE_MAX, static_cast<float>(std::expm1(depth)));
+			}
+		return map;
+	}
 	for (int j=0; j<gh; ++j)
 		for (int i=0; i<gw; ++i)
 		{
@@ -516,10 +539,37 @@ void StelSkyDrawer::setPhotoHazeUniforms(QOpenGLShaderProgram& program, double m
 	// The aerosols of the ShowMySky models (atmosphere/default/params.atmo: 1.0333e8 m^-3 over 1.2 km, 0.042968 um^2):
 	// a vertical optical depth of only 0.0053 at sea level. The rest of the haze of the extinction coefficient is added.
 	const double modelDepth = 0.0053*std::exp(-altitude/1.2);
-	const double extra = active ? qMax(0., photoAerosol.depth - modelDepth) : 0.;
+	// With the ray-traced extinction the haze follows the boundary layer of the model: its optical depth along each
+	// line of sight comes from a table of the aerosol column (in units of the column above sea level); the rest
+	// beyond the aerosols of the sky model, per column above sea level
+	const StelRefractionModel* model = extinction.getModel();
+	const bool fromModel = model != nullptr;
+	const double extra = !active ? 0. : fromModel ? qMax(0., extinction.getAerosolSeaLevelDepth() - 0.0053)
+	                                              : qMax(0., photoAerosol.depth - modelDepth);
 	program.setUniformValue("photoHaze", extra > 1e-4);
 	if (!(extra > 1e-4))
 		return;
+	program.setUniformValue("photoHazeUseTable", fromModel);
+	if (fromModel)
+	{
+		constexpr int SIZE = 64;
+		const double limb = model->getHorizonApparent();
+		const double span = M_PI_2 - limb;
+		float t[SIZE];
+		for (int i = 0; i < SIZE; ++i)
+		{
+			const double u = static_cast<double>(i)/(SIZE - 1);
+			t[i] = static_cast<float>(model->columns(limb + span*u*u*u + (i == 0 ? 1e-7 : 0.)).aerosol);
+		}
+		QVector4D v[SIZE/4];
+		for (int i = 0; i < SIZE/4; ++i)
+			v[i] = QVector4D(t[4*i], t[4*i+1], t[4*i+2], t[4*i+3]);
+		program.setUniformValueArray("photoHazeTable", v, SIZE/4);
+		program.setUniformValue("photoHazeTableLimits", static_cast<float>(limb), static_cast<float>(span));
+		// the thickness of the layer: its aerosol column at sea level in units of its density near the ground
+		const double thickness = qMax(0.05, 1./qMax(1e-9, model->aerosolDensity(0.)*1000.));  // km
+		program.setUniformValue("photoHazeSlab", static_cast<float>(6371./thickness));
+	}
 	const PhotoAerosol& a = photoAerosol;
 	const double f = a.asymmetry*a.asymmetry;  // delta-M: the forward peak (the aureole) goes on with the beam
 	const double wl[3] = {0.610, 0.550, 0.465};

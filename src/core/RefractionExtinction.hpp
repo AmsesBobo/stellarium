@@ -122,6 +122,11 @@ public:
 	void setAngstrom(float alpha) {angstrom=alpha;}
 	//! Vertical optical depth (550 nm) of the aerosols above the observer, with the humidity or at the normal humidity
 	double getAerosolDepth(bool normalHumidity) const;
+	//! Optical depth (550 nm) of the aerosols at the normal humidity per vertical column above sea level: multiplied with
+	//! the aerosol column of a line of sight (StelRefractionModel::columns(), which holds the humidity) it gives its depth
+	double getAerosolSeaLevelDepth() const {return isModelInUse() ? depthAerosol[1] : 0.;}
+	//! The ray-traced model the extinction comes from (null without it)
+	const StelRefractionModel* getModel() const {return isModelInUse() ? model.get() : nullptr;}
 	//! Rebuild the extinction along the rays if model, coefficient or aerosols changed (call once per frame)
 	void updateModel();
 	//! True if the extinction comes from the ray-traced model
