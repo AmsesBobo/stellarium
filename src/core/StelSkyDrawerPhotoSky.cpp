@@ -393,15 +393,21 @@ void StelSkyDrawer::updatePhotoHumidity()
 	const double humidity = active ? photoHumidity : PHOTO_NORMAL_HUMIDITY;
 	const double altitude = qMax(0., static_cast<double>(core->getCurrentLocation().altitude)/1000.);  // km
 	const double base = static_cast<double>(extinctionBase);
-	if (humidity == photoHumidityInputs[0] && base == photoHumidityInputs[1] && altitude == photoHumidityInputs[2])
+	// With the standard atmosphere from the altitude the coefficient is the one at sea level (see
+	// Extinction::setModel()): then the air of the whole column belongs to it, not only the air above the observer
+	const double coefficientAltitude = (flagAtmosphereFromAltitude && core->getCurrentLocation().planetName == QStringLiteral("Earth")) ? 0. : altitude;
+	if (humidity == photoHumidityInputs[0] && base == photoHumidityInputs[1] && altitude == photoHumidityInputs[2]
+	    && coefficientAltitude == photoHumidityInputs[3])
 		return;
 	photoHumidityInputs[0] = humidity;
 	photoHumidityInputs[1] = base;
 	photoHumidityInputs[2] = altitude;
+	photoHumidityInputs[3] = coefficientAltitude;
 
-	// The aerosols at the normal humidity: what the air (Rayleigh, above the observer) and ozone (0.016) do not
-	// explain of the extinction coefficient (magnitudes per airmass = 1.0857 optical depth), at least 0.01
-	const double rayleigh = 0.0088*std::pow(0.55, -4.05)*std::exp(-altitude/8.);
+	// The aerosols at the normal humidity: what the air (Rayleigh, above the altitude the coefficient is given for)
+	// and ozone (0.016) do not explain of the extinction coefficient (magnitudes per airmass = 1.0857 optical depth),
+	// at least 0.01
+	const double rayleigh = 0.0088*std::pow(0.55, -4.05)*std::exp(-coefficientAltitude/8.);
 	const double baseDepth = qMax(0.01, base/1.0857 - rayleigh - 0.016);
 	// Hygroscopic growth: the scattering of the aerosols rises as (1 - RH)^-gamma (Hanel 1976; gamma about 0.5 for
 	// continental air): x2 at 80%, x2.8 at 95% against 60%. The grown particles are larger: the haze becomes whiter
