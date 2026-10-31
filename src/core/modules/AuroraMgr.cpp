@@ -535,7 +535,7 @@ uniform highp float auroraSeed;      // from the date
 uniform highp float auroraExposure;  // exposure time of the camera (s, 0: an instant): what changes faster is averaged
 uniform highp vec4 auroraSubstorm;   // onset (MLT, h), its spread in MLT (h), activity (0-1), poleward bulge (radians)
 uniform highp vec4 auroraState;      // equatorward drift of the arcs (radians), pulsating aurora (0-1), purple lower
-                                     // border against the green (energetic electrons), unused
+                                     // border against the green (energetic electrons), lowest latitude of the aurorae
 
 const highp float PI = 3.14159265;
 const highp float EARTH_RADIUS = 6371.;
@@ -645,6 +645,28 @@ highp float pulsating(highp float lon, highp float lat, highp float amount)
 	return 1. + amount*kept*patchMask*(2.*on - 1.);
 }
 
+// The arcs at a point of the line of sight: the footprint latitude lat (radians) and magnetic longitude lon (turns)
+// against the latitudes of the three arcs there (with their folds): the folds are only computed near an arc
+highp vec3 arcOffsets(highp float lat, highp float lon)
+{
+	highp float mlt = mod(12. + (lon*2.*PI - auroraSunLon)*12./PI, 24.);
+	highp vec3 oval = ovalAt(mlt);
+	highp float dm = mlt - auroraSubstorm.x;
+	dm -= 24.*floor(dm/24. + 0.5);
+	highp float activity = auroraSubstorm.z*exp(-dm*dm/(auroraSubstorm.y*auroraSubstorm.y));
+	highp float bulge = auroraSubstorm.w*activity/max(auroraSubstorm.z, 1e-3);
+	highp float width = max(oval.x - oval.y, 0.005) + bulge;
+	highp vec3 x;
+	for (int j = 0; j < 3; ++j)
+	{
+		highp float frac = j == 0 ? 0.15 : (j == 1 ? 0.4 : 0.7);
+		highp float d = lat - (oval.y + frac*width - auroraState.x*(1. - activity));
+		// the folds reach 0.5 degrees at most
+		x[j] = abs(d) < 0.012 ? d - arcFold(lon, activity, j) : d;
+	}
+	return x;
+}
+
 void main(void)
 {
 	highp vec4 winPos = projectionMatrixInverse * vec4(ndcPos, 1);
@@ -665,9 +687,22 @@ void main(void)
 		FRAG_COLOR = vec4(0); // the line of sight meets the Earth
 		return;
 	}
+	// A line of sight that stays equatorward of the aurorae (seen from low latitudes, or towards the equator)
+	{
+		highp float rb = EARTH_RADIUS + SHELL_BOTTOM, rt = EARTH_RADIUS + SHELL_TOP, rm = EARTH_RADIUS + 200.;
+		highp float lat0 = footLatitude(p0 + (-b + sqrt(b*b - r0*r0 + rb*rb))*dir);
+		highp float lat1 = footLatitude(p0 + (-b + sqrt(b*b - r0*r0 + rm*rm))*dir);
+		highp float lat2 = footLatitude(p0 + (-b + sqrt(b*b - r0*r0 + rt*rt))*dir);
+		if (max(lat0, max(lat1, lat2)) < auroraState.w)
+		{
+			FRAG_COLOR = vec4(0);
+			return;
+		}
+	}
 
 	highp float green = 0., red = 0., purple = 0.;
 	highp float tPrev = 0., hPrev = 0., latPrev = 0., lonPrev = 0.;
+	highp vec3 xPrev = vec3(0);
 	for (int k = 0; k <= STEPS; ++k)
 	{
 		highp float u = float(k)/float(STEPS);
@@ -677,6 +712,7 @@ void main(void)
 		highp vec3 p = p0 + t*dir;
 		highp float lat = footLatitude(p);
 		highp float lon = atan(p.y, p.x)/(2.*PI); // in turns
+		highp vec3 x = arcOffsets(lat, lon);
 		if (k > 0)
 		{
 			highp float len = t - tPrev;
@@ -696,25 +732,24 @@ void main(void)
 			highp float arcs = auroraEmission.x*(0.1 + 0.9*night*sqrt(night))*(1. + 6.*activity);
 			highp float morning = 0.5 + 0.5*cos((mlt - 3.)*PI/12.);
 			highp float diffuse = auroraEmission.y*(0.3 + 0.7*morning)*(1. + 1.5*activity);
-			// rays: a few in quiet arcs, most of the light in activity ones
+			// rays: a few in quiet arcs, most of the light in active ones
 			highp float rays = 0.15 + 0.85*smoothstep(0.03, 0.4, activity);
 
 			// three arcs in the discrete oval, the brightest near its equatorward edge; they drift towards the
-			// equator before a substorm and fill the bulge of the oval in it
-			highp float dl = lat - latPrev;
+			// equator before a substorm and fill the bulge of the oval in it. The distance to an arc is known at
+			// both ends of the piece: the line cannot miss it where it folds
 			for (int j = 0; j < 3; ++j)
 			{
-				highp float frac = j == 0 ? 0.15 : (j == 1 ? 0.4 : 0.7);
 				highp float w = (j == 0 ? 4. : (j == 1 ? 6. : 8.))/FOOT_RADIUS;
+				highp float x0 = xPrev[j], x1 = x[j];
+				if (x0*x1 > 0. && min(abs(x0), abs(x1)) > 5.*w)
+					continue; // far from this arc
 				highp float strength = j == 0 ? 1. : (j == 1 ? 0.45 : 0.25);
-				highp float a0 = oval.y + frac*width - auroraState.x*(1. - activity);
-				highp float a = a0 + arcFold(lonm, activity, j);
-				highp float s = arcs*strength*bandLength(latPrev, lat, a, w, len);
-				if (s <= 0.)
-					continue;
-				highp float c = abs(dl) > 1e-7 ? clamp((a - latPrev)/dl, 0., 1.) : 0.5;
+				highp float s = arcs*strength*bandLength(x0, x1, 0., w, len);
+				highp float dx = x0 - x1;
+				highp float c = abs(dx) > 1e-9 ? clamp(x0/dx, 0., 1.) : 0.5;
 				highp float hc = mix(hPrev, h, c);
-				highp float ray = arcRays(lonPrev + c*dlon, rays, abs(dlon)*min(1., 3.*w/max(abs(dl), 1e-9)), j);
+				highp float ray = arcRays(lonPrev + c*dlon, rays, abs(dlon)*min(1., 3.*w/max(abs(dx), 1e-9)), j);
 				// the rays reach higher than the arc
 				highp float top = 12. + 30.*rays*min(ray, 2.);
 				s *= ray;
@@ -724,16 +759,20 @@ void main(void)
 			}
 			// the diffuse aurora, from its equatorward boundary into the discrete oval, pulsating after a substorm
 			highp float latm = 0.5*(lat + latPrev);
-			highp float hm = 0.5*(h + hPrev);
-			highp float pulse = pulsating(lonm, latm, auroraState.y*smoothstep(0., 0.3, morning));
-			highp float d = diffuse*len*pulse*smoothstep(oval.z, oval.y, latm)*(1. - smoothstep(oval.y + 0.5*width, oval.x + bulge, latm));
-			green += d*chapman(hm, 115., 15.);
-			red += d*chapman(hm, auroraEmission.w, 60.);
+			highp float zone = smoothstep(oval.z, oval.y, latm)*(1. - smoothstep(oval.y + 0.5*width, oval.x + bulge, latm));
+			if (zone > 0.)
+			{
+				highp float hm = 0.5*(h + hPrev);
+				highp float d = diffuse*len*zone*pulsating(lonm, latm, auroraState.y*smoothstep(0., 0.3, morning));
+				green += d*chapman(hm, 115., 15.);
+				red += d*chapman(hm, auroraEmission.w, 60.);
+			}
 		}
 		tPrev = t;
 		hPrev = h;
 		latPrev = lat;
 		lonPrev = lon;
+		xPrev = x;
 	}
 
 	highp vec3 color = green*auroraGreenColor + auroraEmission.z*red*auroraRedColor + auroraState.z*purple*auroraPurpleColor;
@@ -840,8 +879,13 @@ void AuroraMgr::drawLight(StelCore* core, const Geometry& g)
 	p.setUniformValue("auroraSubstorm", QVector4D(static_cast<float>(sub.onsetMLT), static_cast<float>(sub.spread),
 	                                              static_cast<float>(sub.activity), static_cast<float>(sub.bulge*M_PI/180.)));
 	const double energetic = 0.5*std::clamp((kp - 3.5)/4.5, 0., 1.);
+	// Lines of sight that stay equatorward of the diffuse aurora are left out
+	float lowest = oval[0].z();
+	for (const auto& o : oval)
+		lowest = std::min(lowest, o.z());
+	lowest -= static_cast<float>(M_PI/180.);
 	p.setUniformValue("auroraState", QVector4D(static_cast<float>(sub.drift*M_PI/180.), static_cast<float>(sub.pulsating),
-	                                           static_cast<float>(energetic), 0.f));
+	                                           static_cast<float>(energetic), lowest));
 
 	auto& gl = *QOpenGLContext::currentContext()->functions();
 	gl.glEnable(GL_BLEND);
