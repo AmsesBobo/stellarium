@@ -51,13 +51,13 @@ constexpr int VertexAttribIndex = 0;
 
 // The emissions in the linear sRGB of the scene (luminance in cd/m^2) per rayleigh, from the CIE 1931 color matching
 // functions: 1 R is 10^10/(4 pi) photons per second, square meter and steradian. The green line of oxygen (557.7 nm,
-// 1.93e-7 cd/m^2 per R) goes with the blue band of N2+ (427.8 nm), about 1/5 of it in rayleigh and from the same
-// heights; the red line of oxygen (630.0 nm, 4.54e-8 cd/m^2 per R) with its companion at 636.4 nm (1/3 of it).
-// Both are outside the sRGB gamut (the shader keeps their luminance and desaturates them into it).
-const Vec3f GreenPerRayleigh(6.116e-8f, 2.493e-7f, 3.451e-8f);
+// 1.93e-7 cd/m^2 per R); the red line of oxygen (630.0 nm, 4.54e-8 cd/m^2 per R) with its companion at 636.4 nm
+// (1/3 of it); the light of nitrogen, per R of the green line where it is not quenched: the blue band of N2+
+// (427.8 nm, 1/4 of the green) and the first positive band of N2 (650-690 nm, 0.8 of the green), violet. The
+// lines lie outside the sRGB gamut: the shader clips the negative parts, as the color matrix of a camera does.
+const Vec3f GreenPerRayleigh(5.134e-8f, 2.583e-7f, -3.250e-8f);
 const Vec3f RedPerRayleigh(3.604e-7f, -2.776e-8f, -3.84e-9f);
-// The lower border of energetic aurorae: the first positive band of N2 (650-690 nm) with 0.6 of it of 427.8 nm
-const Vec3f PurplePerRayleigh(7.789e-8f, -3.202e-8f, 2.007e-7f);
+const Vec3f NitrogenPerRayleigh(5.100e-8f, -1.530e-8f, 8.370e-8f);
 
 // A number in [0, 1) from the integer n and a salt (splitmix64)
 double unitHash(int64_t n, uint64_t salt)
@@ -527,15 +527,15 @@ uniform highp vec3 auroraObserver;   // km
 uniform highp float auroraSunLon;    // geomagnetic longitude of the Sun (radians)
 uniform highp vec4 auroraOval[49];   // poleward, equatorward, diffuse boundary at 115 km (radians), MLT 0, 0.5, ... 24 h
 uniform highp vec4 auroraEmission;   // green (R) of the main arc, of the diffuse aurora; red against green; red peak (km)
-uniform highp vec3 auroraGreenColor; // scene buffer per R of 557.7 nm (with 427.8 nm)
+uniform highp vec3 auroraGreenColor; // scene buffer per R of 557.7 nm
 uniform highp vec3 auroraRedColor;   // per R of 630.0 nm (with 636.4 nm)
-uniform highp vec3 auroraPurpleColor; // per R of the first positive band of N2 (650-690 nm, with 427.8 nm)
+uniform highp vec3 auroraNitrogenColor; // N2 and N2+ (650-690 and 427.8 nm) per R of 557.7 nm where it is not quenched
 uniform highp float auroraTime;      // seconds since 0h UT
 uniform highp float auroraSeed;      // from the date
 uniform highp float auroraExposure;  // exposure time of the camera (s, 0: an instant): what changes faster is averaged
 uniform highp vec4 auroraSubstorm;   // onset (MLT, h), its spread in MLT (h), activity (0-1), poleward bulge (radians)
-uniform highp vec4 auroraState;      // equatorward drift of the arcs (radians), pulsating aurora (0-1), purple lower
-                                     // border against the green (energetic electrons), lowest latitude of the aurorae
+uniform highp vec4 auroraState;      // equatorward drift of the arcs (radians), pulsating aurora (0-1), energetic
+                                     // electrons (0-1: the aurora reaches deeper), lowest latitude of the aurorae
 
 const highp float PI = 3.14159265;
 const highp float EARTH_RADIUS = 6371.;
@@ -563,6 +563,12 @@ highp float chapman(highp float h, highp float peak, highp float scale)
 highp float shellFade(highp float h)
 {
 	return smoothstep(SHELL_BOTTOM, SHELL_BOTTOM + 14., h)*(1. - smoothstep(380., SHELL_TOP, h));
+}
+// Below about 100 km the excited oxygen atoms collide before they emit the green line (quenching); nitrogen still
+// emits its red and blue bands there: the violet lower border of aurorae that reach deep
+highp float greenQuenching(highp float h)
+{
+	return smoothstep(95., 108., h);
 }
 // Absolute geomagnetic latitude at 115 km of the dipole field line through p: r = L cos^2(lat)
 highp float footLatitude(highp vec3 p)
@@ -705,7 +711,7 @@ void main(void)
 		}
 	}
 
-	highp float green = 0., red = 0., purple = 0.;
+	highp float green = 0., red = 0., nitrogen = 0.;
 	highp float tPrev = 0., hPrev = 0., latPrev = 0., lonPrev = 0.;
 	highp vec3 xPrev = vec3(0);
 	for (int k = 0; k <= STEPS; ++k)
@@ -758,9 +764,11 @@ void main(void)
 				// the rays reach higher than the arc
 				highp float top = 12. + 30.*rays*min(ray, 2.);
 				s *= ray*shellFade(hc);
-				green += s*chapman(hc, 110., top);
+				// energetic electrons reach deeper, in storms and substorms
+				highp float e = s*chapman(hc, 110. - 15.*auroraState.z*(0.4 + 0.6*activity), top);
+				green += e*greenQuenching(hc);
+				nitrogen += e;
 				red += s*chapman(hc, auroraEmission.w, 60.);
-				purple += s*chapman(hc, 98., 8.)*(0.3 + activity);
 			}
 			// the diffuse aurora, from its equatorward boundary into the discrete oval, pulsating after a substorm
 			highp float latm = 0.5*(lat + latPrev);
@@ -769,7 +777,9 @@ void main(void)
 			{
 				highp float hm = 0.5*(h + hPrev);
 				highp float d = diffuse*len*zone*shellFade(hm)*pulsating(lonm, latm, auroraState.y*smoothstep(0., 0.3, morning));
-				green += d*chapman(hm, 115., 15.);
+				highp float e = d*chapman(hm, 115., 15.);
+				green += e*greenQuenching(hm);
+				nitrogen += e;
 				red += d*chapman(hm, auroraEmission.w, 60.);
 			}
 		}
@@ -780,12 +790,8 @@ void main(void)
 		xPrev = x;
 	}
 
-	highp vec3 color = green*auroraGreenColor + auroraEmission.z*red*auroraRedColor + auroraState.z*purple*auroraPurpleColor;
-	// into the gamut of the scene, with the same luminance
-	highp float Y = dot(color, vec3(0.2126, 0.7152, 0.0722));
-	highp float lowest = min(color.r, min(color.g, color.b));
-	if (lowest < 0.)
-		color = Y > 0. ? vec3(Y) + (color - vec3(Y))*(Y/(Y - lowest)) : vec3(0);
+	// the parts outside the gamut of the scene are clipped, as by the color matrix of a camera
+	highp vec3 color = max(green*auroraGreenColor + nitrogen*auroraNitrogenColor + auroraEmission.z*red*auroraRedColor, vec3(0));
 	if (extinctionEnabled)
 		color *= pow(10., -0.4*extinctionMagnitude(altAz)) * photoExtinctionTint(altAz.z);
 	FRAG_COLOR = vec4(color, 1.);
@@ -854,8 +860,8 @@ void AuroraMgr::drawLight(StelCore* core, const Geometry& g)
 	                                              static_cast<float>(e.redRatio), static_cast<float>(e.redHeight)));
 	p.setUniformValue("auroraGreenColor", QVector3D(green[0], green[1], green[2]));
 	p.setUniformValue("auroraRedColor", QVector3D(red[0], red[1], red[2]));
-	const Vec3f purple = PurplePerRayleigh*scale;
-	p.setUniformValue("auroraPurpleColor", QVector3D(purple[0], purple[1], purple[2]));
+	const Vec3f nitrogen = NitrogenPerRayleigh*scale;
+	p.setUniformValue("auroraNitrogenColor", QVector3D(nitrogen[0], nitrogen[1], nitrogen[2]));
 	// The forms and the substorm cycle from the time (UT)
 	// The camera averages what happens during its exposure (centered on the current time), unless it takes the
 	// picture of an instant
@@ -883,7 +889,7 @@ void AuroraMgr::drawLight(StelCore* core, const Geometry& g)
 	p.setUniformValue("auroraSeed", static_cast<float>(std::fmod(std::floor(jd + 0.5), 997.)));
 	p.setUniformValue("auroraSubstorm", QVector4D(static_cast<float>(sub.onsetMLT), static_cast<float>(sub.spread),
 	                                              static_cast<float>(sub.activity), static_cast<float>(sub.bulge*M_PI/180.)));
-	const double energetic = 0.3*std::clamp((kp - 3.5)/4.5, 0., 1.);
+	const double energetic = std::clamp((kp - 3.5)/4.5, 0., 1.);
 	// Lines of sight that stay equatorward of the diffuse aurora are left out
 	float lowest = oval[0].z();
 	for (const auto& o : oval)

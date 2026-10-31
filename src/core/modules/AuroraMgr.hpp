@@ -51,8 +51,9 @@ class QOpenGLVertexArrayObject;
 //!
 //! The arcs fold and break up into rays along the field lines (a corona seen from below them) in the substorm
 //! cycle (see substorm()); afterwards the diffuse aurora pulsates in patches. Their noises come from the date and
-//! time, so that a moment always looks the same. Energetic aurorae get a purple lower border (the first positive
-//! band of N2 and the blue N2+ band, below 100 km where the green line is quenched). The camera averages what
+//! time, so that a moment always looks the same. Below about 100 km the green line is quenched and only
+//! nitrogen shines (its first positive band in red and the blue N2+ band): aurorae that reach deep, in storms and
+//! substorms, get a violet lower border. The camera averages what
 //! changes during its exposure: the substorm, the folds, the rays and the pulsations.
 //!
 //! The ovals can also be drawn as lines in the sky, at the heights of the green (115 km) and red (300 km)
