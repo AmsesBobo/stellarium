@@ -472,12 +472,22 @@
      </property>
      <layout class="QHBoxLayout" name="auroraLayout">
       <item>
+       <widget class="QCheckBox" name="auroraCheckBox">
+        <property name="toolTip">
+         <string>The light of the aurorae (photographic mode): calm arcs and the diffuse aurora in the auroral oval, green around 110 km, red higher up, with their brightness for the geomagnetic activity</string>
+        </property>
+        <property name="text">
+         <string>Show aurorae</string>
+        </property>
+       </widget>
+      </item>
+      <item>
        <widget class="QCheckBox" name="auroraOvalCheckBox">
         <property name="toolTip">
          <string>Draw the boundaries of the auroral oval (Starkov 1994) as lines in the sky: green at 115 km (the green and blue emissions, poleward and equatorward boundaries, the diffuse aurora dimmer), red at 300 km (the red emission)</string>
         </property>
         <property name="text">
-         <string>Show auroral oval</string>
+         <string>Oval lines</string>
         </property>
        </widget>
       </item>
@@ -608,6 +618,7 @@
   <tabstop>temperatureDoubleSpinBox</tabstop>
   <tabstop>extinctionDoubleSpinBox</tabstop>
   <tabstop>standardAtmosphereButton</tabstop>
+  <tabstop>auroraCheckBox</tabstop>
   <tabstop>auroraOvalCheckBox</tabstop>
   <tabstop>auroraKpDoubleSpinBox</tabstop>
   <tabstop>checkBox_noScatter</tabstop>

@@ -21,11 +21,16 @@
 #define AURORAMGR_HPP
 
 #include "StelModule.hpp"
+#include "StelProjectorType.hpp"
 #include "VecMath.hpp"
 
+#include <memory>
 #include <vector>
 
 class StelCore;
+class QOpenGLShaderProgram;
+class QOpenGLBuffer;
+class QOpenGLVertexArrayObject;
 
 //! @class AuroraMgr
 //! The aurorae (northern and southern lights) of the Earth.
@@ -36,12 +41,21 @@ class StelCore;
 //! whose coefficients follow the auroral electrojet index AL; AL comes from the planetary index Kp (Starkov 1994).
 //! The geomagnetic coordinates are those of the dipole of the IGRF (the pole interpolated in time, 1900 to 2030).
 //!
-//! This first step draws the ovals as lines in the sky at the heights of the green (115 km) and red (300 km)
-//! emissions, seen from the observer over a spherical Earth: from far away they stand low over the horizon or are
-//! hidden behind the Earth, from high latitudes they arch overhead.
+//! The light is emitted in a shell 90 to 500 km above a spherical Earth: the green line of oxygen (557.7 nm) with
+//! the blue band of nitrogen ions (427.8 nm) around 110 km, the red lines of oxygen (630.0 and 636.4 nm) higher up.
+//! Calm arcs (thin bands along the magnetic latitude in the discrete oval) and the diffuse aurora (equatorward of
+//! them) follow the dipole field lines upwards. A shader follows the line of sight of each pixel through the shell;
+//! the brightness in rayleigh becomes luminance (cd/m^2) and is recorded by the photographic mode like the sky,
+//! dimmed by the extinction. From far away only the tops, red, stand over the horizon; from high latitudes the
+//! arcs span the sky.
+//!
+//! The ovals can also be drawn as lines in the sky, at the heights of the green (115 km) and red (300 km)
+//! emissions: a guide to their position.
 class AuroraMgr : public StelModule
 {
 	Q_OBJECT
+	//! Show the light of the aurorae (photographic mode)
+	Q_PROPERTY(bool flagShow READ getFlagShow WRITE setFlagShow NOTIFY flagShowChanged)
 	//! Draw the auroral ovals as lines (a guide to their position)
 	Q_PROPERTY(bool flagShowOval READ getFlagShowOval WRITE setFlagShowOval NOTIFY flagShowOvalChanged)
 	//! The planetary geomagnetic activity index Kp (0 quiet to 9 extreme storm)
@@ -56,6 +70,7 @@ public:
 	void draw(StelCore* core) override;
 	double getCallOrder(StelModuleActionName actionName) const override;
 
+	bool getFlagShow() const {return flagShow;}
 	bool getFlagShowOval() const {return flagShowOval;}
 	double getKp() const {return kp;}
 
@@ -70,15 +85,27 @@ public:
 	//! The geomagnetic (dipole) north pole at the given Julian day: latitude and longitude (degrees, east positive)
 	static void dipolePole(double jd, double& latitude, double& longitude);
 
+	//! The brightness of the aurorae for the index kp: the green column (rayleigh, 557.7 nm, looking straight up
+	//! through it) of the brightest calm arc at magnetic midnight and of the diffuse aurora; the red emission
+	//! (630.0 nm) against the green and the height of its peak (km)
+	struct Emission
+	{
+		double arcGreen = 0., diffuseGreen = 0., redRatio = 0., redHeight = 0.;
+	};
+	static Emission emission(double kp);
+
 public slots:
+	void setFlagShow(bool b);
 	void setFlagShowOval(bool b);
 	void setKp(double value);
 
 signals:
+	void flagShowChanged(bool b);
 	void flagShowOvalChanged(bool b);
 	void kpChanged(double value);
 
 private:
+	bool flagShow = false;
 	bool flagShowOval = false;
 	double kp = 3.;
 
@@ -93,6 +120,17 @@ private:
 		}
 	};
 	static MagneticFrame magneticFrame(double jd);
+	//! The observer and the Sun in the Earth-fixed frame
+	struct Geometry
+	{
+		Vec3d up, east, north;  //!< local axes of the observer
+		Vec3d observer;         //!< position of the observer (km, over a spherical Earth)
+		MagneticFrame frame;
+		double sunMagLon = 0.;  //!< geomagnetic longitude of the Sun (radians): magnetic noon below it
+		double sunAltitude = 0.; //!< geometric altitude of the Sun (radians)
+	};
+	Geometry computeGeometry(const StelCore* core) const;
+
 	//! A line of the ovals in the AltAz frame of the observer: the points of one boundary of one hemisphere at one
 	//! height, with whether each one is in sight (not behind the Earth)
 	struct OvalLine
@@ -101,7 +139,16 @@ private:
 		std::vector<bool> visible;
 		Vec3f color;
 	};
-	std::vector<OvalLine> computeOvalLines(const StelCore* core) const;
+	std::vector<OvalLine> computeOvalLines(const Geometry& g) const;
+	void drawOval(StelCore* core, const Geometry& g) const;
+
+	//! The light of the aurorae (photographic mode), in a full screen pass that follows the line of sight of each pixel
+	void drawLight(StelCore* core, const Geometry& g);
+	void buildLightProgram(const StelProjector& projector);
+	std::unique_ptr<QOpenGLShaderProgram> lightProgram;
+	StelProjectorP lightProjector;  //!< the projection the program was built for
+	std::unique_ptr<QOpenGLBuffer> vbo;
+	std::unique_ptr<QOpenGLVertexArrayObject> vao;
 };
 
 #endif // AURORAMGR_HPP

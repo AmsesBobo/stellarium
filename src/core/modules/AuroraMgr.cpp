@@ -28,8 +28,15 @@
 #include "StelTranslator.hpp"
 #include "SolarSystem.hpp"
 #include "Planet.hpp"
+#include "StelSkyDrawer.hpp"
+#include "StelOpenGL.hpp"
+#include "RefractionExtinction.hpp"
 
 #include <QSettings>
+#include <QOpenGLBuffer>
+#include <QOpenGLShaderProgram>
+#include <QOpenGLVertexArrayObject>
+#include <QVector4D>
 #include <cmath>
 #include <array>
 #include <algorithm>
@@ -40,6 +47,15 @@ constexpr double EarthRadius = 6371.;   // km
 constexpr double GreenHeight = 115.;    // km: the green (557.7 nm) and blue (427.8 nm) emissions
 constexpr double RedHeight = 300.;      // km: the red (630.0 nm) emission
 constexpr int PointsPerLine = 180;      // one every 8 minutes of magnetic local time
+constexpr int VertexAttribIndex = 0;
+
+// The emissions in the linear sRGB of the scene (luminance in cd/m^2) per rayleigh, from the CIE 1931 color matching
+// functions: 1 R is 10^10/(4 pi) photons per second, square meter and steradian. The green line of oxygen (557.7 nm,
+// 1.93e-7 cd/m^2 per R) goes with the blue band of N2+ (427.8 nm), about 1/5 of it in rayleigh and from the same
+// heights; the red line of oxygen (630.0 nm, 4.54e-8 cd/m^2 per R) with its companion at 636.4 nm (1/3 of it).
+// Both are outside the sRGB gamut (the shader keeps their luminance and desaturates them into it).
+const Vec3f GreenPerRayleigh(6.116e-8f, 2.493e-7f, 3.451e-8f);
+const Vec3f RedPerRayleigh(3.604e-7f, -2.776e-8f, -3.84e-9f);
 
 // The geomagnetic north pole of the IGRF dipole (World Data Center for Geomagnetism, Kyoto; IGRF-14,
 // predicted from 2026): year, latitude, longitude (degrees, east positive)
@@ -109,8 +125,30 @@ void AuroraMgr::init()
 {
 	QSettings* conf = StelApp::getInstance().getSettings();
 	setKp(conf->value("aurora/kp", 3.).toDouble());
+	setFlagShow(conf->value("aurora/flag_show", false).toBool());
 	setFlagShowOval(conf->value("aurora/flag_show_oval", false).toBool());
+	addAction("actionShow_Aurora", N_("Display Options"), N_("Aurorae"), "flagShow");
 	addAction("actionShow_Aurora_Oval", N_("Display Options"), N_("Auroral oval"), "flagShowOval");
+
+	// A full screen quad for the light
+	auto& gl = *QOpenGLContext::currentContext()->functions();
+	vbo.reset(new QOpenGLBuffer(QOpenGLBuffer::VertexBuffer));
+	vbo->create();
+	vbo->bind();
+	const GLfloat vertices[] = {-1, -1,  1, -1,  -1, 1,  1, 1};
+	gl.glBufferData(GL_ARRAY_BUFFER, sizeof vertices, vertices, GL_STATIC_DRAW);
+	vbo->release();
+	vao.reset(new QOpenGLVertexArrayObject);
+	vao->create();
+	if (vao->isCreated())
+	{
+		vao->bind();
+		vbo->bind();
+		gl.glVertexAttribPointer(VertexAttribIndex, 2, GL_FLOAT, false, 0, nullptr);
+		gl.glEnableVertexAttribArray(VertexAttribIndex);
+		vbo->release();
+		vao->release();
+	}
 }
 
 void AuroraMgr::update(double)
@@ -123,6 +161,15 @@ double AuroraMgr::getCallOrder(StelModuleActionName actionName) const
 	if (actionName == StelModule::ActionDraw)
 		return StelApp::getInstance().getModuleMgr().getModule("LandscapeMgr")->getCallOrder(actionName) - 1.;
 	return 0.;
+}
+
+void AuroraMgr::setFlagShow(bool b)
+{
+	if (b != flagShow)
+	{
+		flagShow = b;
+		emit flagShowChanged(b);
+	}
 }
 
 void AuroraMgr::setFlagShowOval(bool b)
@@ -142,6 +189,20 @@ void AuroraMgr::setKp(double value)
 		kp = value;
 		emit kpChanged(value);
 	}
+}
+
+AuroraMgr::Emission AuroraMgr::emission(double kp)
+{
+	kp = std::clamp(kp, 0., 9.);
+	Emission e;
+	// Calm arcs are a few kR (IBC I-II) on quiet nights, tens of kR in storms (IBC III); the diffuse aurora about
+	// 1 kR. In storms the electrons are softer and the red emission stronger and higher (the red tops seen from
+	// low latitudes).
+	e.arcGreen = 3000.*std::pow(2., kp/2.);
+	e.diffuseGreen = 500.*std::pow(2., kp/3.);
+	e.redRatio = 0.15 + 0.05*kp;
+	e.redHeight = 220. + 8.*kp;
+	return e;
 }
 
 AuroraMgr::OvalBoundaries AuroraMgr::ovalBoundaries(double kp, double mlt)
@@ -195,30 +256,36 @@ AuroraMgr::MagneticFrame AuroraMgr::magneticFrame(double jd)
 	return f;
 }
 
-std::vector<AuroraMgr::OvalLine> AuroraMgr::computeOvalLines(const StelCore* core) const
-{
-	std::vector<OvalLine> lines;
 
+AuroraMgr::Geometry AuroraMgr::computeGeometry(const StelCore* core) const
+{
+	Geometry g;
 	// The observer, over a spherical Earth, with its local axes in the Earth-fixed frame
 	const StelLocation& loc = core->getCurrentLocation();
 	const double phi = static_cast<double>(loc.getLatitude())*M_PI/180.;
 	const double lambda = static_cast<double>(loc.getLongitude())*M_PI/180.;
-	const Vec3d up(std::cos(phi)*std::cos(lambda), std::cos(phi)*std::sin(lambda), std::sin(phi));
-	const Vec3d east(-std::sin(lambda), std::cos(lambda), 0.);
-	const Vec3d north(-std::sin(phi)*std::cos(lambda), -std::sin(phi)*std::sin(lambda), std::cos(phi));
-	const Vec3d observer = up * (EarthRadius + std::max(0., loc.altitude*0.001));
+	g.up.set(std::cos(phi)*std::cos(lambda), std::cos(phi)*std::sin(lambda), std::sin(phi));
+	g.east.set(-std::sin(lambda), std::cos(lambda), 0.);
+	g.north.set(-std::sin(phi)*std::cos(lambda), -std::sin(phi)*std::sin(lambda), std::cos(phi));
+	g.observer = g.up * (EarthRadius + std::max(0., loc.altitude*0.001));
 
 	// The direction of the Sun in the Earth-fixed frame, from its direction in the sky of the observer
 	// (AltAz: x to the south, y to the east, z up)
 	SolarSystem* ssystem = GETSTELMODULE(SolarSystem);
 	Vec3d sunAltAz = core->j2000ToAltAz(ssystem->getSun()->getJ2000EquatorialPos(core), StelCore::RefractionOff);
 	sunAltAz.normalize();
-	const Vec3d sun = north*(-sunAltAz[0]) + east*sunAltAz[1] + up*sunAltAz[2];
+	g.sunAltitude = std::asin(std::clamp(sunAltAz[2], -1., 1.));
+	const Vec3d sun = g.north*(-sunAltAz[0]) + g.east*sunAltAz[1] + g.up*sunAltAz[2];
 
 	// Magnetic local time is measured from the geomagnetic longitude of the Sun: noon below it
-	const MagneticFrame frame = magneticFrame(core->getJD());
-	const double sunMagLon = std::atan2(sun*frame.y, sun*frame.x);
+	g.frame = magneticFrame(core->getJD());
+	g.sunMagLon = std::atan2(sun*g.frame.y, sun*g.frame.x);
+	return g;
+}
 
+std::vector<AuroraMgr::OvalLine> AuroraMgr::computeOvalLines(const Geometry& g) const
+{
+	std::vector<OvalLine> lines;
 	struct LineSpec
 	{
 		int boundary; // 0 poleward, 1 equatorward, 2 diffuse
@@ -250,15 +317,15 @@ std::vector<AuroraMgr::OvalLine> AuroraMgr::computeOvalLines(const StelCore* cor
 				const OvalBoundaries& b = boundaries[static_cast<size_t>(i)];
 				const double latDeg = spec.boundary == 0 ? b.poleward : (spec.boundary == 1 ? b.equatorward : b.diffuse);
 				const double lat = alongFieldLine(hemisphere*latDeg*M_PI/180., spec.height);
-				const double lon = sunMagLon + (mlt - 12.)*M_PI/12.;
-				const Vec3d point = frame.toGeographic(lat, lon) * (EarthRadius + spec.height);
+				const double lon = g.sunMagLon + (mlt - 12.)*M_PI/12.;
+				const Vec3d point = g.frame.toGeographic(lat, lon) * (EarthRadius + spec.height);
 
 				// In sight unless the line of sight passes below the surface of the Earth
-				const Vec3d d = point - observer;
-				const double s = -(observer*d)/(d*d);
-				line.visible.push_back(s <= 0. || (observer + d*std::min(s, 1.)).norm() >= EarthRadius);
+				const Vec3d d = point - g.observer;
+				const double s = -(g.observer*d)/(d*d);
+				line.visible.push_back(s <= 0. || (g.observer + d*std::min(s, 1.)).norm() >= EarthRadius);
 
-				Vec3d altAz(-(north*d), east*d, up*d);
+				Vec3d altAz(-(g.north*d), g.east*d, g.up*d);
 				altAz.normalize();
 				line.points.push_back(altAz);
 			}
@@ -270,13 +337,20 @@ std::vector<AuroraMgr::OvalLine> AuroraMgr::computeOvalLines(const StelCore* cor
 
 void AuroraMgr::draw(StelCore* core)
 {
-	if (!flagShowOval)
+	if (!flagShow && !flagShowOval)
 		return;
-	if (core->getCurrentPlanet()->getEnglishName() != "Earth")
+	if (core->getCurrentPlanet()->getEnglishName() != QStringLiteral("Earth"))
 		return;
+	const Geometry g = computeGeometry(core);
+	if (flagShow)
+		drawLight(core, g);
+	if (flagShowOval)
+		drawOval(core, g);
+}
 
-	const std::vector<OvalLine> lines = computeOvalLines(core);
-
+void AuroraMgr::drawOval(StelCore* core, const Geometry& g) const
+{
+	const std::vector<OvalLine> lines = computeOvalLines(g);
 	const StelProjectorP prj = core->getProjection(StelCore::FrameAltAz, StelCore::RefractionAuto);
 	StelPainter painter(prj);
 	painter.setBlending(true);
@@ -294,4 +368,264 @@ void AuroraMgr::draw(StelCore* core)
 	painter.setLineWidth(1.f);
 	painter.setLineSmooth(false);
 	painter.setBlending(false);
+}
+
+void AuroraMgr::buildLightProgram(const StelProjector& projector)
+{
+	lightProgram.reset();
+	const Extinction& extinction = StelApp::getInstance().getCore()->getSkyDrawer()->getExtinction();
+	std::unique_ptr<QOpenGLShaderProgram> program(new QOpenGLShaderProgram);
+
+	const QByteArray vert = StelOpenGL::globalShaderPrefix(StelOpenGL::VERTEX_SHADER) + R"(
+ATTRIBUTE highp vec3 vertex;
+VARYING highp vec3 ndcPos;
+void main()
+{
+	gl_Position = vec4(vertex, 1.);
+	ndcPos = vertex;
+}
+)";
+	if (!program->addShaderFromSourceCode(QOpenGLShader::Vertex, vert))
+	{
+		qWarning().noquote() << "AuroraMgr: error in the vertex shader:\n" << program->log();
+		return;
+	}
+
+	// The light along the line of sight through the shell of the aurorae, 90 to 500 km. The line is cut at the
+	// heights 90 + 410 (k/N)^2 km, dense where the green light is. In each piece the footprint latitude (at 115 km,
+	// along the dipole field line) changes linearly: the thin arcs (Gaussian across) are integrated exactly over it,
+	// with the vertical profile where the line crosses them; the broad diffuse aurora at the middle of the piece.
+	// The vertical profiles are Chapman layers. Everything is in the geomagnetic frame (km).
+	const QByteArray frag = StelOpenGL::globalShaderPrefix(StelOpenGL::FRAGMENT_SHADER)
+	                        + projector.getUnProjectShader()
+	                        + extinction.getForwardTransformShader()
+	                        + StelSkyDrawer::getPhotoExtinctionShader()
+	                        + R"(
+VARYING highp vec3 ndcPos;
+uniform highp mat4 projectionMatrixInverse;
+uniform bool extinctionEnabled;
+uniform highp vec3 auroraSouth;      // the axes of the AltAz frame in the geomagnetic frame
+uniform highp vec3 auroraEast;
+uniform highp vec3 auroraUp;
+uniform highp vec3 auroraObserver;   // km
+uniform highp float auroraSunLon;    // geomagnetic longitude of the Sun (radians)
+uniform highp vec4 auroraOval[49];   // poleward, equatorward, diffuse boundary at 115 km (radians), MLT 0, 0.5, ... 24 h
+uniform highp vec4 auroraEmission;   // green (R) of the main arc, of the diffuse aurora; red against green; red peak (km)
+uniform highp vec3 auroraGreenColor; // scene buffer per R of 557.7 nm (with 427.8 nm)
+uniform highp vec3 auroraRedColor;   // per R of 630.0 nm (with 636.4 nm)
+
+const highp float PI = 3.14159265;
+const highp float EARTH_RADIUS = 6371.;
+const highp float FOOT_RADIUS = 6486.;  // 115 km
+const highp float SHELL_BOTTOM = 90.;
+const highp float SHELL_TOP = 500.;
+const int STEPS = 48;
+
+// Abramowitz and Stegun 7.1.26
+highp float auroraErf(highp float x)
+{
+	highp float s = sign(x);
+	x = abs(x);
+	highp float t = 1./(1. + 0.3275911*x);
+	highp float y = 1. - ((((1.061405429*t - 1.453152027)*t + 1.421413741)*t - 0.284496736)*t + 0.254829592)*t*exp(-x*x);
+	return s*y;
+}
+// Chapman layer with the given peak and scale height (km), normalized to a column of 1
+highp float chapman(highp float h, highp float peak, highp float scale)
+{
+	highp float z = (h - peak)/scale;
+	return exp(1. - z - exp(-z))/(2.7182818*scale);
+}
+// Absolute geomagnetic latitude at 115 km of the dipole field line through p: r = L cos^2(lat)
+highp float footLatitude(highp vec3 p)
+{
+	highp float r = length(p);
+	highp float s = clamp(abs(p.z)/r, 0., 1.);
+	return acos(sqrt(clamp((1. - s*s)*FOOT_RADIUS/r, 0., 1.)));
+}
+highp vec3 ovalAt(highp float mlt)
+{
+	highp float f = mod(mlt, 24.)*2.;
+	int i = int(min(floor(f), 47.));
+	return mix(auroraOval[i].xyz, auroraOval[i + 1].xyz, f - float(i));
+}
+// Length (km) of the piece of the line of sight from latitude lat0 to lat1, weighted by a Gaussian band at
+// latitude a with the width w (standard deviation)
+highp float bandLength(highp float lat0, highp float lat1, highp float a, highp float w, highp float len)
+{
+	highp float d = lat1 - lat0;
+	if (abs(d) < 0.05*w)
+	{
+		highp float m = 0.5*(lat0 + lat1) - a;
+		return len*exp(-0.5*m*m/(w*w));
+	}
+	highp float k = 0.70710678/w;
+	return len*w*1.2533141/d*(auroraErf((lat1 - a)*k) - auroraErf((lat0 - a)*k));
+}
+
+void main(void)
+{
+	highp vec4 winPos = projectionMatrixInverse * vec4(ndcPos, 1);
+	bool ok = false;
+	highp vec3 altAz = unProject(winPos.x, winPos.y, ok).xyz;
+	if (!ok)
+	{
+		FRAG_COLOR = vec4(0);
+		return;
+	}
+	altAz = normalize(altAz);
+	highp vec3 dir = altAz.x*auroraSouth + altAz.y*auroraEast + altAz.z*auroraUp;
+	highp vec3 p0 = auroraObserver;
+	highp float r0 = length(p0);
+	highp float b = dot(p0, dir);
+	if (b < 0. && b*b - r0*r0 + EARTH_RADIUS*EARTH_RADIUS > 0.)
+	{
+		FRAG_COLOR = vec4(0); // the line of sight meets the Earth
+		return;
+	}
+
+	highp float green = 0., red = 0.;
+	highp float tPrev = 0., hPrev = 0., latPrev = 0.;
+	highp vec3 pPrev = p0;
+	for (int k = 0; k <= STEPS; ++k)
+	{
+		highp float u = float(k)/float(STEPS);
+		highp float h = SHELL_BOTTOM + (SHELL_TOP - SHELL_BOTTOM)*u*u;
+		highp float rh = EARTH_RADIUS + h;
+		highp float t = -b + sqrt(max(b*b - r0*r0 + rh*rh, 0.));
+		highp vec3 p = p0 + t*dir;
+		highp float lat = footLatitude(p);
+		if (k > 0)
+		{
+			highp float len = t - tPrev;
+			highp vec3 pm = 0.5*(p + pPrev);
+			highp float mlt = mod(12. + (atan(pm.y, pm.x) - auroraSunLon)*12./PI, 24.);
+			highp vec3 oval = ovalAt(mlt);
+			highp float width = max(oval.x - oval.y, 0.005);
+			// the arcs are brightest before magnetic midnight, faint on the day side; the diffuse aurora after it
+			highp float night = 0.5 + 0.5*cos((mlt - 23.)*PI/12.);
+			highp float arcs = auroraEmission.x*(0.1 + 0.9*night*sqrt(night));
+			highp float morning = 0.5 + 0.5*cos((mlt - 3.)*PI/12.);
+			highp float diffuse = auroraEmission.y*(0.3 + 0.7*morning);
+
+			// three calm arcs in the discrete oval, the brightest near its equatorward edge
+			highp float dl = lat - latPrev;
+			for (int j = 0; j < 3; ++j)
+			{
+				highp float frac = j == 0 ? 0.15 : (j == 1 ? 0.4 : 0.7);
+				highp float w = (j == 0 ? 4. : (j == 1 ? 6. : 8.))/FOOT_RADIUS;
+				highp float strength = j == 0 ? 1. : (j == 1 ? 0.45 : 0.25);
+				highp float a = oval.y + frac*width;
+				highp float s = arcs*strength*bandLength(latPrev, lat, a, w, len);
+				highp float c = abs(dl) > 1e-7 ? clamp((a - latPrev)/dl, 0., 1.) : 0.5;
+				highp float hc = mix(hPrev, h, c);
+				green += s*chapman(hc, 110., 12.);
+				red += s*chapman(hc, auroraEmission.w, 60.);
+			}
+			// the diffuse aurora, from its equatorward boundary into the discrete oval
+			highp float latm = 0.5*(lat + latPrev);
+			highp float hm = 0.5*(h + hPrev);
+			highp float d = diffuse*len*smoothstep(oval.z, oval.y, latm)*(1. - smoothstep(oval.y + 0.5*width, oval.x, latm));
+			green += d*chapman(hm, 115., 15.);
+			red += d*chapman(hm, auroraEmission.w, 60.);
+		}
+		tPrev = t;
+		hPrev = h;
+		latPrev = lat;
+		pPrev = p;
+	}
+
+	highp vec3 color = green*auroraGreenColor + auroraEmission.z*red*auroraRedColor;
+	// into the gamut of the scene, with the same luminance
+	highp float Y = dot(color, vec3(0.2126, 0.7152, 0.0722));
+	highp float lowest = min(color.r, min(color.g, color.b));
+	if (lowest < 0.)
+		color = Y > 0. ? vec3(Y) + (color - vec3(Y))*(Y/(Y - lowest)) : vec3(0);
+	if (extinctionEnabled)
+		color *= pow(10., -0.4*extinctionMagnitude(altAz)) * photoExtinctionTint(altAz.z);
+	FRAG_COLOR = vec4(color, 1.);
+}
+)";
+	if (!program->addShaderFromSourceCode(QOpenGLShader::Fragment, frag))
+	{
+		qWarning().noquote() << "AuroraMgr: error in the fragment shader:\n" << program->log();
+		return;
+	}
+	program->bindAttributeLocation("vertex", VertexAttribIndex);
+	if (!StelPainter::linkProg(program.get(), "AuroraMgr light program"))
+		return;
+	lightProgram = std::move(program);
+}
+
+void AuroraMgr::drawLight(StelCore* core, const Geometry& g)
+{
+	// The aurorae are as bright as the Milky Way to the full Moon: the photographic mode records them with their
+	// luminance; by day they are lost in the sky
+	StelSkyDrawer* drawer = core->getSkyDrawer();
+	if (!drawer->getFlagPhotographicModeActive() || g.sunAltitude > 0.)
+		return;
+
+	const StelProjectorP prj = core->getProjection(StelCore::FrameAltAz, StelCore::RefractionAuto);
+	if (!lightProjector || !prj->isSameProjection(*lightProjector))
+	{
+		buildLightProgram(*prj);
+		lightProjector = prj;
+	}
+	if (!lightProgram)
+		return;
+
+	// The axes of the AltAz frame and the observer in the geomagnetic frame
+	const MagneticFrame& f = g.frame;
+	const auto toMag = [&f](const Vec3d& v) {return QVector3D(static_cast<float>(v*f.x), static_cast<float>(v*f.y), static_cast<float>(v*f.z));};
+	// The oval at 115 km, MLT every half hour
+	std::array<QVector4D, 49> oval;
+	for (size_t i = 0; i < oval.size(); ++i)
+	{
+		const OvalBoundaries b = ovalBoundaries(kp, 0.5*static_cast<double>(i));
+		oval[i] = QVector4D(static_cast<float>(b.poleward*M_PI/180.), static_cast<float>(b.equatorward*M_PI/180.),
+		                    static_cast<float>(b.diffuse*M_PI/180.), 0.f);
+	}
+	const Emission e = emission(kp);
+	const float scale = drawer->getPhotoSceneScale();
+	const Vec3f green = GreenPerRayleigh*scale;
+	const Vec3f red = RedPerRayleigh*scale;
+	const Extinction& extinction = drawer->getExtinction();
+
+	QOpenGLShaderProgram& p = *lightProgram;
+	p.bind();
+	p.setUniformValue("projectionMatrixInverse", prj->getProjectionMatrix().toQMatrix().inverted());
+	prj->setUnProjectUniforms(p);
+	extinction.setForwardTransformUniforms(p);
+	drawer->setPhotoExtinctionUniforms(p, 1);
+	p.setUniformValue("extinctionEnabled", drawer->getFlagHasAtmosphere() && extinction.getExtinctionCoefficient() >= 0.01f);
+	p.setUniformValue("auroraSouth", toMag(-g.north));
+	p.setUniformValue("auroraEast", toMag(g.east));
+	p.setUniformValue("auroraUp", toMag(g.up));
+	p.setUniformValue("auroraObserver", toMag(g.observer));
+	p.setUniformValue("auroraSunLon", static_cast<float>(g.sunMagLon));
+	p.setUniformValueArray("auroraOval", oval.data(), static_cast<int>(oval.size()));
+	p.setUniformValue("auroraEmission", QVector4D(static_cast<float>(e.arcGreen), static_cast<float>(e.diffuseGreen),
+	                                              static_cast<float>(e.redRatio), static_cast<float>(e.redHeight)));
+	p.setUniformValue("auroraGreenColor", QVector3D(green[0], green[1], green[2]));
+	p.setUniformValue("auroraRedColor", QVector3D(red[0], red[1], red[2]));
+
+	auto& gl = *QOpenGLContext::currentContext()->functions();
+	gl.glEnable(GL_BLEND);
+	gl.glBlendFunc(GL_ONE, GL_ONE);
+	if (vao->isCreated())
+		vao->bind();
+	else
+	{
+		vbo->bind();
+		gl.glVertexAttribPointer(VertexAttribIndex, 2, GL_FLOAT, false, 0, nullptr);
+		gl.glEnableVertexAttribArray(VertexAttribIndex);
+		vbo->release();
+	}
+	gl.glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+	if (vao->isCreated())
+		vao->release();
+	else
+		gl.glDisableVertexAttribArray(VertexAttribIndex);
+	gl.glDisable(GL_BLEND);
+	p.release();
 }

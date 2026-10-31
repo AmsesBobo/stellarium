@@ -75,6 +75,7 @@ void AtmosphereDialog::createDialogContent()
 	// The haze layer: presets, or a custom height
 	connectIntProperty(ui->hazeLayerComboBox, "StelSkyDrawer.hazeLayerPreset");
 	connectDoubleProperty(ui->hazeLayerHeightDoubleSpinBox, "StelSkyDrawer.hazeLayerHeight");
+	connectBoolProperty(ui->auroraCheckBox, "AuroraMgr.flagShow");
 	connectBoolProperty(ui->auroraOvalCheckBox, "AuroraMgr.flagShowOval");
 	connectDoubleProperty(ui->auroraKpDoubleSpinBox, "AuroraMgr.kp");
 	auto updateHazeLayer = [this](){
