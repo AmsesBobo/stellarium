@@ -629,17 +629,41 @@ highp float arcFold(highp float lon, highp float activity, int j)
 	                + 0.3*(auroraNoise(lon*900. + auroraTime/90. + o, 900., auroraTime/12. + o) - 0.5);
 	return mix(0.06*quiet*exposed(1500.), 0.5*act*exposed(30.), activity)*PI/180.;
 }
-// The rays: brightness against the mean (about 1) at the magnetic longitude lon (in turns), for the share of
-// rays in the arc; the cells are 0.04 and 0.012 degrees of longitude (2 and 0.7 km in the oval), and they drift
-// along the arc
-highp float arcRays(highp float lon, highp float rays, highp float span, int j)
+// The rays: brightness against the mean (about 1) over the magnetic longitudes lon0 to lon1 (in turns) that a piece
+// of the line of sight sees of an arc, for the share of rays in the arc; the cells are 0.04 and 0.012 degrees of
+// longitude (2 and 0.7 km in the oval), and they drift along the arc. The pieces of a line that runs along an arc lie
+// side by side: each takes the mean over its own stretch, so that they do not sample the rays like a comb (moire).
+highp float rayNoise(highp float lon, highp float o)
 {
-	highp float o = float(j)*31.;
 	highp float r = 0.6*auroraNoise(lon*9000. + auroraTime/3. + o, 9000., auroraTime/2.5 + o)
 	              + 0.4*auroraNoise(lon*30000. - auroraTime/1.5 + o, 30000., auroraTime/0.8 + o);
-	// a piece of the line of sight that spans many rays sees their mean
-	highp float mean = smoothstep(2., 8., span*9000.);
-	return mix(1., mix(3.*r*r/0.84, 1., mean), rays*exposed(3.));
+	return 3.*r*r/0.84;
+}
+highp float arcRays(highp float lon0, highp float lon1, highp float rays, int j)
+{
+	highp float o = float(j)*31.;
+	highp float cells = abs(lon1 - lon0)*9000.;
+	highp float m = 1.;
+	if (cells < 0.3)
+		m = rayNoise(0.5*(lon0 + lon1), o);
+	else if (cells < 16.)
+	{
+		m = 0.;
+		for (int i = 0; i < 4; ++i)
+			m += 0.25*rayNoise(mix(lon0, lon1, (float(i) + 0.5)/4.), o);
+		// a long stretch sees the mean of many rays
+		m = mix(m, 1., smoothstep(4., 16., cells));
+	}
+	return mix(1., m, rays*exposed(3.));
+}
+// Where the light of a Gaussian band lies in a piece of the line of sight from x0 to x1 (the distances to the band;
+// 0 at the start, 1 at the end): where the line crosses it, or the middle where the line runs along it
+highp float bandCenter(highp float x0, highp float x1, highp float w)
+{
+	highp float dx = x0 - x1;
+	if (abs(dx) < 1e-9)
+		return 0.5;
+	return mix(clamp(x0/dx, 0., 1.), 0.5, smoothstep(0.3, 2., w/abs(dx)));
 }
 // Patches of pulsating aurora: brightness against the mean, the patches flicker on and off in a few seconds
 highp float pulsating(highp float lon, highp float lat, highp float amount)
@@ -757,10 +781,12 @@ void main(void)
 					continue; // far from this arc
 				highp float strength = j == 0 ? 1. : (j == 1 ? 0.45 : 0.25);
 				highp float s = arcs*strength*bandLength(x0, x1, 0., w, len);
-				highp float dx = x0 - x1;
-				highp float c = abs(dx) > 1e-9 ? clamp(x0/dx, 0., 1.) : 0.5;
+				highp float c = bandCenter(x0, x1, w);
 				highp float hc = mix(hPrev, h, c);
-				highp float ray = arcRays(lonPrev + c*dlon, rays, abs(dlon)*min(1., 3.*w/max(abs(dx), 1e-9)), j);
+				// the stretch of the arc in this piece: all of it along the arc, about 3 widths across it
+				highp float halfSpan = 0.5*dlon*min(1., 3.*w/max(abs(x0 - x1), 1e-9));
+				highp float lonc = lonPrev + c*dlon;
+				highp float ray = arcRays(lonc - halfSpan, lonc + halfSpan, rays, j);
 				// the rays reach higher than the arc
 				highp float top = 12. + 30.*rays*min(ray, 2.);
 				s *= ray*shellFade(hc);
