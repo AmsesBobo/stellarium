@@ -99,6 +99,8 @@ public:
 	//! The storm index Dst in use (nT)
 	double getDst() const;
 	QString getSubstormInfo() const {return substormInfo;}
+	//! The illuminance (lux, linear sRGB) that the aurorae give on the ground (photographic mode), for the landscape
+	Vec3f getIlluminance() const {return illuminance;}
 	//! The Kp and Dst (nT) of the presets of the activity (kpPreset); the last one is the custom activity
 	static constexpr double KpPresets[5] = {1., 3., 6., 9., 9.};
 	static constexpr double DstPresets[5] = {-5., -20., -80., -250., -412.};
@@ -174,6 +176,7 @@ private:
 	double kpCustom = 3.;
 	double dstCustom = -20.;
 	QString substormInfo;
+	Vec3f illuminance = Vec3f(0.f);
 
 	//! The geomagnetic frame (axes in Earth-fixed geographic coordinates) at the given Julian day
 	struct MagneticFrame
@@ -210,6 +213,14 @@ private:
 		double sunAltitude = 0.; //!< geometric altitude of the Sun (radians)
 	};
 	Geometry computeGeometry(const StelCore* core) const;
+	//! The substorm as the camera sees it: averaged over its exposure (centered on the current time), unless it takes
+	//! the picture of an instant; the exposure time (s, 0: an instant)
+	Substorm exposedSubstorm(const StelCore* core, double& exposure) const;
+	//! The illuminance on the ground from the light of the aurorae (lux, linear sRGB): their columns over a polar grid
+	//! around the observer, without the fine forms (their mean), dimmed by the extinction
+	Vec3f computeIlluminance(const StelCore* core, const Geometry& g) const;
+	//! The displacement to the corrected geomagnetic coordinates from the map (degrees, north and east)
+	Vec2d correctionFromMap(double lat, double lon) const;
 
 	//! A line of the ovals in the AltAz frame of the observer: the points of one boundary of one hemisphere at one
 	//! height, with whether each one is in sight (not behind the Earth)

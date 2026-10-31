@@ -22,6 +22,7 @@
 
 #include "LandscapeMgr.hpp"
 #include "LightDomes.hpp"
+#include "AuroraMgr.hpp"
 #include "Landscape.hpp"
 #include "AtmospherePreetham.hpp"
 #include "AtmosphereLightweight.hpp"
@@ -697,7 +698,8 @@ void LandscapeMgr::update(double deltaTime)
 	// camera records luminance x scene scale. The illuminance comes from
 	// - the Sun and the Moon: their light (magnitude with extinction, color of the extinction), on the
 	//   upright and sloping faces of a landscape, not only on level ground; none when they stand behind it,
-	// - the sky: luminance x pi (this includes twilight, moonlit sky, airglow and light pollution).
+	// - the sky: luminance x pi (this includes twilight, moonlit sky, airglow and light pollution),
+	// - the light domes of towns and the aurorae.
 	if (drawer->getFlagPhotographicModeActive())
 	{
 		const double sceneScale = static_cast<double>(drawer->getPhotoSceneScale());
@@ -708,6 +710,13 @@ void LandscapeMgr::update(double deltaTime)
 		if (lightDomes)
 		{
 			const Vec3f E = lightDomes->getIlluminance();
+			light += Vec3d(static_cast<double>(E[0]), static_cast<double>(E[1]), static_cast<double>(E[2]));
+		}
+		// the aurorae (AuroraMgr): their green, red and violet light, on snow in particular
+		static AuroraMgr* aurorae = GETSTELMODULE(AuroraMgr);
+		if (aurorae)
+		{
+			const Vec3f E = aurorae->getIlluminance();
 			light += Vec3d(static_cast<double>(E[0]), static_cast<double>(E[1]), static_cast<double>(E[2]));
 		}
 		// The values for the shaders: they take sRGB-encoded brightness (colorToShader() decodes it)

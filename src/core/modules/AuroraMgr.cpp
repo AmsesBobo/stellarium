@@ -205,12 +205,178 @@ void AuroraMgr::update(double)
 		substormInfo = info;
 		emit substormInfoChanged(info);
 	}
+
+	// The light of the aurorae on the ground (photographic mode, at night)
+	illuminance = Vec3f(0.f);
+	StelCore* core = StelApp::getInstance().getCore();
+	if (flagShow && core->getSkyDrawer()->getFlagPhotographicModeActive()
+	    && core->getCurrentPlanet()->getEnglishName() == QStringLiteral("Earth"))
+	{
+		const Geometry g = computeGeometry(core);
+		if (g.sunAltitude <= 0.)
+		{
+			updateCorrection(2000. + (core->getJD() - 2451545.0)/365.25);
+			illuminance = computeIlluminance(core, g);
+		}
+	}
+}
+
+AuroraMgr::Substorm AuroraMgr::exposedSubstorm(const StelCore* core, double& exposure) const
+{
+	const StelSkyDrawer* drawer = core->getSkyDrawer();
+	const double jd = core->getJD();
+	const double kp = getKp();
+	exposure = drawer->getFlagPhotoStarTrails() ? std::max(0., drawer->getPhotoExposureTime()) : 0.;
+	Substorm sub = substorm(jd, kp);
+	if (exposure > 0.5)
+	{
+		constexpr int samples = 9;
+		Substorm mean = sub;
+		mean.spread = mean.activity = mean.bulge = mean.drift = mean.pulsating = 0.;
+		for (int i = 0; i < samples; ++i)
+		{
+			const Substorm s = substorm(jd + exposure*((i + 0.5)/samples - 0.5)/86400., kp);
+			mean.spread += s.spread/samples;
+			mean.activity += s.activity/samples;
+			mean.bulge += s.bulge/samples;
+			mean.drift += s.drift/samples;
+			mean.pulsating += s.pulsating/samples;
+		}
+		sub = mean;
+	}
+	return sub;
+}
+
+Vec2d AuroraMgr::correctionFromMap(double lat, double lon) const
+{
+	if (correctionMap.size() < static_cast<size_t>(180*91*3))
+		return Vec2d(0., 0.);
+	const double x = std::fmod((lon*180./M_PI + 179.)/2. + 360., 180.);
+	const double y = std::clamp((lat*180./M_PI + 90.)/2., 0., 90.);
+	const int x0 = static_cast<int>(x), y0 = std::min(static_cast<int>(y), 89);
+	const int x1 = (x0 + 1)%180, y1 = y0 + 1;
+	const double fx = x - x0, fy = y - y0;
+	Vec2d d(0., 0.);
+	for (int c = 0; c < 2; ++c)
+	{
+		const auto at = [this, c](int col, int row) {return static_cast<double>(correctionMap[static_cast<size_t>(3*(row*180 + col) + c)]);};
+		d[c] = (1. - fy)*((1. - fx)*at(x0, y0) + fx*at(x1, y0)) + fy*((1. - fx)*at(x0, y1) + fx*at(x1, y1));
+	}
+	return d;
+}
+
+Vec3f AuroraMgr::computeIlluminance(const StelCore* core, const Geometry& g) const
+{
+	// E = sum over the shell of the column C (R) of each piece of area A: k C A cos(z)/s^2, with k the luminance
+	// per rayleigh (cd/m^2) and s the distance from the observer (km), z the zenith distance of the piece; the
+	// emissions at their heights. A polar grid on the Earth around the observer, dense near it, out to where the
+	// red tops (about 300 km high) stand over the horizon.
+	const double kp = getKp(), dst = getDst();
+	const Emission e = emission(kp, dst);
+	double exposure = 0.;
+	const Substorm sub = exposedSubstorm(core, exposure);
+	const double k = static_cast<double>(core->getSkyDrawer()->getExtinction().getExtinctionCoefficient());
+	const bool withAtmosphere = core->getSkyDrawer()->getFlagHasAtmosphere();
+	std::array<OvalBoundaries, 49> ovals;
+	for (size_t i = 0; i < ovals.size(); ++i)
+		ovals[i] = ovalBoundaries(kp, 0.5*static_cast<double>(i), dst);
+	const auto ovalAt = [&ovals](double mlt) {
+		const double f = std::fmod(mlt + 24., 24.)*2.;
+		const size_t i = std::min(static_cast<size_t>(f), size_t(47));
+		const double t = f - static_cast<double>(i);
+		OvalBoundaries b;
+		b.poleward = (1. - t)*ovals[i].poleward + t*ovals[i+1].poleward;
+		b.equatorward = (1. - t)*ovals[i].equatorward + t*ovals[i+1].equatorward;
+		b.diffuse = (1. - t)*ovals[i].diffuse + t*ovals[i+1].diffuse;
+		return b;
+	};
+	const auto smooth = [](double e0, double e1, double x) {
+		const double t = std::clamp((x - e0)/(e1 - e0), 0., 1.);
+		return t*t*(3. - 2.*t);
+	};
+
+	constexpr int Rings = 40, Sectors = 48;
+	constexpr double MaxAngle = 2600./EarthRadius;
+	Vec3d light(0.);
+	for (const double h : {110., e.redHeight})
+	{
+		const bool red = h != 110.;
+		const double rh = EarthRadius + h;
+		for (int i = 0; i < Rings; ++i)
+		{
+			const double t0 = MaxAngle*std::pow(static_cast<double>(i)/Rings, 2.);
+			const double t1 = MaxAngle*std::pow(static_cast<double>(i + 1)/Rings, 2.);
+			const double theta = 0.5*(t0 + t1);
+			const double area = rh*rh*(std::cos(t0) - std::cos(t1))*2.*M_PI/Sectors;
+			// the width of a cell across the arcs, as an angle: a thin arc is spread over it (its column kept)
+			const double cell = std::max(t1 - t0, theta*2.*M_PI/Sectors);
+			for (int j = 0; j < Sectors; ++j)
+			{
+				const double az = (j + 0.5)*2.*M_PI/Sectors;
+				const Vec3d dir = g.up*std::cos(theta) + (g.north*std::cos(az) + g.east*std::sin(az))*std::sin(theta);
+				const Vec3d v = dir*rh - g.observer;
+				const double s = v.norm();
+				const double cosZ = (v*g.up)/s;
+				if (cosZ <= 0.)
+					continue; // below the horizon of the observer
+				// corrected geomagnetic coordinates of the footprint and magnetic local time
+				const MagneticFrame& f = g.frame;
+				const double sinLat = std::clamp(dir*f.z, -1., 1.);
+				const double cosFoot = std::sqrt(std::min(1., (1. - sinLat*sinLat)*(EarthRadius + GreenHeight)/rh));
+				const Vec2d d = correctionFromMap(std::asin(std::clamp(dir[2], -1., 1.)), std::atan2(dir[1], dir[0]))*(M_PI/180.);
+				const double lat = std::fabs((sinLat < 0. ? -1. : 1.)*std::acos(cosFoot) + d[0])*180./M_PI;
+				const double lon = std::atan2(dir*f.y, dir*f.x) + d[1]/std::max(std::sqrt(1. - sinLat*sinLat), 0.1);
+				const double mlt = std::fmod(12. + (lon - g.sunMagLon)*12./M_PI + 48., 24.);
+				const OvalBoundaries b = ovalAt(mlt);
+				double dm = mlt - sub.onsetMLT;
+				dm -= 24.*std::floor(dm/24. + 0.5);
+				const double activity = sub.activity*std::exp(-dm*dm/(sub.spread*sub.spread));
+				const double bulge = sub.activity > 1e-3 ? sub.bulge*activity/sub.activity : 0.;
+				const double width = std::max(b.poleward - b.equatorward, 0.3) + bulge;
+				const double night = 0.5 + 0.5*std::cos((mlt - 23.)*M_PI/12.);
+				const double morning = 0.5 + 0.5*std::cos((mlt - 3.)*M_PI/12.);
+				// the arcs, each spread over the cell
+				double column = 0.;
+				const double arcs = e.arcGreen*(0.1 + 0.9*night*std::sqrt(night))*(1. + 6.*activity);
+				const double cellDeg = cell*180./M_PI;
+				for (int a = 0; a < 3; ++a)
+				{
+					const double frac = a == 0 ? 0.15 : (a == 1 ? 0.4 : 0.7);
+					const double w = (a == 0 ? 4. : (a == 1 ? 6. : 8.))/(EarthRadius + GreenHeight)*180./M_PI;
+					const double strength = a == 0 ? 1. : (a == 1 ? 0.45 : 0.25);
+					const double we = std::max(w, 0.5*cellDeg);
+					const double x = lat - (b.equatorward + frac*width - sub.drift*(1. - activity));
+					column += arcs*strength*(w/we)*std::exp(-0.5*x*x/(we*we));
+				}
+				const double zone = smooth(b.diffuse, b.equatorward, lat)*(1. - smooth(b.equatorward + 0.5*width, b.poleward + bulge, lat));
+				column += e.diffuseGreen*(0.3 + 0.7*morning)*(1. + 1.5*activity)*zone;
+				if (!(column > 0.))
+					continue;
+				// the light through the air: the extinction along the airmass (Young 1994), at most 40
+				double transmission = 1.;
+				if (withAtmosphere)
+				{
+					const double airmass = std::min(40., (1.002432*cosZ*cosZ + 0.148386*cosZ + 0.0096467)
+					                                     /(cosZ*cosZ*cosZ + 0.149864*cosZ*cosZ + 0.0102963*cosZ + 0.000303978));
+					transmission = std::pow(10., -0.4*k*airmass);
+				}
+				const double weight = column*area*cosZ/(s*s)*transmission;
+				if (red)
+					light += Vec3d(RedPerRayleigh[0], RedPerRayleigh[1], RedPerRayleigh[2])*(e.redRatio*weight);
+				else
+					light += Vec3d(GreenPerRayleigh[0] + NitrogenPerRayleigh[0], GreenPerRayleigh[1] + NitrogenPerRayleigh[1],
+					               GreenPerRayleigh[2] + NitrogenPerRayleigh[2])*weight;
+			}
+		}
+	}
+	return Vec3f(static_cast<float>(std::max(0., light[0])), static_cast<float>(std::max(0., light[1])),
+	             static_cast<float>(std::max(0., light[2])));
 }
 
 double AuroraMgr::getCallOrder(StelModuleActionName actionName) const
 {
-	// Before the landscape, which hides what is below its horizon
-	if (actionName == StelModule::ActionDraw)
+	// Before the landscape: it hides what is below its horizon, and it is lit by the aurorae
+	if (actionName == StelModule::ActionDraw || actionName == StelModule::ActionUpdate)
 		return StelApp::getInstance().getModuleMgr().getModule("LandscapeMgr")->getCallOrder(actionName) - 1.;
 	return 0.;
 }
@@ -1081,27 +1247,9 @@ void AuroraMgr::drawLight(StelCore* core, const Geometry& g)
 	const Vec3f nitrogen = NitrogenPerRayleigh*scale;
 	p.setUniformValue("auroraNitrogenColor", QVector3D(nitrogen[0], nitrogen[1], nitrogen[2]));
 	// The forms and the substorm cycle from the time (UT)
-	// The camera averages what happens during its exposure (centered on the current time), unless it takes the
-	// picture of an instant
 	const double jd = core->getJD();
-	const double exposure = drawer->getFlagPhotoStarTrails() ? std::max(0., drawer->getPhotoExposureTime()) : 0.;
-	Substorm sub = substorm(jd, kp);
-	if (exposure > 0.5)
-	{
-		constexpr int samples = 9;
-		Substorm mean = sub;
-		mean.spread = mean.activity = mean.bulge = mean.drift = mean.pulsating = 0.;
-		for (int i = 0; i < samples; ++i)
-		{
-			const Substorm s = substorm(jd + exposure*((i + 0.5)/samples - 0.5)/86400., kp);
-			mean.spread += s.spread/samples;
-			mean.activity += s.activity/samples;
-			mean.bulge += s.bulge/samples;
-			mean.drift += s.drift/samples;
-			mean.pulsating += s.pulsating/samples;
-		}
-		sub = mean;
-	}
+	double exposure = 0.;
+	const Substorm sub = exposedSubstorm(core, exposure);
 	p.setUniformValue("auroraExposure", static_cast<float>(exposure));
 	p.setUniformValue("auroraTime", static_cast<float>(86400.*(jd + 0.5 - std::floor(jd + 0.5))));
 	p.setUniformValue("auroraSeed", static_cast<float>(std::fmod(std::floor(jd + 0.5), 997.)));
