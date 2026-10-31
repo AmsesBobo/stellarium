@@ -37,11 +37,15 @@
 #include <QOpenGLBuffer>
 #include <QOpenGLShaderProgram>
 #include <QOpenGLVertexArrayObject>
+#include <QOpenGLFramebufferObject>
 #include <QVector4D>
 #include <cmath>
 #include <array>
 #include <algorithm>
 
+#ifndef GL_RGBA16F
+#define GL_RGBA16F 0x881A
+#endif
 #ifndef GL_RGB32F
 #define GL_RGB32F 0x8815
 #endif
@@ -63,6 +67,22 @@ constexpr int VertexAttribIndex = 0;
 const Vec3f GreenPerRayleigh(5.134e-8f, 2.583e-7f, -3.250e-8f);
 const Vec3f RedPerRayleigh(3.604e-7f, -2.776e-8f, -3.84e-9f);
 const Vec3f NitrogenPerRayleigh(5.100e-8f, -1.530e-8f, 8.370e-8f);
+
+// The emissions as the camera records them: with the digital sensor as above, with a color film as its layers see the
+// lines (PhotoFilmSpec::aurora, computed from their spectral sensitivities)
+void emissionColors(const StelSkyDrawer* drawer, Vec3f& green, Vec3f& red, Vec3f& nitrogen)
+{
+	green = GreenPerRayleigh;
+	red = RedPerRayleigh;
+	nitrogen = NitrogenPerRayleigh;
+	if (drawer->getFlagPhotoFilmActive() && StelSkyDrawer::getPhotoFilmSpectral(drawer->getPhotoActiveFilmSpec()))
+	{
+		const std::array<float, 9>& a = drawer->getPhotoActiveFilmSpec().aurora;
+		green.set(a[0], a[1], a[2]);
+		red.set(a[3], a[4], a[5]);
+		nitrogen.set(a[6], a[7], a[8]);
+	}
+}
 
 // A number in [0, 1) from the integer n and a salt (splitmix64)
 double unitHash(int64_t n, uint64_t salt)
@@ -157,6 +177,7 @@ void AuroraMgr::init()
 	setKpPreset(preset);
 	setFlagShow(conf->value("aurora/flag_show", false).toBool());
 	setFlagShowOval(conf->value("aurora/flag_show_oval", false).toBool());
+	setFlagHalfResolution(conf->value("aurora/flag_half_resolution", false).toBool());
 	addAction("actionShow_Aurora", N_("Display Options"), N_("Aurorae"), "flagShow");
 	addAction("actionShow_Aurora_Oval", N_("Display Options"), N_("Auroral oval"), "flagShowOval");
 
@@ -277,6 +298,8 @@ Vec3f AuroraMgr::computeIlluminance(const StelCore* core, const Geometry& g) con
 	const Substorm sub = exposedSubstorm(core, exposure);
 	const double k = static_cast<double>(core->getSkyDrawer()->getExtinction().getExtinctionCoefficient());
 	const bool withAtmosphere = core->getSkyDrawer()->getFlagHasAtmosphere();
+	Vec3f greenColor, redColor, nitrogenColor;
+	emissionColors(core->getSkyDrawer(), greenColor, redColor, nitrogenColor);
 	std::array<OvalBoundaries, 49> ovals;
 	for (size_t i = 0; i < ovals.size(); ++i)
 		ovals[i] = ovalBoundaries(kp, 0.5*static_cast<double>(i), dst);
@@ -362,10 +385,10 @@ Vec3f AuroraMgr::computeIlluminance(const StelCore* core, const Geometry& g) con
 				}
 				const double weight = column*area*cosZ/(s*s)*transmission;
 				if (red)
-					light += Vec3d(RedPerRayleigh[0], RedPerRayleigh[1], RedPerRayleigh[2])*(e.redRatio*weight);
+					light += Vec3d(redColor[0], redColor[1], redColor[2])*(e.redRatio*weight);
 				else
-					light += Vec3d(GreenPerRayleigh[0] + NitrogenPerRayleigh[0], GreenPerRayleigh[1] + NitrogenPerRayleigh[1],
-					               GreenPerRayleigh[2] + NitrogenPerRayleigh[2])*weight;
+					light += Vec3d(greenColor[0] + nitrogenColor[0], greenColor[1] + nitrogenColor[1],
+					               greenColor[2] + nitrogenColor[2])*weight;
 			}
 		}
 	}
@@ -388,6 +411,16 @@ void AuroraMgr::setFlagShow(bool b)
 		flagShow = b;
 		StelApp::immediateSave("aurora/flag_show", b);
 		emit flagShowChanged(b);
+	}
+}
+
+void AuroraMgr::setFlagHalfResolution(bool b)
+{
+	if (b != flagHalfResolution)
+	{
+		flagHalfResolution = b;
+		StelApp::immediateSave("aurora/flag_half_resolution", b);
+		emit flagHalfResolutionChanged(b);
 	}
 }
 
@@ -1200,8 +1233,10 @@ void AuroraMgr::drawLight(StelCore* core, const Geometry& g)
 	}
 	const Emission e = emission(kp, getDst());
 	const float scale = drawer->getPhotoSceneScale();
-	const Vec3f green = GreenPerRayleigh*scale;
-	const Vec3f red = RedPerRayleigh*scale;
+	Vec3f greenColor, redColor, nitrogenColor;
+	emissionColors(drawer, greenColor, redColor, nitrogenColor);
+	const Vec3f green = greenColor*scale;
+	const Vec3f red = redColor*scale;
 	const Extinction& extinction = drawer->getExtinction();
 
 	QOpenGLShaderProgram& p = *lightProgram;
@@ -1244,7 +1279,7 @@ void AuroraMgr::drawLight(StelCore* core, const Geometry& g)
 	                                              static_cast<float>(e.redRatio), static_cast<float>(e.redHeight)));
 	p.setUniformValue("auroraGreenColor", QVector3D(green[0], green[1], green[2]));
 	p.setUniformValue("auroraRedColor", QVector3D(red[0], red[1], red[2]));
-	const Vec3f nitrogen = NitrogenPerRayleigh*scale;
+	const Vec3f nitrogen = nitrogenColor*scale;
 	p.setUniformValue("auroraNitrogenColor", QVector3D(nitrogen[0], nitrogen[1], nitrogen[2]));
 	// The forms and the substorm cycle from the time (UT)
 	const double jd = core->getJD();
@@ -1265,8 +1300,95 @@ void AuroraMgr::drawLight(StelCore* core, const Geometry& g)
 	                                           static_cast<float>(energetic), lowest));
 
 	auto& gl = *QOpenGLContext::currentContext()->functions();
+	if (!flagHalfResolution)
+	{
+		lowResBuffer.reset();
+		gl.glEnable(GL_BLEND);
+		gl.glBlendFunc(GL_ONE, GL_ONE);
+		drawQuad();
+		gl.glDisable(GL_BLEND);
+		p.release();
+		return;
+	}
+
+	// At half resolution: into a buffer of its own (the full screen quad covers it all, so the shader maps it on the
+	// same view), then scaled up and added to the scene
+	GLint previousBuffer = 0;
+	gl.glGetIntegerv(GL_FRAMEBUFFER_BINDING, &previousBuffer);
+	GLint viewport[4];
+	gl.glGetIntegerv(GL_VIEWPORT, viewport);
+	const QSize size(std::max(1, (viewport[2] + 1)/2), std::max(1, (viewport[3] + 1)/2));
+	if (!lowResBuffer || lowResBuffer->size() != size)
+	{
+		QOpenGLFramebufferObjectFormat format;
+		format.setInternalTextureFormat(GL_RGBA16F);
+		lowResBuffer.reset(new QOpenGLFramebufferObject(size, format));
+		gl.glBindTexture(GL_TEXTURE_2D, lowResBuffer->texture());
+		gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		gl.glBindTexture(GL_TEXTURE_2D, 0);
+	}
+	gl.glBindFramebuffer(GL_FRAMEBUFFER, lowResBuffer->handle());
+	gl.glViewport(0, 0, size.width(), size.height());
+	gl.glDisable(GL_BLEND);
+	gl.glClearColor(0.f, 0.f, 0.f, 0.f);
+	gl.glClear(GL_COLOR_BUFFER_BIT);
+	drawQuad();
+	p.release();
+	gl.glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(previousBuffer));
+	gl.glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
+
+	if (!compositeProgram)
+	{
+		std::unique_ptr<QOpenGLShaderProgram> program(new QOpenGLShaderProgram);
+		const QByteArray vert = StelOpenGL::globalShaderPrefix(StelOpenGL::VERTEX_SHADER) + R"(
+ATTRIBUTE highp vec3 vertex;
+VARYING highp vec2 texCoord;
+void main()
+{
+	gl_Position = vec4(vertex, 1.);
+	texCoord = 0.5*vertex.xy + 0.5;
+}
+)";
+		const QByteArray frag = StelOpenGL::globalShaderPrefix(StelOpenGL::FRAGMENT_SHADER) + R"(
+VARYING highp vec2 texCoord;
+uniform sampler2D lightTex;
+void main()
+{
+	FRAG_COLOR = vec4(texture2D(lightTex, texCoord).rgb, 1.);
+}
+)";
+		if (program->addShaderFromSourceCode(QOpenGLShader::Vertex, vert)
+		    && program->addShaderFromSourceCode(QOpenGLShader::Fragment, frag))
+		{
+			program->bindAttributeLocation("vertex", VertexAttribIndex);
+			if (StelPainter::linkProg(program.get(), "AuroraMgr composite program"))
+				compositeProgram = std::move(program);
+		}
+		if (!compositeProgram)
+		{
+			qWarning() << "AuroraMgr: cannot build the program that adds the light at half resolution";
+			flagHalfResolution = false;
+			return;
+		}
+	}
+	compositeProgram->bind();
+	gl.glActiveTexture(GL_TEXTURE0);
+	gl.glBindTexture(GL_TEXTURE_2D, lowResBuffer->texture());
+	compositeProgram->setUniformValue("lightTex", 0);
 	gl.glEnable(GL_BLEND);
 	gl.glBlendFunc(GL_ONE, GL_ONE);
+	drawQuad();
+	gl.glDisable(GL_BLEND);
+	gl.glBindTexture(GL_TEXTURE_2D, 0);
+	compositeProgram->release();
+}
+
+void AuroraMgr::drawQuad()
+{
+	auto& gl = *QOpenGLContext::currentContext()->functions();
 	if (vao->isCreated())
 		vao->bind();
 	else
@@ -1281,6 +1403,4 @@ void AuroraMgr::drawLight(StelCore* core, const Geometry& g)
 		vao->release();
 	else
 		gl.glDisableVertexAttribArray(VertexAttribIndex);
-	gl.glDisable(GL_BLEND);
-	p.release();
 }

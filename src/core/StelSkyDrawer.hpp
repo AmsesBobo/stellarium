@@ -546,6 +546,10 @@ public:
 		//! Color films: an emission nebula (H II region), from its line spectrum: the linear sRGB of the scene for
 		//! a nebula as bright in V as white light of luminance 1 (see StelSkyImageTile)
 		std::array<float, 3> emission = {};
+		//! Color films: the aurorae, from their lines: the linear sRGB of the scene per rayleigh of the green line
+		//! (557.7 nm), of the red lines (630.0 nm with 636.4 nm) and of the light of nitrogen (per rayleigh of the
+		//! green line: 427.8 nm and the first positive band of N2), three by three (see AuroraMgr)
+		std::array<float, 9> aurora = {};
 	};
 	//! Whether a film has spectral data (a color film): its own sensitivity to the sky, the stars and the airglow
 	static bool getPhotoFilmSpectral(const PhotoFilmSpec& f) {return f.spectral;}

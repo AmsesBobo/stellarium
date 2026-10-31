@@ -31,6 +31,7 @@ class StelCore;
 class QOpenGLShaderProgram;
 class QOpenGLBuffer;
 class QOpenGLVertexArrayObject;
+class QOpenGLFramebufferObject;
 
 //! @class AuroraMgr
 //! The aurorae (northern and southern lights) of the Earth.
@@ -66,6 +67,9 @@ class AuroraMgr : public StelModule
 	Q_OBJECT
 	//! Show the light of the aurorae (photographic mode)
 	Q_PROPERTY(bool flagShow READ getFlagShow WRITE setFlagShow NOTIFY flagShowChanged)
+	//! Compute the light of the aurorae at half the resolution of the screen and scale it up (faster: about a quarter
+	//! of the work, the thinnest arcs and rays a little softer)
+	Q_PROPERTY(bool flagHalfResolution READ getFlagHalfResolution WRITE setFlagHalfResolution NOTIFY flagHalfResolutionChanged)
 	//! Draw the auroral ovals as lines (a guide to their position)
 	Q_PROPERTY(bool flagShowOval READ getFlagShowOval WRITE setFlagShowOval NOTIFY flagShowOvalChanged)
 	//! The geomagnetic activity: 0 quiet (Kp 1), 1 moderate (Kp 3), 2 storm (Kp 6), 3 extreme storm (Kp 9, Dst -250 nT),
@@ -92,6 +96,7 @@ public:
 
 	bool getFlagShow() const {return flagShow;}
 	bool getFlagShowOval() const {return flagShowOval;}
+	bool getFlagHalfResolution() const {return flagHalfResolution;}
 	int getKpPreset() const {return kpPreset;}
 	double getKpCustom() const {return kpCustom;}
 	double getKp() const;
@@ -155,6 +160,7 @@ public:
 public slots:
 	void setFlagShow(bool b);
 	void setFlagShowOval(bool b);
+	void setFlagHalfResolution(bool b);
 	void setKpPreset(int preset);
 	void setKpCustom(double value);
 	void setKp(double value);
@@ -163,6 +169,7 @@ public slots:
 signals:
 	void flagShowChanged(bool b);
 	void flagShowOvalChanged(bool b);
+	void flagHalfResolutionChanged(bool b);
 	void kpPresetChanged(int preset);
 	void kpCustomChanged(double value);
 	void kpChanged(double value);
@@ -172,6 +179,7 @@ signals:
 private:
 	bool flagShow = false;
 	bool flagShowOval = false;
+	bool flagHalfResolution = false;
 	int kpPreset = 1;
 	double kpCustom = 3.;
 	double dstCustom = -20.;
@@ -240,6 +248,10 @@ private:
 	StelProjectorP lightProjector;  //!< the projection the program was built for
 	std::unique_ptr<QOpenGLBuffer> vbo;
 	std::unique_ptr<QOpenGLVertexArrayObject> vao;
+	//! At half resolution: the buffer of the light, and the program that adds it to the scene
+	std::unique_ptr<QOpenGLFramebufferObject> lowResBuffer;
+	std::unique_ptr<QOpenGLShaderProgram> compositeProgram;
+	void drawQuad();
 };
 
 #endif // AURORAMGR_HPP

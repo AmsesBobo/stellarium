@@ -333,6 +333,7 @@ void PhotographicModeDialog::createDialogContent()
 	connectBoolProperty(ui->airglowCheckBox,          "StelSkyDrawer.flagPhotoAirglow");
 	connectBoolProperty(ui->auroraCheckBox,           "AuroraMgr.flagShow");
 	connectBoolProperty(ui->auroraOvalCheckBox,       "AuroraMgr.flagShowOval");
+	connectBoolProperty(ui->auroraHalfResolutionCheckBox, "AuroraMgr.flagHalfResolution");
 	// The aurorae: the activity is a preset or a custom Kp; the substorm cycle shows where it stands
 	connectIntProperty(ui->auroraActivityComboBox,   "AuroraMgr.kpPreset");
 	connectDoubleProperty(ui->auroraKpDoubleSpinBox,  "AuroraMgr.kpCustom");

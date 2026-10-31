@@ -58,7 +58,9 @@
 // make 25% in red, and the violet it gives to the twilight is not in Till Credner's twilight slides (Ektachrome,
 // Sensia: a deep blue sky over an orange horizon), which the colors of rgbToFilm match.
 // The airglow (O I 557.7 and 630.0/636.4 nm, Na 589 nm, OH bands, with a continuum fitted to its color) is
-// computed from its spectrum directly.
+// computed from its spectrum directly, and so are the lines of the aurorae (see AuroraMgr): the film sees the green
+// line a little brighter than the eye, the red lines and the red band of nitrogen much brighter (its red layer
+// reaches far into the red), and Ektachrome and Royal Gold the green line with some blue (cyan-green aurorae).
 // Emission nebulae (H II regions) too: their light is in lines, most of it in H-alpha at 656 nm, which the V band
 // of their catalog magnitude hardly sees (about 9%) but the red layer of a film does. A typical H II region
 // (relative to H-beta: H-alpha 2.86, [N II] 658.3/654.8 0.8/0.27, [O III] 500.7/495.9 2.0/0.67 as in the bright
@@ -102,6 +104,7 @@ struct SpectralData
 	std::array<float, 12> skyXYZW;
 	std::array<float, 3> airglow;
 	std::array<float, 3> emission;
+	std::array<float, 9> aurora;
 };
 
 void setSpectral(FilmSpec& f, const SpectralData& d)
@@ -111,6 +114,7 @@ void setSpectral(FilmSpec& f, const SpectralData& d)
 	f.skyXYZW = d.skyXYZW;
 	f.airglow = d.airglow;
 	f.emission = d.emission;
+	f.aurora = d.aurora;
 }
 
 // The curves of Fujifilm Provia 100F (used for Provia 400F too)
@@ -118,7 +122,8 @@ const SpectralData proviaSpectral = {
 	{0.8823f, -0.0092f, 0.0425f, 0.1133f, 0.8423f, 0.0529f, 0.0625f, -0.0729f, 1.2184f},
 	{7.7363f, -8.6066f, -2.8156f, 2.1554f, -1.9413f, 3.4614f, 0.5767f, -0.5048f, -0.7867f, 1.2239f, 1.4820f, -0.4456f},
 	{1.3715f, 0.9966f, 0.6528f},
-	{5.183f, 0.129f, 0.291f}
+	{5.183f, 0.129f, 0.291f},
+	{1.125e-8f, 3.155e-7f, 1.833e-8f, 4.235e-7f, -5.528e-8f, -2.503e-8f, 1.039e-7f, -1.805e-8f, 7.080e-8f}
 };
 
 // The curves of Kodak Ektachrome 100 (for E200)
@@ -126,7 +131,8 @@ const SpectralData ektachromeSpectral = {
 	{0.8792f, -0.0011f, 0.0371f, 0.0948f, 0.8654f, 0.0501f, 0.1603f, -0.4778f, 1.5726f},
 	{7.5488f, -8.3193f, -2.7195f, 2.0691f, -1.6322f, 2.9534f, 0.4129f, -0.3452f, -1.9772f, 3.2321f, 2.0329f, -1.0508f},
 	{1.3868f, 1.0087f, 0.7239f},
-	{5.185f, 0.272f, 0.f}
+	{5.185f, 0.272f, 0.f},
+	{-1.924e-9f, 3.554e-7f, 1.084e-7f, 4.550e-7f, -4.630e-8f, -6.041e-8f, 9.804e-8f, -1.534e-8f, 8.012e-8f}
 };
 
 // The curves of Kodak Ultramax 400 (for Royal Gold 400)
@@ -134,7 +140,8 @@ const SpectralData ultramaxSpectral = {
 	{0.9412f, -0.0826f, 0.0515f, 0.0703f, 0.8433f, 0.1094f, 0.1719f, -0.4943f, 1.5769f},
 	{8.9881f, -10.5313f, -3.4227f, 2.7209f, -1.3177f, 2.4159f, 0.2430f, -0.1723f, -2.2375f, 3.6457f, 2.1490f, -1.1702f},
 	{1.2693f, 1.0570f, 0.7534f},
-	{5.226f, 0.567f, 0.053f}
+	{5.226f, 0.567f, 0.053f},
+	{3.762e-8f, 3.662e-7f, 1.107e-7f, 2.978e-7f, -1.981e-8f, -3.868e-8f, 1.419e-7f, -1.397e-8f, 3.796e-8f}
 };
 
 FilmSpec provia100F()
