@@ -56,6 +56,18 @@ constexpr int VertexAttribIndex = 0;
 // Both are outside the sRGB gamut (the shader keeps their luminance and desaturates them into it).
 const Vec3f GreenPerRayleigh(6.116e-8f, 2.493e-7f, 3.451e-8f);
 const Vec3f RedPerRayleigh(3.604e-7f, -2.776e-8f, -3.84e-9f);
+// The lower border of energetic aurorae: the first positive band of N2 (650-690 nm) with 0.6 of it of 427.8 nm
+const Vec3f PurplePerRayleigh(7.789e-8f, -3.202e-8f, 2.007e-7f);
+
+// A number in [0, 1) from the integer n and a salt (splitmix64)
+double unitHash(int64_t n, uint64_t salt)
+{
+	uint64_t z = static_cast<uint64_t>(n)*0x9E3779B97F4A7C15ull + salt*0xBF58476D1CE4E5B9ull + 0x94D049BB133111EBull;
+	z = (z ^ (z >> 30))*0xBF58476D1CE4E5B9ull;
+	z = (z ^ (z >> 27))*0x94D049BB133111EBull;
+	z ^= z >> 31;
+	return static_cast<double>(z >> 11)*(1./9007199254740992.);
+}
 
 // The geomagnetic north pole of the IGRF dipole (World Data Center for Geomagnetism, Kyoto; IGRF-14,
 // predicted from 2026): year, latitude, longitude (degrees, east positive)
@@ -257,6 +269,49 @@ AuroraMgr::MagneticFrame AuroraMgr::magneticFrame(double jd)
 }
 
 
+AuroraMgr::Substorm AuroraMgr::substorm(double jd, double kp)
+{
+	kp = std::clamp(kp, 0., 9.);
+	Substorm s;
+	const double cycle = 3.5 - 0.2*kp;  // hours
+	const double hours = (jd - 2451545.0)*24.;
+	const double n = std::floor(hours/cycle);
+	const double x = hours/cycle - n;   // in the cycle, 0 to 1
+	const int64_t slot = static_cast<int64_t>(n);
+	const double growth = 0.35 + 0.25*unitHash(slot, 1);
+	const double expansion = (0.2 + 0.2*unitHash(slot, 2))/cycle;
+	const double strength = (0.35 + 0.65*unitHash(slot, 3))*std::min(1., 0.25 + kp/6.);
+	const double maxBulge = 4.*strength*(0.6 + kp/15.);
+	const double maxDrift = 0.5 + 0.15*kp;
+	s.onsetMLT = 22.5 + 2.*(unitHash(slot, 4) - 0.5);
+	if (x < growth)
+	{
+		const double t = x/growth;
+		s.phase = 0;
+		s.drift = maxDrift*t;
+	}
+	else if (x < growth + expansion)
+	{
+		const double t = (x - growth)/expansion;
+		s.phase = 1;
+		s.activity = strength*(1. - std::exp(-t/0.08));
+		s.spread = 0.7 + 2.5*t;
+		s.bulge = maxBulge*std::sqrt(t);
+		s.drift = maxDrift;
+	}
+	else
+	{
+		const double t = (x - growth - expansion)/(1. - growth - expansion);
+		s.phase = 2;
+		s.activity = strength*(1. - t)*(1. - t);
+		s.spread = 3.2 + 1.5*t;
+		s.bulge = maxBulge*(1. - t);
+		s.drift = maxDrift*(1. - t);
+		s.pulsating = strength*std::sin(M_PI*t);
+	}
+	return s;
+}
+
 AuroraMgr::Geometry AuroraMgr::computeGeometry(const StelCore* core) const
 {
 	Geometry g;
@@ -396,6 +451,11 @@ void main()
 	// along the dipole field line) changes linearly: the thin arcs (Gaussian across) are integrated exactly over it,
 	// with the vertical profile where the line crosses them; the broad diffuse aurora at the middle of the piece.
 	// The vertical profiles are Chapman layers. Everything is in the geomagnetic frame (km).
+	// The forms: the arcs fold (noise in magnetic longitude), and their light is broken into rays: a fine noise in
+	// magnetic longitude, which stays the same along the dipole field lines (they lie in the magnetic meridians), so
+	// the rays follow them and meet in the magnetic zenith (the corona) seen from below. A substorm (see substorm())
+	// brightens and folds the arcs around its onset in magnetic local time and spreads out from there; afterwards
+	// the diffuse aurora pulsates in patches. All noises come from the date and time: a moment always looks the same.
 	const QByteArray frag = StelOpenGL::globalShaderPrefix(StelOpenGL::FRAGMENT_SHADER)
 	                        + projector.getUnProjectShader()
 	                        + extinction.getForwardTransformShader()
@@ -413,6 +473,12 @@ uniform highp vec4 auroraOval[49];   // poleward, equatorward, diffuse boundary 
 uniform highp vec4 auroraEmission;   // green (R) of the main arc, of the diffuse aurora; red against green; red peak (km)
 uniform highp vec3 auroraGreenColor; // scene buffer per R of 557.7 nm (with 427.8 nm)
 uniform highp vec3 auroraRedColor;   // per R of 630.0 nm (with 636.4 nm)
+uniform highp vec3 auroraPurpleColor; // per R of the first positive band of N2 (650-690 nm, with 427.8 nm)
+uniform highp float auroraTime;      // seconds since 0h UT
+uniform highp float auroraSeed;      // from the date
+uniform highp vec4 auroraSubstorm;   // onset (MLT, h), its spread in MLT (h), activity (0-1), poleward bulge (radians)
+uniform highp vec4 auroraState;      // equatorward drift of the arcs (radians), pulsating aurora (0-1), purple lower
+                                     // border against the green (energetic electrons), unused
 
 const highp float PI = 3.14159265;
 const highp float EARTH_RADIUS = 6371.;
@@ -462,6 +528,57 @@ highp float bandLength(highp float lat0, highp float lat1, highp float a, highp 
 	highp float k = 0.70710678/w;
 	return len*w*1.2533141/d*(auroraErf((lat1 - a)*k) - auroraErf((lat0 - a)*k));
 }
+// Hash (Dave Hoskins, "Hash without Sine") and value noise, periodic in x with n cells
+highp float auroraHash(highp vec2 p)
+{
+	highp vec3 p3 = fract(vec3(p.xyx)*0.1031);
+	p3 += dot(p3, p3.yzx + 33.33);
+	return fract((p3.x + p3.y)*p3.z);
+}
+highp float auroraNoise(highp float x, highp float n, highp float y)
+{
+	highp float ix = floor(x), iy = floor(y);
+	highp float fx = x - ix, fy = y - iy;
+	highp float x0 = mod(ix, n), x1 = mod(ix + 1., n);
+	highp vec2 s = vec2(auroraSeed, 0.37*auroraSeed);
+	highp float a = auroraHash(vec2(x0, iy) + s), b = auroraHash(vec2(x1, iy) + s);
+	highp float c = auroraHash(vec2(x0, iy + 1.) + s), d = auroraHash(vec2(x1, iy + 1.) + s);
+	fx = fx*fx*(3. - 2.*fx);
+	fy = fy*fy*(3. - 2.*fy);
+	return mix(mix(a, b, fx), mix(c, d, fx), fy);
+}
+// Fold of the arcs: the shift of their latitude (radians) at the magnetic longitude lon (in turns), quiet and activity
+highp float arcFold(highp float lon, highp float activity, int j)
+{
+	highp float o = float(j)*17.;
+	highp float quiet = auroraNoise(lon*60. + o, 60., auroraTime/1500. + o) - 0.5;
+	highp float act = 0.7*(auroraNoise(lon*240. + auroraTime/400. + o, 240., auroraTime/40. + o) - 0.5)
+	                + 0.3*(auroraNoise(lon*900. + auroraTime/90. + o, 900., auroraTime/12. + o) - 0.5);
+	return mix(0.06*quiet, 0.5*act, activity)*PI/180.;
+}
+// The rays: brightness against the mean (about 1) at the magnetic longitude lon (in turns), for the share of
+// rays in the arc; the cells are 0.04 and 0.012 degrees of longitude (2 and 0.7 km in the oval), and they drift
+// along the arc
+highp float arcRays(highp float lon, highp float rays, highp float span, int j)
+{
+	highp float o = float(j)*31.;
+	highp float r = 0.6*auroraNoise(lon*9000. + auroraTime/3. + o, 9000., auroraTime/2.5 + o)
+	              + 0.4*auroraNoise(lon*30000. - auroraTime/1.5 + o, 30000., auroraTime/0.8 + o);
+	// a piece of the line of sight that spans many rays sees their mean
+	highp float mean = smoothstep(2., 8., span*9000.);
+	return mix(1., mix(3.*r*r, 1., mean), rays);
+}
+// Patches of pulsating aurora: brightness against the mean, the patches flicker on and off in a few seconds
+highp float pulsating(highp float lon, highp float lat, highp float amount)
+{
+	if (amount <= 0.)
+		return 1.;
+	highp float patchMask = smoothstep(0.5, 0.65, auroraNoise(lon*1200. + auroraTime/2000., 1200., lat*180./PI*4.));
+	highp float phase = auroraNoise(lon*2400. + 7., 2400., lat*180./PI*8. + 11.);
+	highp float period = 4. + 8.*auroraNoise(lon*600. + 3., 600., lat*180./PI*2. + 5.);
+	highp float on = smoothstep(-0.3, 0.3, sin(2.*PI*(auroraTime/period + 5.*phase)));
+	return 1. + amount*patchMask*(2.*on - 1.);
+}
 
 void main(void)
 {
@@ -484,9 +601,8 @@ void main(void)
 		return;
 	}
 
-	highp float green = 0., red = 0.;
-	highp float tPrev = 0., hPrev = 0., latPrev = 0.;
-	highp vec3 pPrev = p0;
+	highp float green = 0., red = 0., purple = 0.;
+	highp float tPrev = 0., hPrev = 0., latPrev = 0., lonPrev = 0.;
 	for (int k = 0; k <= STEPS; ++k)
 	{
 		highp float u = float(k)/float(STEPS);
@@ -495,47 +611,67 @@ void main(void)
 		highp float t = -b + sqrt(max(b*b - r0*r0 + rh*rh, 0.));
 		highp vec3 p = p0 + t*dir;
 		highp float lat = footLatitude(p);
+		highp float lon = atan(p.y, p.x)/(2.*PI); // in turns
 		if (k > 0)
 		{
 			highp float len = t - tPrev;
-			highp vec3 pm = 0.5*(p + pPrev);
-			highp float mlt = mod(12. + (atan(pm.y, pm.x) - auroraSunLon)*12./PI, 24.);
+			highp float dlon = lon - lonPrev;
+			dlon -= floor(dlon + 0.5);
+			highp float lonm = lonPrev + 0.5*dlon;
+			highp float mlt = mod(12. + (lonm*2.*PI - auroraSunLon)*12./PI, 24.);
 			highp vec3 oval = ovalAt(mlt);
-			highp float width = max(oval.x - oval.y, 0.005);
+			// the substorm around its onset in magnetic local time
+			highp float dm = mlt - auroraSubstorm.x;
+			dm -= 24.*floor(dm/24. + 0.5);
+			highp float activity = auroraSubstorm.z*exp(-dm*dm/(auroraSubstorm.y*auroraSubstorm.y));
+			highp float bulge = auroraSubstorm.w*activity/max(auroraSubstorm.z, 1e-3);
+			highp float width = max(oval.x - oval.y, 0.005) + bulge;
 			// the arcs are brightest before magnetic midnight, faint on the day side; the diffuse aurora after it
 			highp float night = 0.5 + 0.5*cos((mlt - 23.)*PI/12.);
-			highp float arcs = auroraEmission.x*(0.1 + 0.9*night*sqrt(night));
+			highp float arcs = auroraEmission.x*(0.1 + 0.9*night*sqrt(night))*(1. + 6.*activity);
 			highp float morning = 0.5 + 0.5*cos((mlt - 3.)*PI/12.);
-			highp float diffuse = auroraEmission.y*(0.3 + 0.7*morning);
+			highp float diffuse = auroraEmission.y*(0.3 + 0.7*morning)*(1. + 1.5*activity);
+			// rays: a few in quiet arcs, most of the light in activity ones
+			highp float rays = 0.15 + 0.85*smoothstep(0.03, 0.4, activity);
 
-			// three calm arcs in the discrete oval, the brightest near its equatorward edge
+			// three arcs in the discrete oval, the brightest near its equatorward edge; they drift towards the
+			// equator before a substorm and fill the bulge of the oval in it
 			highp float dl = lat - latPrev;
 			for (int j = 0; j < 3; ++j)
 			{
 				highp float frac = j == 0 ? 0.15 : (j == 1 ? 0.4 : 0.7);
 				highp float w = (j == 0 ? 4. : (j == 1 ? 6. : 8.))/FOOT_RADIUS;
 				highp float strength = j == 0 ? 1. : (j == 1 ? 0.45 : 0.25);
-				highp float a = oval.y + frac*width;
+				highp float a0 = oval.y + frac*width - auroraState.x*(1. - activity);
+				highp float a = a0 + arcFold(lonm, activity, j);
 				highp float s = arcs*strength*bandLength(latPrev, lat, a, w, len);
+				if (s <= 0.)
+					continue;
 				highp float c = abs(dl) > 1e-7 ? clamp((a - latPrev)/dl, 0., 1.) : 0.5;
 				highp float hc = mix(hPrev, h, c);
-				green += s*chapman(hc, 110., 12.);
+				highp float ray = arcRays(lonPrev + c*dlon, rays, abs(dlon)*min(1., 3.*w/max(abs(dl), 1e-9)), j);
+				// the rays reach higher than the arc
+				highp float top = 12. + 30.*rays*min(ray, 2.);
+				s *= ray;
+				green += s*chapman(hc, 110., top);
 				red += s*chapman(hc, auroraEmission.w, 60.);
+				purple += s*chapman(hc, 97., 5.)*(0.3 + activity);
 			}
-			// the diffuse aurora, from its equatorward boundary into the discrete oval
+			// the diffuse aurora, from its equatorward boundary into the discrete oval, pulsating after a substorm
 			highp float latm = 0.5*(lat + latPrev);
 			highp float hm = 0.5*(h + hPrev);
-			highp float d = diffuse*len*smoothstep(oval.z, oval.y, latm)*(1. - smoothstep(oval.y + 0.5*width, oval.x, latm));
+			highp float pulse = pulsating(lonm, latm, auroraState.y*smoothstep(0., 0.3, morning));
+			highp float d = diffuse*len*pulse*smoothstep(oval.z, oval.y, latm)*(1. - smoothstep(oval.y + 0.5*width, oval.x + bulge, latm));
 			green += d*chapman(hm, 115., 15.);
 			red += d*chapman(hm, auroraEmission.w, 60.);
 		}
 		tPrev = t;
 		hPrev = h;
 		latPrev = lat;
-		pPrev = p;
+		lonPrev = lon;
 	}
 
-	highp vec3 color = green*auroraGreenColor + auroraEmission.z*red*auroraRedColor;
+	highp vec3 color = green*auroraGreenColor + auroraEmission.z*red*auroraRedColor + auroraState.z*purple*auroraPurpleColor;
 	// into the gamut of the scene, with the same luminance
 	highp float Y = dot(color, vec3(0.2126, 0.7152, 0.0722));
 	highp float lowest = min(color.r, min(color.g, color.b));
@@ -608,6 +744,18 @@ void AuroraMgr::drawLight(StelCore* core, const Geometry& g)
 	                                              static_cast<float>(e.redRatio), static_cast<float>(e.redHeight)));
 	p.setUniformValue("auroraGreenColor", QVector3D(green[0], green[1], green[2]));
 	p.setUniformValue("auroraRedColor", QVector3D(red[0], red[1], red[2]));
+	const Vec3f purple = PurplePerRayleigh*scale;
+	p.setUniformValue("auroraPurpleColor", QVector3D(purple[0], purple[1], purple[2]));
+	// The forms and the substorm cycle from the time (UT)
+	const double jd = core->getJD();
+	const Substorm sub = substorm(jd, kp);
+	p.setUniformValue("auroraTime", static_cast<float>(86400.*(jd + 0.5 - std::floor(jd + 0.5))));
+	p.setUniformValue("auroraSeed", static_cast<float>(std::fmod(std::floor(jd + 0.5), 997.)));
+	p.setUniformValue("auroraSubstorm", QVector4D(static_cast<float>(sub.onsetMLT), static_cast<float>(sub.spread),
+	                                              static_cast<float>(sub.activity), static_cast<float>(sub.bulge*M_PI/180.)));
+	const double energetic = 0.5*std::clamp((kp - 3.5)/4.5, 0., 1.);
+	p.setUniformValue("auroraState", QVector4D(static_cast<float>(sub.drift*M_PI/180.), static_cast<float>(sub.pulsating),
+	                                           static_cast<float>(energetic), 0.f));
 
 	auto& gl = *QOpenGLContext::currentContext()->functions();
 	gl.glEnable(GL_BLEND);

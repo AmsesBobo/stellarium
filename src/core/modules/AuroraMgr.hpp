@@ -94,6 +94,23 @@ public:
 	};
 	static Emission emission(double kp);
 
+	//! The substorm cycle at the Julian day jd (UT) for the index kp. A substorm comes every 1.7 to 3.5 hours (more
+	//! often in storms): in the growth phase the arcs drift towards the equator; at the onset, near magnetic midnight,
+	//! they brighten suddenly, fold and break up into rays, the oval bulges poleward and the activity spreads in
+	//! magnetic local time (the expansion, 12 to 24 minutes); in the recovery it fades and the diffuse aurora pulsates.
+	//! Each cycle is drawn from its time: the same moment always looks the same.
+	struct Substorm
+	{
+		int phase = 0;           //!< 0 growth, 1 expansion, 2 recovery
+		double onsetMLT = 23.;   //!< magnetic local time of the onset (h)
+		double spread = 1.;      //!< extent of the activity in magnetic local time (h)
+		double activity = 0.;    //!< 0 quiet to 1 the brightest
+		double bulge = 0.;       //!< poleward bulge of the oval (degrees)
+		double drift = 0.;       //!< equatorward drift of the arcs (degrees)
+		double pulsating = 0.;   //!< pulsating aurora (0 to 1)
+	};
+	static Substorm substorm(double jd, double kp);
+
 public slots:
 	void setFlagShow(bool b);
 	void setFlagShowOval(bool b);
