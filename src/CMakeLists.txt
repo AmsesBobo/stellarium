@@ -232,9 +232,11 @@ SET(stellarium_lib_SRCS
      core/modules/LandscapeMgr.cpp
      core/modules/LandscapeMgr.hpp
      core/modules/LightDomes.cpp
+     core/modules/AuroraMgr.cpp
      core/modules/NightLightsMap.hpp
      core/modules/NightLightsMap.cpp
      core/modules/LightDomes.hpp
+     core/modules/AuroraMgr.hpp
      core/modules/Meteor.cpp
      core/modules/Meteor.hpp
      core/modules/SporadicMeteor.cpp

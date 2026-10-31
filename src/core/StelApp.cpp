@@ -35,6 +35,7 @@
 #include "NebulaMgr.hpp"
 #include "LandscapeMgr.hpp"
 #include "LightDomes.hpp"
+#include "AuroraMgr.hpp"
 #include "CustomObjectMgr.hpp"
 #include "HighlightMgr.hpp"
 #include "GridLinesMgr.hpp"
@@ -654,6 +655,11 @@ void StelApp::init(QSettings* conf)
 	LightDomes* lightDomes = new LightDomes();
 	lightDomes->init();
 	getModuleMgr().registerModule(lightDomes);
+
+	// Aurorae
+	AuroraMgr* auroraMgr = new AuroraMgr();
+	auroraMgr->init();
+	getModuleMgr().registerModule(auroraMgr);
 	// Only now we can switch to auto-landscape. (GH:#3550)
 	if (landscape->getFlagLandscapeAutoSelection() && (confSettings->value("init_location/location", "auto").toString() == "auto"))
 	{
