@@ -64,8 +64,14 @@ class AuroraMgr : public StelModule
 	Q_PROPERTY(bool flagShow READ getFlagShow WRITE setFlagShow NOTIFY flagShowChanged)
 	//! Draw the auroral ovals as lines (a guide to their position)
 	Q_PROPERTY(bool flagShowOval READ getFlagShowOval WRITE setFlagShowOval NOTIFY flagShowOvalChanged)
-	//! The planetary geomagnetic activity index Kp (0 quiet to 9 extreme storm)
+	//! The geomagnetic activity: 0 quiet (Kp 1), 1 moderate (Kp 3), 2 storm (Kp 6), 3 extreme storm (Kp 9), 4 custom (kpCustom)
+	Q_PROPERTY(int kpPreset READ getKpPreset WRITE setKpPreset NOTIFY kpPresetChanged)
+	//! The planetary geomagnetic activity index Kp of the custom activity (0 quiet to 9 extreme storm)
+	Q_PROPERTY(double kpCustom READ getKpCustom WRITE setKpCustom NOTIFY kpCustomChanged)
+	//! The planetary geomagnetic activity index Kp in use (setting it makes the activity custom)
 	Q_PROPERTY(double kp READ getKp WRITE setKp NOTIFY kpChanged)
+	//! Where the substorm cycle stands now and when the next onset comes (for the user interface)
+	Q_PROPERTY(QString substormInfo READ getSubstormInfo NOTIFY substormInfoChanged)
 
 public:
 	AuroraMgr();
@@ -78,7 +84,12 @@ public:
 
 	bool getFlagShow() const {return flagShow;}
 	bool getFlagShowOval() const {return flagShowOval;}
-	double getKp() const {return kp;}
+	int getKpPreset() const {return kpPreset;}
+	double getKpCustom() const {return kpCustom;}
+	double getKp() const;
+	QString getSubstormInfo() const {return substormInfo;}
+	//! The Kp of the presets of the activity (kpPreset)
+	static constexpr double KpPresets[4] = {1., 3., 6., 9.};
 
 	//! The boundaries of the auroral oval at the magnetic local time mlt (hours, 0 at magnetic midnight) for the
 	//! index kp: geomagnetic latitudes (degrees) of the poleward and equatorward boundaries of the discrete aurora and
@@ -114,23 +125,32 @@ public:
 		double bulge = 0.;       //!< poleward bulge of the oval (degrees)
 		double drift = 0.;       //!< equatorward drift of the arcs (degrees)
 		double pulsating = 0.;   //!< pulsating aurora (0 to 1)
+		double onset = 0.;       //!< Julian day of the onset of this cycle
+		double nextOnset = 0.;   //!< Julian day of the onset of the next cycle
 	};
 	static Substorm substorm(double jd, double kp);
 
 public slots:
 	void setFlagShow(bool b);
 	void setFlagShowOval(bool b);
+	void setKpPreset(int preset);
+	void setKpCustom(double value);
 	void setKp(double value);
 
 signals:
 	void flagShowChanged(bool b);
 	void flagShowOvalChanged(bool b);
+	void kpPresetChanged(int preset);
+	void kpCustomChanged(double value);
 	void kpChanged(double value);
+	void substormInfoChanged(const QString& info);
 
 private:
 	bool flagShow = false;
 	bool flagShowOval = false;
-	double kp = 3.;
+	int kpPreset = 1;
+	double kpCustom = 3.;
+	QString substormInfo;
 
 	//! The geomagnetic frame (axes in Earth-fixed geographic coordinates) at the given Julian day
 	struct MagneticFrame

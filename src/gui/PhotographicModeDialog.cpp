@@ -27,6 +27,7 @@
 #include "StelTranslator.hpp"
 #include "StelModuleMgr.hpp"
 #include "LightDomes.hpp"
+#include "AuroraMgr.hpp"
 #include "StelLocation.hpp"
 
 #include <QComboBox>
@@ -332,7 +333,21 @@ void PhotographicModeDialog::createDialogContent()
 	connectBoolProperty(ui->airglowCheckBox,          "StelSkyDrawer.flagPhotoAirglow");
 	connectBoolProperty(ui->auroraCheckBox,           "AuroraMgr.flagShow");
 	connectBoolProperty(ui->auroraOvalCheckBox,       "AuroraMgr.flagShowOval");
-	connectDoubleProperty(ui->auroraKpDoubleSpinBox,  "AuroraMgr.kp");
+	// The aurorae: the activity is a preset or a custom Kp; the substorm cycle shows where it stands
+	connectIntProperty(ui->auroraActivityComboBox,   "AuroraMgr.kpPreset");
+	connectDoubleProperty(ui->auroraKpDoubleSpinBox,  "AuroraMgr.kpCustom");
+	{
+		auto updateActivity = [this](){
+			const bool custom = ui->auroraActivityComboBox->currentIndex() == 4;
+			ui->auroraKpDoubleSpinBox->setEnabled(custom);
+			ui->auroraKpLabel->setEnabled(custom);
+		};
+		connect(ui->auroraActivityComboBox, qOverload<int>(&QComboBox::currentIndexChanged), this, updateActivity);
+		updateActivity();
+		AuroraMgr* aurora = GETSTELMODULE(AuroraMgr);
+		ui->auroraSubstormLabel->setText(aurora->getSubstormInfo());
+		connect(aurora, &AuroraMgr::substormInfoChanged, ui->auroraSubstormLabel, &QLabel::setText);
+	}
 	connectBoolProperty(ui->filmSpectralSkyCheckBox,  "StelSkyDrawer.flagPhotoFilmSpectralSky");
 	connectBoolProperty(ui->programApertureLockCheckBox, "StelSkyDrawer.flagPhotoProgramApertureLock");
 	connect(drawer, &StelSkyDrawer::flagPhotoProgramApertureLockChanged, this, &PhotographicModeDialog::updateCameraWidgets);

@@ -1254,16 +1254,55 @@
            </widget>
           </item>
           <item row="1" column="0">
-           <widget class="QLabel" name="auroraKpLabel">
+           <widget class="QLabel" name="auroraActivityLabel">
             <property name="text">
-             <string>Geomagnetic activity Kp:</string>
+             <string>Geomagnetic activity:</string>
             </property>
            </widget>
           </item>
           <item row="1" column="1">
+           <widget class="QComboBox" name="auroraActivityComboBox">
+            <property name="toolTip">
+             <string>The geomagnetic activity, by the planetary index Kp (0 to 9): it sets the size of the ovals, the brightness of the aurorae and how often substorms come. Quiet: the oval over the far north (northern Norway, Iceland). Moderate: often seen from northern Scandinavia. Storm: low in the north from southern Sweden. Extreme storm: as in May 2024 (the model stops widening at Kp 9).</string>
+            </property>
+            <item>
+             <property name="text">
+              <string>Quiet (Kp 1)</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Moderate (Kp 3)</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Storm (Kp 6)</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Extreme storm (Kp 9)</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Custom</string>
+             </property>
+            </item>
+           </widget>
+          </item>
+          <item row="2" column="0">
+           <widget class="QLabel" name="auroraKpLabel">
+            <property name="text">
+             <string>Kp:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="1">
            <widget class="QDoubleSpinBox" name="auroraKpDoubleSpinBox">
             <property name="toolTip">
-             <string>The planetary index Kp: 0-2 quiet, 3-4 active, 5-6 storm, 7-9 strong to extreme storm. It sets the size of the ovals, the brightness of the aurorae and how often substorms come.</string>
+             <string>The planetary index Kp of the custom activity: 0-2 quiet, 3-4 active, 5-6 storm, 7-9 strong to extreme storm</string>
             </property>
             <property name="alignment">
              <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
@@ -1275,10 +1314,20 @@
              <double>9.000000000000000</double>
             </property>
             <property name="singleStep">
-             <double>1.000000000000000</double>
+             <double>0.300000000000000</double>
             </property>
             <property name="value">
              <double>3.000000000000000</double>
+            </property>
+           </widget>
+          </item>
+          <item row="3" column="0" colspan="2">
+           <widget class="QLabel" name="auroraSubstormLabel">
+            <property name="toolTip">
+             <string>Where the substorm cycle stands at the current time: a growth phase with calm arcs, the onset and expansion (bright, folded aurorae with rays, about a quarter of an hour, strongest near magnetic midnight), and the recovery with pulsating aurora. The cycles come from the date and time.</string>
+            </property>
+            <property name="text">
+             <string notr="true"/>
             </property>
            </widget>
           </item>

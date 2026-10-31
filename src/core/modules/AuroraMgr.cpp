@@ -136,7 +136,9 @@ AuroraMgr::~AuroraMgr()
 void AuroraMgr::init()
 {
 	QSettings* conf = StelApp::getInstance().getSettings();
-	setKp(conf->value("aurora/kp", 3.).toDouble());
+	// The activity: a preset, or the custom Kp (a setting from before the presets is custom)
+	setKpCustom(conf->value("aurora/kp", 3.).toDouble());
+	setKpPreset(conf->value("aurora/kp_preset", conf->contains("aurora/kp") ? 4 : 1).toInt());
 	setFlagShow(conf->value("aurora/flag_show", false).toBool());
 	setFlagShowOval(conf->value("aurora/flag_show_oval", false).toBool());
 	addAction("actionShow_Aurora", N_("Display Options"), N_("Aurorae"), "flagShow");
@@ -165,6 +167,28 @@ void AuroraMgr::init()
 
 void AuroraMgr::update(double)
 {
+	// Where the substorm cycle stands, for the user interface (it changes once a minute)
+	QString info;
+	if (flagShow)
+	{
+		const double jd = StelApp::getInstance().getCore()->getJD();
+		const Substorm s = substorm(jd, getKp());
+		const auto minutes = [](double days) {
+			const int m = qRound(std::fabs(days)*1440.);
+			return m >= 60 ? QString("%1 h %2 min").arg(m/60).arg(m%60, 2, 10, QChar('0')) : QString("%1 min").arg(m);
+		};
+		if (s.phase == 0)
+			info = q_("Substorm: growth phase, onset in %1").arg(minutes(s.onset - jd));
+		else if (s.phase == 1)
+			info = q_("Substorm: expansion, onset %1 ago").arg(minutes(jd - s.onset));
+		else
+			info = q_("Substorm: recovery, next onset in %1").arg(minutes(s.nextOnset - jd));
+	}
+	if (info != substormInfo)
+	{
+		substormInfo = info;
+		emit substormInfoChanged(info);
+	}
 }
 
 double AuroraMgr::getCallOrder(StelModuleActionName actionName) const
@@ -195,15 +219,41 @@ void AuroraMgr::setFlagShowOval(bool b)
 	}
 }
 
-void AuroraMgr::setKp(double value)
+double AuroraMgr::getKp() const
+{
+	return kpPreset >= 0 && kpPreset < 4 ? KpPresets[kpPreset] : kpCustom;
+}
+
+void AuroraMgr::setKpPreset(int preset)
+{
+	preset = std::clamp(preset, 0, 4);
+	if (preset == kpPreset)
+		return;
+	const double old = getKp();
+	kpPreset = preset;
+	StelApp::immediateSave("aurora/kp_preset", preset);
+	emit kpPresetChanged(preset);
+	if (!qFuzzyCompare(old + 1., getKp() + 1.))
+		emit kpChanged(getKp());
+}
+
+void AuroraMgr::setKpCustom(double value)
 {
 	value = std::clamp(value, 0., 9.);
-	if (!qFuzzyCompare(value + 1., kp + 1.))
-	{
-		kp = value;
-		StelApp::immediateSave("aurora/kp", value);
-		emit kpChanged(value);
-	}
+	if (qFuzzyCompare(value + 1., kpCustom + 1.))
+		return;
+	const double old = getKp();
+	kpCustom = value;
+	StelApp::immediateSave("aurora/kp", value);
+	emit kpCustomChanged(value);
+	if (!qFuzzyCompare(old + 1., getKp() + 1.))
+		emit kpChanged(getKp());
+}
+
+void AuroraMgr::setKp(double value)
+{
+	setKpCustom(value);
+	setKpPreset(4);
 }
 
 AuroraMgr::Emission AuroraMgr::emission(double kp)
@@ -287,6 +337,8 @@ AuroraMgr::Substorm AuroraMgr::substorm(double jd, double kp)
 	const double maxBulge = 4.*strength*(0.6 + kp/15.);
 	const double maxDrift = 0.5 + 0.15*kp;
 	s.onsetMLT = 22.5 + 2.*(unitHash(slot, 4) - 0.5);
+	s.onset = 2451545.0 + (n + growth)*cycle/24.;
+	s.nextOnset = 2451545.0 + (n + 1. + 0.35 + 0.25*unitHash(slot + 1, 1))*cycle/24.;
 	if (x < growth)
 	{
 		const double t = x/growth;
@@ -343,6 +395,7 @@ AuroraMgr::Geometry AuroraMgr::computeGeometry(const StelCore* core) const
 
 std::vector<AuroraMgr::OvalLine> AuroraMgr::computeOvalLines(const Geometry& g) const
 {
+	const double kp = getKp();
 	std::vector<OvalLine> lines;
 	struct LineSpec
 	{
@@ -725,6 +778,7 @@ void AuroraMgr::drawLight(StelCore* core, const Geometry& g)
 	// The axes of the AltAz frame and the observer in the geomagnetic frame
 	const MagneticFrame& f = g.frame;
 	const auto toMag = [&f](const Vec3d& v) {return QVector3D(static_cast<float>(v*f.x), static_cast<float>(v*f.y), static_cast<float>(v*f.z));};
+	const double kp = getKp();
 	// The oval at 115 km, MLT every half hour
 	std::array<QVector4D, 49> oval;
 	for (size_t i = 0; i < oval.size(); ++i)
