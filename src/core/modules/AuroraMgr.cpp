@@ -502,8 +502,8 @@ void main()
 		return;
 	}
 
-	// The light along the line of sight through the shell of the aurorae, 90 to 500 km. The line is cut at the
-	// heights 90 + 410 (k/N)^2 km, dense where the green light is. In each piece the footprint latitude (at 115 km,
+	// The light along the line of sight through the shell of the aurorae, 80 to 600 km. The line is cut at the
+	// heights 80 + 520 (k/N)^2 km, dense where the green light is. In each piece the footprint latitude (at 115 km,
 	// along the dipole field line) changes linearly: the thin arcs (Gaussian across) are integrated exactly over it,
 	// with the vertical profile where the line crosses them; the broad diffuse aurora at the middle of the piece.
 	// The vertical profiles are Chapman layers. Everything is in the geomagnetic frame (km).
@@ -540,8 +540,8 @@ uniform highp vec4 auroraState;      // equatorward drift of the arcs (radians),
 const highp float PI = 3.14159265;
 const highp float EARTH_RADIUS = 6371.;
 const highp float FOOT_RADIUS = 6486.;  // 115 km
-const highp float SHELL_BOTTOM = 90.;
-const highp float SHELL_TOP = 500.;
+const highp float SHELL_BOTTOM = 80.;
+const highp float SHELL_TOP = 600.;
 const int STEPS = 48;
 
 // Abramowitz and Stegun 7.1.26
@@ -558,6 +558,11 @@ highp float chapman(highp float h, highp float peak, highp float scale)
 {
 	highp float z = (h - peak)/scale;
 	return exp(1. - z - exp(-z))/(2.7182818*scale);
+}
+// The emission fades out towards the bottom and the top of the shell, which would cut it with a sharp edge
+highp float shellFade(highp float h)
+{
+	return smoothstep(SHELL_BOTTOM, SHELL_BOTTOM + 14., h)*(1. - smoothstep(380., SHELL_TOP, h));
 }
 // Absolute geomagnetic latitude at 115 km of the dipole field line through p: r = L cos^2(lat)
 highp float footLatitude(highp vec3 p)
@@ -752,10 +757,10 @@ void main(void)
 				highp float ray = arcRays(lonPrev + c*dlon, rays, abs(dlon)*min(1., 3.*w/max(abs(dx), 1e-9)), j);
 				// the rays reach higher than the arc
 				highp float top = 12. + 30.*rays*min(ray, 2.);
-				s *= ray;
+				s *= ray*shellFade(hc);
 				green += s*chapman(hc, 110., top);
 				red += s*chapman(hc, auroraEmission.w, 60.);
-				purple += s*chapman(hc, 97., 5.)*(0.3 + activity);
+				purple += s*chapman(hc, 98., 8.)*(0.3 + activity);
 			}
 			// the diffuse aurora, from its equatorward boundary into the discrete oval, pulsating after a substorm
 			highp float latm = 0.5*(lat + latPrev);
@@ -763,7 +768,7 @@ void main(void)
 			if (zone > 0.)
 			{
 				highp float hm = 0.5*(h + hPrev);
-				highp float d = diffuse*len*zone*pulsating(lonm, latm, auroraState.y*smoothstep(0., 0.3, morning));
+				highp float d = diffuse*len*zone*shellFade(hm)*pulsating(lonm, latm, auroraState.y*smoothstep(0., 0.3, morning));
 				green += d*chapman(hm, 115., 15.);
 				red += d*chapman(hm, auroraEmission.w, 60.);
 			}
@@ -878,7 +883,7 @@ void AuroraMgr::drawLight(StelCore* core, const Geometry& g)
 	p.setUniformValue("auroraSeed", static_cast<float>(std::fmod(std::floor(jd + 0.5), 997.)));
 	p.setUniformValue("auroraSubstorm", QVector4D(static_cast<float>(sub.onsetMLT), static_cast<float>(sub.spread),
 	                                              static_cast<float>(sub.activity), static_cast<float>(sub.bulge*M_PI/180.)));
-	const double energetic = 0.5*std::clamp((kp - 3.5)/4.5, 0., 1.);
+	const double energetic = 0.3*std::clamp((kp - 3.5)/4.5, 0., 1.);
 	// Lines of sight that stay equatorward of the diffuse aurora are left out
 	float lowest = oval[0].z();
 	for (const auto& o : oval)

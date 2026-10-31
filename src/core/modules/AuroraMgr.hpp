@@ -41,7 +41,7 @@ class QOpenGLVertexArrayObject;
 //! whose coefficients follow the auroral electrojet index AL; AL comes from the planetary index Kp (Starkov 1994).
 //! The geomagnetic coordinates are those of the dipole of the IGRF (the pole interpolated in time, 1900 to 2030).
 //!
-//! The light is emitted in a shell 90 to 500 km above a spherical Earth: the green line of oxygen (557.7 nm) with
+//! The light is emitted in a shell 80 to 600 km above a spherical Earth: the green line of oxygen (557.7 nm) with
 //! the blue band of nitrogen ions (427.8 nm) around 110 km, the red lines of oxygen (630.0 and 636.4 nm) higher up.
 //! Calm arcs (thin bands along the magnetic latitude in the discrete oval) and the diffuse aurora (equatorward of
 //! them) follow the dipole field lines upwards. A shader follows the line of sight of each pixel through the shell;
