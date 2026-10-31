@@ -1228,6 +1228,64 @@
         </widget>
        </item>
        <item>
+        <widget class="QGroupBox" name="auroraGroupBox">
+         <property name="title">
+          <string>Aurorae</string>
+         </property>
+         <layout class="QGridLayout" name="auroraGridLayout">
+          <item row="0" column="0">
+           <widget class="QCheckBox" name="auroraCheckBox">
+            <property name="toolTip">
+             <string>The light of the northern and southern lights in the auroral ovals: arcs, curtains and rays along the magnetic field, green around 110 km, red higher up, a purple lower border in strong storms. They brighten and break up in substorms every two to three hours and pulsate afterwards; the forms come from the date and time, so a moment always looks the same. The exposure averages what changes during it (not with the mount "No motion").</string>
+            </property>
+            <property name="text">
+             <string>Show aurorae</string>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="1">
+           <widget class="QCheckBox" name="auroraOvalCheckBox">
+            <property name="toolTip">
+             <string>Draw the boundaries of the auroral oval (Starkov 1994) as lines in the sky, also outside the photographic mode: green at 115 km (the green and blue emissions, poleward and equatorward boundaries, the diffuse aurora dimmer), red at 300 km (the red emission)</string>
+            </property>
+            <property name="text">
+             <string>Oval lines</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="0">
+           <widget class="QLabel" name="auroraKpLabel">
+            <property name="text">
+             <string>Geomagnetic activity Kp:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="1">
+           <widget class="QDoubleSpinBox" name="auroraKpDoubleSpinBox">
+            <property name="toolTip">
+             <string>The planetary index Kp: 0-2 quiet, 3-4 active, 5-6 storm, 7-9 strong to extreme storm. It sets the size of the ovals, the brightness of the aurorae and how often substorms come.</string>
+            </property>
+            <property name="alignment">
+             <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+            </property>
+            <property name="decimals">
+             <number>1</number>
+            </property>
+            <property name="maximum">
+             <double>9.000000000000000</double>
+            </property>
+            <property name="singleStep">
+             <double>1.000000000000000</double>
+            </property>
+            <property name="value">
+             <double>3.000000000000000</double>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
         <spacer name="rightColumnSpacer">
          <property name="orientation">
           <enum>Qt::Vertical</enum>

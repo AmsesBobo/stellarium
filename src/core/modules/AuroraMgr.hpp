@@ -49,6 +49,12 @@ class QOpenGLVertexArrayObject;
 //! dimmed by the extinction. From far away only the tops, red, stand over the horizon; from high latitudes the
 //! arcs span the sky.
 //!
+//! The arcs fold and break up into rays along the field lines (a corona seen from below them) in the substorm
+//! cycle (see substorm()); afterwards the diffuse aurora pulsates in patches. Their noises come from the date and
+//! time, so that a moment always looks the same. Energetic aurorae get a purple lower border (the first positive
+//! band of N2 and the blue N2+ band, below 100 km where the green line is quenched). The camera averages what
+//! changes during its exposure: the substorm, the folds, the rays and the pulsations.
+//!
 //! The ovals can also be drawn as lines in the sky, at the heights of the green (115 km) and red (300 km)
 //! emissions: a guide to their position.
 class AuroraMgr : public StelModule

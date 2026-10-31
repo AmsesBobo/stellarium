@@ -466,71 +466,6 @@
     </widget>
    </item>
    <item>
-    <widget class="QGroupBox" name="auroraGroupBox">
-     <property name="title">
-      <string>Aurora</string>
-     </property>
-     <layout class="QHBoxLayout" name="auroraLayout">
-      <item>
-       <widget class="QCheckBox" name="auroraCheckBox">
-        <property name="toolTip">
-         <string>The light of the aurorae (photographic mode): calm arcs and the diffuse aurora in the auroral oval, green around 110 km, red higher up, with their brightness for the geomagnetic activity</string>
-        </property>
-        <property name="text">
-         <string>Show aurorae</string>
-        </property>
-       </widget>
-      </item>
-      <item>
-       <widget class="QCheckBox" name="auroraOvalCheckBox">
-        <property name="toolTip">
-         <string>Draw the boundaries of the auroral oval (Starkov 1994) as lines in the sky: green at 115 km (the green and blue emissions, poleward and equatorward boundaries, the diffuse aurora dimmer), red at 300 km (the red emission)</string>
-        </property>
-        <property name="text">
-         <string>Oval lines</string>
-        </property>
-       </widget>
-      </item>
-      <item>
-       <spacer name="auroraSpacer">
-        <property name="orientation">
-         <enum>Qt::Horizontal</enum>
-        </property>
-       </spacer>
-      </item>
-      <item>
-       <widget class="QLabel" name="auroraKpLabel">
-        <property name="text">
-         <string>Geomagnetic activity Kp:</string>
-        </property>
-       </widget>
-      </item>
-      <item>
-       <widget class="QDoubleSpinBox" name="auroraKpDoubleSpinBox">
-        <property name="toolTip">
-         <string>The planetary index Kp: 0-2 quiet, 3-4 active, 5-6 storm, 7-9 strong to extreme storm</string>
-        </property>
-        <property name="alignment">
-         <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
-        </property>
-        <property name="decimals">
-         <number>1</number>
-        </property>
-        <property name="maximum">
-         <double>9.000000000000000</double>
-        </property>
-        <property name="singleStep">
-         <double>1.000000000000000</double>
-        </property>
-        <property name="value">
-         <double>3.000000000000000</double>
-        </property>
-       </widget>
-      </item>
-     </layout>
-    </widget>
-   </item>
-   <item>
     <widget class="QGroupBox" name="groupBox_experimental">
      <property name="title">
       <string>Experimental</string>
@@ -618,9 +553,6 @@
   <tabstop>temperatureDoubleSpinBox</tabstop>
   <tabstop>extinctionDoubleSpinBox</tabstop>
   <tabstop>standardAtmosphereButton</tabstop>
-  <tabstop>auroraCheckBox</tabstop>
-  <tabstop>auroraOvalCheckBox</tabstop>
-  <tabstop>auroraKpDoubleSpinBox</tabstop>
   <tabstop>checkBox_noScatter</tabstop>
   <tabstop>checkBox_TfromK</tabstop>
   <tabstop>doubleSpinBox_T</tabstop>

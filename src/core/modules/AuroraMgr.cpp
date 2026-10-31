@@ -180,6 +180,7 @@ void AuroraMgr::setFlagShow(bool b)
 	if (b != flagShow)
 	{
 		flagShow = b;
+		StelApp::immediateSave("aurora/flag_show", b);
 		emit flagShowChanged(b);
 	}
 }
@@ -189,6 +190,7 @@ void AuroraMgr::setFlagShowOval(bool b)
 	if (b != flagShowOval)
 	{
 		flagShowOval = b;
+		StelApp::immediateSave("aurora/flag_show_oval", b);
 		emit flagShowOvalChanged(b);
 	}
 }
@@ -199,6 +201,7 @@ void AuroraMgr::setKp(double value)
 	if (!qFuzzyCompare(value + 1., kp + 1.))
 	{
 		kp = value;
+		StelApp::immediateSave("aurora/kp", value);
 		emit kpChanged(value);
 	}
 }
@@ -476,6 +479,7 @@ uniform highp vec3 auroraRedColor;   // per R of 630.0 nm (with 636.4 nm)
 uniform highp vec3 auroraPurpleColor; // per R of the first positive band of N2 (650-690 nm, with 427.8 nm)
 uniform highp float auroraTime;      // seconds since 0h UT
 uniform highp float auroraSeed;      // from the date
+uniform highp float auroraExposure;  // exposure time of the camera (s, 0: an instant): what changes faster is averaged
 uniform highp vec4 auroraSubstorm;   // onset (MLT, h), its spread in MLT (h), activity (0-1), poleward bulge (radians)
 uniform highp vec4 auroraState;      // equatorward drift of the arcs (radians), pulsating aurora (0-1), purple lower
                                      // border against the green (energetic electrons), unused
@@ -547,6 +551,11 @@ highp float auroraNoise(highp float x, highp float n, highp float y)
 	fy = fy*fy*(3. - 2.*fy);
 	return mix(mix(a, b, fx), mix(c, d, fx), fy);
 }
+// What is left of the contrast of a noise that changes in the time tau (s) in the exposure
+highp float exposed(highp float tau)
+{
+	return sqrt(tau/(tau + auroraExposure));
+}
 // Fold of the arcs: the shift of their latitude (radians) at the magnetic longitude lon (in turns), quiet and activity
 highp float arcFold(highp float lon, highp float activity, int j)
 {
@@ -554,7 +563,7 @@ highp float arcFold(highp float lon, highp float activity, int j)
 	highp float quiet = auroraNoise(lon*60. + o, 60., auroraTime/1500. + o) - 0.5;
 	highp float act = 0.7*(auroraNoise(lon*240. + auroraTime/400. + o, 240., auroraTime/40. + o) - 0.5)
 	                + 0.3*(auroraNoise(lon*900. + auroraTime/90. + o, 900., auroraTime/12. + o) - 0.5);
-	return mix(0.06*quiet, 0.5*act, activity)*PI/180.;
+	return mix(0.06*quiet*exposed(1500.), 0.5*act*exposed(30.), activity)*PI/180.;
 }
 // The rays: brightness against the mean (about 1) at the magnetic longitude lon (in turns), for the share of
 // rays in the arc; the cells are 0.04 and 0.012 degrees of longitude (2 and 0.7 km in the oval), and they drift
@@ -566,7 +575,7 @@ highp float arcRays(highp float lon, highp float rays, highp float span, int j)
 	              + 0.4*auroraNoise(lon*30000. - auroraTime/1.5 + o, 30000., auroraTime/0.8 + o);
 	// a piece of the line of sight that spans many rays sees their mean
 	highp float mean = smoothstep(2., 8., span*9000.);
-	return mix(1., mix(3.*r*r, 1., mean), rays);
+	return mix(1., mix(3.*r*r/0.84, 1., mean), rays*exposed(3.));
 }
 // Patches of pulsating aurora: brightness against the mean, the patches flicker on and off in a few seconds
 highp float pulsating(highp float lon, highp float lat, highp float amount)
@@ -577,7 +586,10 @@ highp float pulsating(highp float lon, highp float lat, highp float amount)
 	highp float phase = auroraNoise(lon*2400. + 7., 2400., lat*180./PI*8. + 11.);
 	highp float period = 4. + 8.*auroraNoise(lon*600. + 3., 600., lat*180./PI*2. + 5.);
 	highp float on = smoothstep(-0.3, 0.3, sin(2.*PI*(auroraTime/period + 5.*phase)));
-	return 1. + amount*patchMask*(2.*on - 1.);
+	// the mean over the exposure of the flicker (as of a sine)
+	highp float x = PI*auroraExposure/period;
+	highp float kept = x > 1e-3 ? abs(sin(x)/x) : 1.;
+	return 1. + amount*kept*patchMask*(2.*on - 1.);
 }
 
 void main(void)
@@ -747,8 +759,28 @@ void AuroraMgr::drawLight(StelCore* core, const Geometry& g)
 	const Vec3f purple = PurplePerRayleigh*scale;
 	p.setUniformValue("auroraPurpleColor", QVector3D(purple[0], purple[1], purple[2]));
 	// The forms and the substorm cycle from the time (UT)
+	// The camera averages what happens during its exposure (centered on the current time), unless it takes the
+	// picture of an instant
 	const double jd = core->getJD();
-	const Substorm sub = substorm(jd, kp);
+	const double exposure = drawer->getFlagPhotoStarTrails() ? std::max(0., drawer->getPhotoExposureTime()) : 0.;
+	Substorm sub = substorm(jd, kp);
+	if (exposure > 0.5)
+	{
+		constexpr int samples = 9;
+		Substorm mean = sub;
+		mean.spread = mean.activity = mean.bulge = mean.drift = mean.pulsating = 0.;
+		for (int i = 0; i < samples; ++i)
+		{
+			const Substorm s = substorm(jd + exposure*((i + 0.5)/samples - 0.5)/86400., kp);
+			mean.spread += s.spread/samples;
+			mean.activity += s.activity/samples;
+			mean.bulge += s.bulge/samples;
+			mean.drift += s.drift/samples;
+			mean.pulsating += s.pulsating/samples;
+		}
+		sub = mean;
+	}
+	p.setUniformValue("auroraExposure", static_cast<float>(exposure));
 	p.setUniformValue("auroraTime", static_cast<float>(86400.*(jd + 0.5 - std::floor(jd + 0.5))));
 	p.setUniformValue("auroraSeed", static_cast<float>(std::fmod(std::floor(jd + 0.5), 997.)));
 	p.setUniformValue("auroraSubstorm", QVector4D(static_cast<float>(sub.onsetMLT), static_cast<float>(sub.spread),

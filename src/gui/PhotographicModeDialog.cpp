@@ -330,6 +330,9 @@ void PhotographicModeDialog::createDialogContent()
 	connectBoolProperty(ui->infoLineCheckBox,         "StelSkyDrawer.flagPhotoInfoLine");
 	connectBoolProperty(ui->extinctionColorCheckBox,  "StelSkyDrawer.flagPhotoExtinctionColor");
 	connectBoolProperty(ui->airglowCheckBox,          "StelSkyDrawer.flagPhotoAirglow");
+	connectBoolProperty(ui->auroraCheckBox,           "AuroraMgr.flagShow");
+	connectBoolProperty(ui->auroraOvalCheckBox,       "AuroraMgr.flagShowOval");
+	connectDoubleProperty(ui->auroraKpDoubleSpinBox,  "AuroraMgr.kp");
 	connectBoolProperty(ui->filmSpectralSkyCheckBox,  "StelSkyDrawer.flagPhotoFilmSpectralSky");
 	connectBoolProperty(ui->programApertureLockCheckBox, "StelSkyDrawer.flagPhotoProgramApertureLock");
 	connect(drawer, &StelSkyDrawer::flagPhotoProgramApertureLockChanged, this, &PhotographicModeDialog::updateCameraWidgets);
