@@ -336,11 +336,14 @@ void PhotographicModeDialog::createDialogContent()
 	// The aurorae: the activity is a preset or a custom Kp; the substorm cycle shows where it stands
 	connectIntProperty(ui->auroraActivityComboBox,   "AuroraMgr.kpPreset");
 	connectDoubleProperty(ui->auroraKpDoubleSpinBox,  "AuroraMgr.kpCustom");
+	connectDoubleProperty(ui->auroraDstDoubleSpinBox, "AuroraMgr.dstCustom");
 	{
 		auto updateActivity = [this](){
-			const bool custom = ui->auroraActivityComboBox->currentIndex() == 4;
+			const bool custom = ui->auroraActivityComboBox->currentIndex() == AuroraMgr::KpPresetCustom;
 			ui->auroraKpDoubleSpinBox->setEnabled(custom);
 			ui->auroraKpLabel->setEnabled(custom);
+			ui->auroraDstDoubleSpinBox->setEnabled(custom);
+			ui->auroraDstLabel->setEnabled(custom);
 		};
 		connect(ui->auroraActivityComboBox, qOverload<int>(&QComboBox::currentIndexChanged), this, updateActivity);
 		updateActivity();

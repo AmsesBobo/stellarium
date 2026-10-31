@@ -39,7 +39,10 @@ class QOpenGLVertexArrayObject;
 //! ovals is the one of Starkov (1994): the poleward and equatorward boundaries of the discrete aurora and the
 //! equatorward boundary of the diffuse aurora, in geomagnetic latitude, as Fourier series of the magnetic local time
 //! whose coefficients follow the auroral electrojet index AL; AL comes from the planetary index Kp (Starkov 1994).
-//! The geomagnetic coordinates are those of the dipole of the IGRF (the pole interpolated in time, 1900 to 2030).
+//! The geomagnetic coordinates are the corrected ones of the aurora research (AACGM-v2), which follow the real field of
+//! the Earth: they come from those of the dipole of the IGRF (the pole interpolated in time, 1900 to 2030) with a
+//! fitted displacement (see AuroraCorrection.hpp); off the dipole the aurorae of Iceland, Europe and Tasmania lie
+//! 2 to 5 degrees off.
 //!
 //! The light is emitted in a shell 80 to 600 km above a spherical Earth: the green line of oxygen (557.7 nm) with
 //! the blue band of nitrogen ions (427.8 nm) around 110 km, the red lines of oxygen (630.0 and 636.4 nm) higher up.
@@ -65,10 +68,14 @@ class AuroraMgr : public StelModule
 	Q_PROPERTY(bool flagShow READ getFlagShow WRITE setFlagShow NOTIFY flagShowChanged)
 	//! Draw the auroral ovals as lines (a guide to their position)
 	Q_PROPERTY(bool flagShowOval READ getFlagShowOval WRITE setFlagShowOval NOTIFY flagShowOvalChanged)
-	//! The geomagnetic activity: 0 quiet (Kp 1), 1 moderate (Kp 3), 2 storm (Kp 6), 3 extreme storm (Kp 9), 4 custom (kpCustom)
+	//! The geomagnetic activity: 0 quiet (Kp 1), 1 moderate (Kp 3), 2 storm (Kp 6), 3 extreme storm (Kp 9, Dst -250 nT),
+	//! 4 superstorm (as in May 2024: Kp 9, Dst -412 nT), 5 custom (kpCustom, dstCustom)
 	Q_PROPERTY(int kpPreset READ getKpPreset WRITE setKpPreset NOTIFY kpPresetChanged)
 	//! The planetary geomagnetic activity index Kp of the custom activity (0 quiet to 9 extreme storm)
 	Q_PROPERTY(double kpCustom READ getKpCustom WRITE setKpCustom NOTIFY kpCustomChanged)
+	//! The storm index Dst (nT, 0 or negative) of the custom activity: the ring current of a great storm, which widens
+	//! the ovals beyond what Kp gives (the Kp scale ends at 9)
+	Q_PROPERTY(double dstCustom READ getDstCustom WRITE setDstCustom NOTIFY dstCustomChanged)
 	//! The planetary geomagnetic activity index Kp in use (setting it makes the activity custom)
 	Q_PROPERTY(double kp READ getKp WRITE setKp NOTIFY kpChanged)
 	//! Where the substorm cycle stands now and when the next onset comes (for the user interface)
@@ -88,18 +95,30 @@ public:
 	int getKpPreset() const {return kpPreset;}
 	double getKpCustom() const {return kpCustom;}
 	double getKp() const;
+	double getDstCustom() const {return dstCustom;}
+	//! The storm index Dst in use (nT)
+	double getDst() const;
 	QString getSubstormInfo() const {return substormInfo;}
-	//! The Kp of the presets of the activity (kpPreset)
-	static constexpr double KpPresets[4] = {1., 3., 6., 9.};
+	//! The Kp and Dst (nT) of the presets of the activity (kpPreset); the last one is the custom activity
+	static constexpr double KpPresets[5] = {1., 3., 6., 9., 9.};
+	static constexpr double DstPresets[5] = {-5., -20., -80., -250., -412.};
+	static constexpr int KpPresetCustom = 5;
 
 	//! The boundaries of the auroral oval at the magnetic local time mlt (hours, 0 at magnetic midnight) for the
-	//! index kp: geomagnetic latitudes (degrees) of the poleward and equatorward boundaries of the discrete aurora and
-	//! of the equatorward boundary of the diffuse aurora (Starkov 1994)
+	//! index kp: corrected geomagnetic latitudes (degrees) of the poleward and equatorward boundaries of the discrete
+	//! aurora and of the equatorward boundary of the diffuse aurora (Starkov 1994). The model of Starkov stops widening
+	//! at Kp 9; in great storms the ring current (Dst, nT) widens the ovals further: the equatorward boundary of the
+	//! auroral belt at midnight lies near 65 degrees in quiet times, near 52.5 at Dst -100 nT and moves another 6-7
+	//! degrees towards the equator per 100 nT (Yokoyama et al. 1998, Ann. Geophys. 16, 566), as in May 2024 (Dst -412,
+	//! the aurora down to about 30 degrees; Hayakawa et al. 2025, ApJ 979, 49).
 	struct OvalBoundaries
 	{
 		double poleward = 0., equatorward = 0., diffuse = 0.;
 	};
-	static OvalBoundaries ovalBoundaries(double kp, double mlt);
+	static OvalBoundaries ovalBoundaries(double kp, double mlt, double dst = 0.);
+	//! How far a great storm (dst, nT) moves the equatorward boundary of the diffuse aurora at midnight towards the
+	//! equator, beyond the oval of Starkov for kp (degrees, 0 when the storm is not great enough)
+	static double stormShift(double kp, double dst);
 	//! The geomagnetic (dipole) north pole at the given Julian day: latitude and longitude (degrees, east positive)
 	static void dipolePole(double jd, double& latitude, double& longitude);
 
@@ -110,7 +129,7 @@ public:
 	{
 		double arcGreen = 0., diffuseGreen = 0., redRatio = 0., redHeight = 0.;
 	};
-	static Emission emission(double kp);
+	static Emission emission(double kp, double dst = 0.);
 
 	//! The substorm cycle at the Julian day jd (UT) for the index kp. A substorm comes every 1.7 to 3.5 hours (more
 	//! often in storms): in the growth phase the arcs drift towards the equator; at the onset, near magnetic midnight,
@@ -137,6 +156,7 @@ public slots:
 	void setKpPreset(int preset);
 	void setKpCustom(double value);
 	void setKp(double value);
+	void setDstCustom(double value);
 
 signals:
 	void flagShowChanged(bool b);
@@ -144,6 +164,7 @@ signals:
 	void kpPresetChanged(int preset);
 	void kpCustomChanged(double value);
 	void kpChanged(double value);
+	void dstCustomChanged(double value);
 	void substormInfoChanged(const QString& info);
 
 private:
@@ -151,6 +172,7 @@ private:
 	bool flagShowOval = false;
 	int kpPreset = 1;
 	double kpCustom = 3.;
+	double dstCustom = -20.;
 	QString substormInfo;
 
 	//! The geomagnetic frame (axes in Earth-fixed geographic coordinates) at the given Julian day
@@ -164,6 +186,20 @@ private:
 		}
 	};
 	static MagneticFrame magneticFrame(double jd);
+
+	//! The corrected geomagnetic coordinates (AACGM-v2) of the aurorae: the displacement from the dipole coordinates
+	//! (see AuroraCorrection.hpp) for the year, and a map of it over the Earth for the shader (2 degrees)
+	void updateCorrection(double year);
+	//! The displacement (northward and eastward, degrees) at the geographic latitude and longitude (radians)
+	Vec2d correctionAt(double lat, double lon) const;
+	//! The point of the geomagnetic frame (unit vector, Earth-fixed) at the corrected geomagnetic latitude and
+	//! longitude (radians) of its footprint at 115 km, raised along the dipole field line to the height h (km)
+	Vec3d correctedToGeographic(const MagneticFrame& frame, double lat, double lon, double h) const;
+	double correctionYear = -1e9;
+	std::vector<double> correctionN, correctionE;
+	std::vector<float> correctionMap;
+	unsigned int correctionTexture = 0;
+	bool correctionTextureStale = true;
 	//! The observer and the Sun in the Earth-fixed frame
 	struct Geometry
 	{

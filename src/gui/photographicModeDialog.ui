@@ -1263,7 +1263,7 @@
           <item row="1" column="1">
            <widget class="QComboBox" name="auroraActivityComboBox">
             <property name="toolTip">
-             <string>The geomagnetic activity, by the planetary index Kp (0 to 9): it sets the size of the ovals, the brightness of the aurorae and how often substorms come. Quiet: the oval over the far north (northern Norway, Iceland). Moderate: often seen from northern Scandinavia. Storm: low in the north from southern Sweden. Extreme storm: as in May 2024 (the model stops widening at Kp 9).</string>
+             <string>The geomagnetic activity, by the planetary index Kp (0 to 9): it sets the size of the ovals, the brightness of the aurorae and how often substorms come. Quiet: the oval over the far north (northern Norway, Iceland). Moderate: often seen from northern Scandinavia. Storm: low in the north from southern Sweden. Extreme storm: Kp 9 with Dst -250 nT, the aurora overhead in southern Scandinavia. Superstorm: as on 10-11 May 2024 (Kp 9, Dst -412 nT), aurorae as far as Spain and Mexico.</string>
             </property>
             <item>
              <property name="text">
@@ -1283,6 +1283,11 @@
             <item>
              <property name="text">
               <string>Extreme storm (Kp 9)</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Superstorm (May 2024)</string>
              </property>
             </item>
             <item>
@@ -1321,7 +1326,39 @@
             </property>
            </widget>
           </item>
-          <item row="3" column="0" colspan="2">
+          <item row="3" column="0">
+           <widget class="QLabel" name="auroraDstLabel">
+            <property name="text">
+             <string>Dst (nT):</string>
+            </property>
+           </widget>
+          </item>
+          <item row="3" column="1">
+           <widget class="QDoubleSpinBox" name="auroraDstDoubleSpinBox">
+            <property name="toolTip">
+             <string>The storm index Dst of the custom activity: the ring current of a great storm, which widens the auroral ovals beyond what Kp gives (the Kp scale ends at 9). About -50 nT in a moderate storm, -100 to -200 nT in a strong one, -250 to -400 nT in the greatest storms of a solar cycle (May 2024: -412 nT, aurorae down to about 30 degrees of magnetic latitude).</string>
+            </property>
+            <property name="alignment">
+             <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+            </property>
+            <property name="decimals">
+             <number>0</number>
+            </property>
+            <property name="minimum">
+             <double>-1000.000000000000000</double>
+            </property>
+            <property name="maximum">
+             <double>0.000000000000000</double>
+            </property>
+            <property name="singleStep">
+             <double>10.000000000000000</double>
+            </property>
+            <property name="value">
+             <double>-20.000000000000000</double>
+            </property>
+           </widget>
+          </item>
+          <item row="4" column="0" colspan="2">
            <widget class="QLabel" name="auroraSubstormLabel">
             <property name="toolTip">
              <string>Where the substorm cycle stands at the current time: a growth phase with calm arcs, the onset and expansion (bright, folded aurorae with rays, about a quarter of an hour, strongest near magnetic midnight), and the recovery with pulsating aurora. The cycles come from the date and time.</string>

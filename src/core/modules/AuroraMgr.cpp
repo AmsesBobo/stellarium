@@ -18,6 +18,7 @@
  */
 
 #include "AuroraMgr.hpp"
+#include "AuroraCorrection.hpp"
 #include "StelApp.hpp"
 #include "StelCore.hpp"
 #include "StelLocation.hpp"
@@ -40,6 +41,10 @@
 #include <cmath>
 #include <array>
 #include <algorithm>
+
+#ifndef GL_RGB32F
+#define GL_RGB32F 0x8815
+#endif
 
 namespace
 {
@@ -136,9 +141,20 @@ AuroraMgr::~AuroraMgr()
 void AuroraMgr::init()
 {
 	QSettings* conf = StelApp::getInstance().getSettings();
-	// The activity: a preset, or the custom Kp (a setting from before the presets is custom)
+	// The activity: a preset, or the custom Kp and Dst (a setting from before the presets is custom; the custom
+	// preset was 4 before the superstorm)
 	setKpCustom(conf->value("aurora/kp", 3.).toDouble());
-	setKpPreset(conf->value("aurora/kp_preset", conf->contains("aurora/kp") ? 4 : 1).toInt());
+	setDstCustom(conf->value("aurora/dst", -20.).toDouble());
+	int preset = conf->contains("aurora/kp") ? KpPresetCustom : 1;
+	if (conf->contains("aurora/activity"))
+		preset = conf->value("aurora/activity").toInt();
+	else if (conf->contains("aurora/kp_preset"))
+	{
+		preset = conf->value("aurora/kp_preset").toInt();
+		if (preset == 4)
+			preset = KpPresetCustom;
+	}
+	setKpPreset(preset);
 	setFlagShow(conf->value("aurora/flag_show", false).toBool());
 	setFlagShowOval(conf->value("aurora/flag_show_oval", false).toBool());
 	addAction("actionShow_Aurora", N_("Display Options"), N_("Aurorae"), "flagShow");
@@ -221,17 +237,22 @@ void AuroraMgr::setFlagShowOval(bool b)
 
 double AuroraMgr::getKp() const
 {
-	return kpPreset >= 0 && kpPreset < 4 ? KpPresets[kpPreset] : kpCustom;
+	return kpPreset >= 0 && kpPreset < KpPresetCustom ? KpPresets[kpPreset] : kpCustom;
+}
+
+double AuroraMgr::getDst() const
+{
+	return kpPreset >= 0 && kpPreset < KpPresetCustom ? DstPresets[kpPreset] : dstCustom;
 }
 
 void AuroraMgr::setKpPreset(int preset)
 {
-	preset = std::clamp(preset, 0, 4);
+	preset = std::clamp(preset, 0, KpPresetCustom);
 	if (preset == kpPreset)
 		return;
 	const double old = getKp();
 	kpPreset = preset;
-	StelApp::immediateSave("aurora/kp_preset", preset);
+	StelApp::immediateSave("aurora/activity", preset);
 	emit kpPresetChanged(preset);
 	if (!qFuzzyCompare(old + 1., getKp() + 1.))
 		emit kpChanged(getKp());
@@ -253,10 +274,20 @@ void AuroraMgr::setKpCustom(double value)
 void AuroraMgr::setKp(double value)
 {
 	setKpCustom(value);
-	setKpPreset(4);
+	setKpPreset(KpPresetCustom);
 }
 
-AuroraMgr::Emission AuroraMgr::emission(double kp)
+void AuroraMgr::setDstCustom(double value)
+{
+	value = std::clamp(value, -1000., 0.);
+	if (qFuzzyCompare(value - 1., dstCustom - 1.))
+		return;
+	dstCustom = value;
+	StelApp::immediateSave("aurora/dst", value);
+	emit dstCustomChanged(value);
+}
+
+AuroraMgr::Emission AuroraMgr::emission(double kp, double dst)
 {
 	kp = std::clamp(kp, 0., 9.);
 	Emission e;
@@ -267,10 +298,23 @@ AuroraMgr::Emission AuroraMgr::emission(double kp)
 	e.diffuseGreen = 500.*std::pow(2., kp/3.);
 	e.redRatio = 0.15 + 0.05*kp;
 	e.redHeight = 220. + 8.*kp;
+	// The aurorae of great storms far from the poles are mostly red, from soft electrons, and high
+	const double storm = std::clamp(stormShift(kp, dst)/20., 0., 1.);
+	e.redRatio += 0.8*storm;
+	e.redHeight += 60.*storm;
 	return e;
 }
 
-AuroraMgr::OvalBoundaries AuroraMgr::ovalBoundaries(double kp, double mlt)
+double AuroraMgr::stormShift(double kp, double dst)
+{
+	dst = std::clamp(dst, -1000., 0.);
+	// the equatorward boundary of the auroral belt at midnight (Yokoyama et al. 1998), at least 25 degrees
+	const double boundary = std::max(25., dst >= -100. ? 65. + 0.125*dst : 52.5 + 0.065*(dst + 100.));
+	const double x = std::log10(std::max(1., std::fabs(18. - 12.3*kp + 27.2*kp*kp - 2.*kp*kp*kp)));
+	return std::max(0., starkovLatitude(starkovDiffuse, x, 0.) - boundary);
+}
+
+AuroraMgr::OvalBoundaries AuroraMgr::ovalBoundaries(double kp, double mlt, double dst)
 {
 	kp = std::clamp(kp, 0., 9.);
 	const double al = 18. - 12.3*kp + 27.2*kp*kp - 2.*kp*kp*kp;
@@ -279,6 +323,11 @@ AuroraMgr::OvalBoundaries AuroraMgr::ovalBoundaries(double kp, double mlt)
 	b.poleward = starkovLatitude(starkovPoleward, x, mlt);
 	b.equatorward = starkovLatitude(starkovEquatorward, x, mlt);
 	b.diffuse = starkovLatitude(starkovDiffuse, x, mlt);
+	// A great storm moves the oval towards the equator, most on the night side; the poleward boundary half as much
+	const double shift = stormShift(kp, dst)*(0.7 + 0.3*std::cos(mlt*M_PI/12.));
+	b.poleward -= 0.5*shift;
+	b.equatorward -= shift;
+	b.diffuse -= shift;
 	return b;
 }
 
@@ -367,6 +416,106 @@ AuroraMgr::Substorm AuroraMgr::substorm(double jd, double kp)
 	return s;
 }
 
+namespace
+{
+// Fully normalized associated Legendre functions P(n,m) of sin(lat) up to the degree of AuroraCorrection, and the
+// terms of its series at the longitude lon, in its order
+void correctionTerms(double lat, double lon, std::array<double, AuroraCorrection::Terms>& terms)
+{
+	constexpr int N = AuroraCorrection::Degree;
+	double P[N + 1][N + 1] = {};
+	const double s = std::sin(lat), c = std::cos(lat);
+	P[0][0] = 1.;
+	P[1][1] = std::sqrt(3.)*c;
+	for (int m = 2; m <= N; ++m)
+		P[m][m] = std::sqrt((2.*m + 1.)/(2.*m))*c*P[m-1][m-1];
+	for (int m = 0; m < N; ++m)
+		P[m+1][m] = std::sqrt(2.*m + 3.)*s*P[m][m];
+	for (int m = 0; m <= N; ++m)
+		for (int n = m + 2; n <= N; ++n)
+		{
+			const double a = std::sqrt((2.*n - 1.)*(2.*n + 1.)/((n - m)*(n + m)));
+			const double b = std::sqrt((2.*n + 1.)*(n + m - 1.)*(n - m - 1.)/((n - m)*(n + m)*(2.*n - 3.)));
+			P[n][m] = a*s*P[n-1][m] - b*P[n-2][m];
+		}
+	size_t k = 0;
+	for (int n = 0; n <= N; ++n)
+	{
+		terms[k++] = P[n][0];
+		for (int m = 1; m <= n; ++m)
+		{
+			terms[k++] = P[n][m]*std::cos(m*lon);
+			terms[k++] = P[n][m]*std::sin(m*lon);
+		}
+	}
+}
+}
+
+void AuroraMgr::updateCorrection(double year)
+{
+	if (std::fabs(year - correctionYear) < 0.1)
+		return;
+	correctionYear = year;
+	// The coefficients for the year, between the epochs (before and after them as at the first and the last one)
+	using namespace AuroraCorrection;
+	int i = 0;
+	while (i < Epochs - 2 && year > Years[i + 1])
+		++i;
+	const double f = std::clamp((year - Years[i])/(Years[i + 1] - Years[i]), 0., 1.);
+	correctionN.assign(Terms, 0.);
+	correctionE.assign(Terms, 0.);
+	for (int k = 0; k < Terms; ++k)
+	{
+		correctionN[static_cast<size_t>(k)] = (1. - f)*AuroraCorrection::Coefficients[i][0][k] + f*AuroraCorrection::Coefficients[i + 1][0][k];
+		correctionE[static_cast<size_t>(k)] = (1. - f)*AuroraCorrection::Coefficients[i][1][k] + f*AuroraCorrection::Coefficients[i + 1][1][k];
+	}
+	// The map: 180 longitudes (from -179 degrees) by 91 latitudes (from -90 degrees), 2 degrees apart
+	correctionMap.assign(180*91*3, 0.f);
+	std::array<double, Terms> terms;
+	for (int row = 0; row < 91; ++row)
+		for (int col = 0; col < 180; ++col)
+		{
+			correctionTerms((-90. + 2.*row)*M_PI/180., (-179. + 2.*col)*M_PI/180., terms);
+			double dn = 0., de = 0.;
+			for (size_t k = 0; k < terms.size(); ++k)
+			{
+				dn += correctionN[k]*terms[k];
+				de += correctionE[k]*terms[k];
+			}
+			const size_t p = static_cast<size_t>(3*(row*180 + col));
+			correctionMap[p] = static_cast<float>(dn);
+			correctionMap[p + 1] = static_cast<float>(de);
+		}
+	correctionTextureStale = true;
+}
+
+Vec2d AuroraMgr::correctionAt(double lat, double lon) const
+{
+	std::array<double, AuroraCorrection::Terms> terms;
+	correctionTerms(lat, lon, terms);
+	Vec2d d(0., 0.);
+	for (size_t k = 0; k < terms.size() && k < correctionN.size(); ++k)
+	{
+		d[0] += correctionN[k]*terms[k];
+		d[1] += correctionE[k]*terms[k];
+	}
+	return d;
+}
+
+Vec3d AuroraMgr::correctedToGeographic(const MagneticFrame& frame, double lat, double lon, double h) const
+{
+	// The dipole coordinates of the footprint: the corrected ones less the displacement where the footprint is
+	double latD = lat, lonD = lon;
+	for (int i = 0; i < 4; ++i)
+	{
+		const Vec3d v = frame.toGeographic(latD, lonD);
+		const Vec2d d = correctionAt(std::asin(std::clamp(v[2], -1., 1.)), std::atan2(v[1], v[0]))*(M_PI/180.);
+		latD = lat - d[0];
+		lonD = lon - d[1]/std::max(std::cos(latD), 0.1);
+	}
+	return frame.toGeographic(alongFieldLine(latD, h), lonD);
+}
+
 AuroraMgr::Geometry AuroraMgr::computeGeometry(const StelCore* core) const
 {
 	Geometry g;
@@ -412,7 +561,7 @@ std::vector<AuroraMgr::OvalLine> AuroraMgr::computeOvalLines(const Geometry& g) 
 
 	std::array<OvalBoundaries, PointsPerLine+1> boundaries;
 	for (int i = 0; i <= PointsPerLine; ++i)
-		boundaries[static_cast<size_t>(i)] = ovalBoundaries(kp, 24.*i/PointsPerLine);
+		boundaries[static_cast<size_t>(i)] = ovalBoundaries(kp, 24.*i/PointsPerLine, getDst());
 
 	for (const double hemisphere : {1., -1.})
 	{
@@ -427,9 +576,8 @@ std::vector<AuroraMgr::OvalLine> AuroraMgr::computeOvalLines(const Geometry& g) 
 				const double mlt = 24.*i/PointsPerLine;
 				const OvalBoundaries& b = boundaries[static_cast<size_t>(i)];
 				const double latDeg = spec.boundary == 0 ? b.poleward : (spec.boundary == 1 ? b.equatorward : b.diffuse);
-				const double lat = alongFieldLine(hemisphere*latDeg*M_PI/180., spec.height);
 				const double lon = g.sunMagLon + (mlt - 12.)*M_PI/12.;
-				const Vec3d point = g.frame.toGeographic(lat, lon) * (EarthRadius + spec.height);
+				const Vec3d point = correctedToGeographic(g.frame, hemisphere*latDeg*M_PI/180., lon, spec.height)*(EarthRadius + spec.height);
 
 				// In sight unless the line of sight passes below the surface of the Earth
 				const Vec3d d = point - g.observer;
@@ -453,6 +601,7 @@ void AuroraMgr::draw(StelCore* core)
 	if (core->getCurrentPlanet()->getEnglishName() != QStringLiteral("Earth"))
 		return;
 	const Geometry g = computeGeometry(core);
+	updateCorrection(2000. + (core->getJD() - 2451545.0)/365.25);
 	if (flagShow)
 		drawLight(core, g);
 	if (flagShowOval)
@@ -526,6 +675,11 @@ uniform highp vec3 auroraUp;
 uniform highp vec3 auroraObserver;   // km
 uniform highp float auroraSunLon;    // geomagnetic longitude of the Sun (radians)
 uniform highp vec4 auroraOval[49];   // poleward, equatorward, diffuse boundary at 115 km (radians), MLT 0, 0.5, ... 24 h
+uniform highp vec3 auroraGeoX;       // the axes of the geomagnetic frame in the geographic one
+uniform highp vec3 auroraGeoY;
+uniform highp vec3 auroraGeoZ;
+uniform sampler2D auroraCorrectionMap; // displacement to the corrected geomagnetic coordinates (degrees, north and
+                                       // east) over the geographic latitude and longitude
 uniform highp vec4 auroraEmission;   // green (R) of the main arc, of the diffuse aurora; red against green; red peak (km)
 uniform highp vec3 auroraGreenColor; // scene buffer per R of 557.7 nm
 uniform highp vec3 auroraRedColor;   // per R of 630.0 nm (with 636.4 nm)
@@ -569,6 +723,20 @@ highp float shellFade(highp float h)
 highp float greenQuenching(highp float h)
 {
 	return smoothstep(95., 108., h);
+}
+// The corrected geomagnetic coordinates of a point p: the absolute latitude (radians) of its footprint at 115 km and
+// its longitude (turns), from the dipole ones and the displacement at its geographic place
+highp float footLatitude(highp vec3 p);
+highp vec2 magneticCoordinates(highp vec3 p)
+{
+	highp float r = length(p);
+	highp vec3 g = p.x*auroraGeoX + p.y*auroraGeoY + p.z*auroraGeoZ;
+	highp vec2 tc = vec2(atan(g.y, g.x)/(2.*PI) + 0.5, (asin(clamp(g.z/r, -1., 1.))/PI + 0.5)*(90./91.) + 0.5/91.);
+	highp vec2 d = texture2D(auroraCorrectionMap, tc).xy*(PI/180.);
+	highp float sinLat = p.z/r;
+	highp float lat = (p.z < 0. ? -1. : 1.)*footLatitude(p) + d.x;
+	highp float lon = atan(p.y, p.x) + d.y/max(sqrt(1. - sinLat*sinLat), 0.1);
+	return vec2(abs(lat), lon/(2.*PI));
 }
 // Absolute geomagnetic latitude at 115 km of the dipole field line through p: r = L cos^2(lat)
 highp float footLatitude(highp vec3 p)
@@ -725,9 +893,9 @@ void main(void)
 	// A line of sight that stays equatorward of the aurorae (seen from low latitudes, or towards the equator)
 	{
 		highp float rb = EARTH_RADIUS + SHELL_BOTTOM, rt = EARTH_RADIUS + SHELL_TOP, rm = EARTH_RADIUS + 200.;
-		highp float lat0 = footLatitude(p0 + (-b + sqrt(b*b - r0*r0 + rb*rb))*dir);
-		highp float lat1 = footLatitude(p0 + (-b + sqrt(b*b - r0*r0 + rm*rm))*dir);
-		highp float lat2 = footLatitude(p0 + (-b + sqrt(b*b - r0*r0 + rt*rt))*dir);
+		highp float lat0 = magneticCoordinates(p0 + (-b + sqrt(b*b - r0*r0 + rb*rb))*dir).x;
+		highp float lat1 = magneticCoordinates(p0 + (-b + sqrt(b*b - r0*r0 + rm*rm))*dir).x;
+		highp float lat2 = magneticCoordinates(p0 + (-b + sqrt(b*b - r0*r0 + rt*rt))*dir).x;
 		if (max(lat0, max(lat1, lat2)) < auroraState.w)
 		{
 			FRAG_COLOR = vec4(0);
@@ -745,8 +913,9 @@ void main(void)
 		highp float rh = EARTH_RADIUS + h;
 		highp float t = -b + sqrt(max(b*b - r0*r0 + rh*rh, 0.));
 		highp vec3 p = p0 + t*dir;
-		highp float lat = footLatitude(p);
-		highp float lon = atan(p.y, p.x)/(2.*PI); // in turns
+		highp vec2 m = magneticCoordinates(p);
+		highp float lat = m.x;
+		highp float lon = m.y; // in turns
 		highp vec3 x = arcOffsets(lat, lon);
 		if (k > 0)
 		{
@@ -859,11 +1028,11 @@ void AuroraMgr::drawLight(StelCore* core, const Geometry& g)
 	std::array<QVector4D, 49> oval;
 	for (size_t i = 0; i < oval.size(); ++i)
 	{
-		const OvalBoundaries b = ovalBoundaries(kp, 0.5*static_cast<double>(i));
+		const OvalBoundaries b = ovalBoundaries(kp, 0.5*static_cast<double>(i), getDst());
 		oval[i] = QVector4D(static_cast<float>(b.poleward*M_PI/180.), static_cast<float>(b.equatorward*M_PI/180.),
 		                    static_cast<float>(b.diffuse*M_PI/180.), 0.f);
 	}
-	const Emission e = emission(kp);
+	const Emission e = emission(kp, getDst());
 	const float scale = drawer->getPhotoSceneScale();
 	const Vec3f green = GreenPerRayleigh*scale;
 	const Vec3f red = RedPerRayleigh*scale;
@@ -875,6 +1044,29 @@ void AuroraMgr::drawLight(StelCore* core, const Geometry& g)
 	prj->setUnProjectUniforms(p);
 	extinction.setForwardTransformUniforms(p);
 	drawer->setPhotoExtinctionUniforms(p, 1);
+	// The corrected geomagnetic coordinates (texture unit 2)
+	{
+		auto& gl = *QOpenGLContext::currentContext()->functions();
+		gl.glActiveTexture(GL_TEXTURE2);
+		if (!correctionTexture)
+			gl.glGenTextures(1, &correctionTexture);
+		gl.glBindTexture(GL_TEXTURE_2D, correctionTexture);
+		if (correctionTextureStale)
+		{
+			gl.glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB32F, 180, 91, 0, GL_RGB, GL_FLOAT, correctionMap.data());
+			gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+			gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+			gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+			gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+			correctionTextureStale = false;
+		}
+		gl.glActiveTexture(GL_TEXTURE0);
+		p.setUniformValue("auroraCorrectionMap", 2);
+		const auto vec = [](const Vec3d& v) {return QVector3D(static_cast<float>(v[0]), static_cast<float>(v[1]), static_cast<float>(v[2]));};
+		p.setUniformValue("auroraGeoX", vec(g.frame.x));
+		p.setUniformValue("auroraGeoY", vec(g.frame.y));
+		p.setUniformValue("auroraGeoZ", vec(g.frame.z));
+	}
 	p.setUniformValue("extinctionEnabled", drawer->getFlagHasAtmosphere() && extinction.getExtinctionCoefficient() >= 0.01f);
 	p.setUniformValue("auroraSouth", toMag(-g.north));
 	p.setUniformValue("auroraEast", toMag(g.east));
