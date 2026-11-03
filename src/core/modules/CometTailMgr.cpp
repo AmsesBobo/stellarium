@@ -27,8 +27,15 @@
 #include "StelPainter.hpp"
 #include "StelProjector.hpp"
 #include "StelTranslator.hpp"
+#include "StelSkyDrawer.hpp"
+#include "StelOpenGL.hpp"
+#include "RefractionExtinction.hpp"
 
 #include <QSettings>
+#include <QOpenGLBuffer>
+#include <QOpenGLShaderProgram>
+#include <QOpenGLVertexArrayObject>
+#include <QVector4D>
 #include <cmath>
 #include <array>
 #include <algorithm>
@@ -66,6 +73,39 @@ constexpr int SynchronePoints = 40;
 constexpr double IonTailLength = 0.5;   // AU
 constexpr double GuideMagnitude = 8.;   // comets brighter than this get guide lines (and the selected one)
 constexpr double MaxDistance = 5.;      // AU from the Sun: no tails beyond
+
+// The light of the comets (photographic mode)
+constexpr double LightMagnitude = 10.;  // comets brighter than this get their light from this module
+constexpr int BetaCount = 40;           // grains: beta from 0.001 to 1 (logarithmic) ...
+constexpr int AgeCount = 80;            // ... and ages up to MaxGrainAge (quadratic: the young grains closer)
+constexpr double MaxGrainAge = 150.;    // days
+constexpr double KmPerAU = 1.495978707e8;
+// Speed of ejection of the grains: v0 sqrt(beta) / sqrt(r) (r in AU), about 0.55 km/s for the smallest grains at
+// 1 AU (Whipple 1951 scaled to the observed expansion of dust envelopes)
+constexpr double EjectionSpeed = 0.55*86400./KmPerAU; // AU/day
+constexpr double DustFraction = 0.5;    // share of the dust in the light of the coma (visual)
+constexpr double DustAperture = 1e5/KmPerAU;   // the coma in which the dust gives its share of the magnitude (AU)
+constexpr double GasScaleLength = 8e4/KmPerAU; // Haser scale length of C2 at 1 AU (AU, grows with r^2)
+constexpr double IlluminanceMag0 = 2.54e-6;    // lux of a star of magnitude 0 (V)
+constexpr int FloatsPerVertex = 11;     // position 2, center 2, inverse 3, color 3, profile 1
+
+// The colors (linear sRGB, luminance 1): sunlight reddened a little by the dust; the Swan bands of C2 with CN and
+// the continuum, as cameras record comae (cyan-green)
+const Vec3f DustColor(1.07f, 0.99f, 0.89f);
+const Vec3f GasColor(0.2f/0.8065f, 1.f/0.8065f, 0.6f/0.8065f);
+
+// The phase function of cometary dust (Marcus 2007): two Henyey-Greenstein terms, forward (g 0.9) and backward
+// (g -0.6), as a function of the phase angle (radians)
+double dustPhase(double cosPhase)
+{
+	const auto hg = [](double g, double cosScatter) {
+		return (1. - g*g)/std::pow(1. + g*g - 2.*g*cosScatter, 1.5);
+	};
+	// the scattering angle is 180 degrees less the phase angle
+	return 0.95*hg(0.9, -cosPhase) + 0.05*hg(-0.6, -cosPhase);
+}
+// The formulas for the magnitude of comets hold for the usual phase angles: the dust is normalized at 45 degrees
+const double DustPhaseReference = dustPhase(std::cos(45.*M_PI/180.));
 }
 
 CometTailMgr::CometTailMgr()
@@ -81,6 +121,8 @@ void CometTailMgr::init()
 {
 	QSettings* conf = StelApp::getInstance().getSettings();
 	setFlagShowGuides(conf->value("comet_tails/flag_show_guides", false).toBool());
+	setFlagShow(conf->value("comet_tails/flag_show", true).toBool());
+	addAction("actionShow_Comet_Tails", N_("Display Options"), N_("Comet tails (photographic mode)"), "flagShow");
 	addAction("actionShow_Comet_Tail_Guides", N_("Display Options"), N_("Comet tail guide lines"), "flagShowGuides");
 }
 
@@ -99,6 +141,16 @@ void CometTailMgr::setFlagShowGuides(bool b)
 		flagShowGuides = b;
 		StelApp::immediateSave("comet_tails/flag_show_guides", b);
 		emit flagShowGuidesChanged(b);
+	}
+}
+
+void CometTailMgr::setFlagShow(bool b)
+{
+	if (b != flagShow)
+	{
+		flagShow = b;
+		StelApp::immediateSave("comet_tails/flag_show", b);
+		emit flagShowChanged(b);
 	}
 }
 
@@ -241,19 +293,336 @@ void CometTailMgr::drawGuides(StelCore* core, const Comet* comet) const
 	painter.setBlending(false);
 }
 
+double CometTailMgr::lightTime(const Comet* comet, double jde, const Vec3d& observer)
+{
+	Vec3d pos, vel;
+	comet->computePosition(jde, pos, vel);
+	double lt = (pos - observer).norm()*LightTimePerAU;
+	comet->computePosition(jde - lt, pos, vel);
+	return (pos - observer).norm()*LightTimePerAU;
+}
+
+bool CometTailMgr::drawsComet(const StelCore* core, const Comet* comet) const
+{
+	if (!flagShow || !core->getSkyDrawer()->getFlagPhotographicModeActive() || (splatProgramTried && !splatProgram))
+		return false;
+	if (core->getCurrentPlanet().data() == comet || !(comet->getVMagnitude(core) < LightMagnitude))
+		return false;
+	return comet->getHeliocentricEclipticPos().norm() < MaxDistance;
+}
+
+const CometTailMgr::DustGrid& CometTailMgr::dustGrid(const Comet* comet, double jde, double lightTime) const
+{
+	DustGrid& grid = grids[comet];
+	// The shape of the tail changes slowly: the grains are computed again after a quarter of an hour
+	if (std::fabs(jde - grid.jde) < 0.01 && grid.offsets.size() == BetaCount*AgeCount)
+		return grid;
+	grid.jde = jde;
+	grid.offsets.assign(BetaCount*AgeCount, Vec3d(0.));
+	grid.weights.assign(BetaCount*AgeCount, 0.f);
+	grid.spread.assign(BetaCount*AgeCount, 0.f);
+	const double t = jde - lightTime;
+	Vec3d nucleus, vel;
+	comet->computePosition(t, nucleus, vel);
+	for (int k = 0; k < AgeCount; ++k)
+	{
+		const double u = (k + 0.5)/AgeCount;
+		const double age = MaxGrainAge*u*u;
+		const double dAge = 2.*MaxGrainAge*u/AgeCount;
+		Vec3d pos;
+		comet->computePosition(t - age, pos, vel);
+		const double r = std::max(pos.norm(), 0.05);
+		// the production of dust falls with the distance from the Sun (about r^-3, from 4 AU on much faster)
+		const double production = std::pow(r, -3.)*(r > 4. ? std::exp(-(r - 4.)) : 1.);
+		for (int j = 0; j < BetaCount; ++j)
+		{
+			const double beta = std::pow(10., -3. + 3.*(j + 0.5)/BetaCount);
+			const int i = j*AgeCount + k;
+			grid.offsets[i] = propagate(pos, vel, SunMu*(1. - beta), age) - nucleus;
+			// grains of the size distribution n(s) ~ s^-3.5: their cross section per interval of ln(beta) ~ beta^0.5
+			grid.weights[i] = static_cast<float>(std::sqrt(beta)*production*dAge);
+			grid.spread[i] = static_cast<float>(EjectionSpeed*std::sqrt(beta/r)*age);
+		}
+	}
+	return grid;
+}
+
+bool CometTailMgr::initSplats()
+{
+	if (splatProgramTried)
+		return splatProgram != nullptr;
+	splatProgramTried = true;
+	const QByteArray vert = StelOpenGL::globalShaderPrefix(StelOpenGL::VERTEX_SHADER) + R"(
+ATTRIBUTE highp vec2 position; // window coordinates
+ATTRIBUTE highp vec2 center;
+ATTRIBUTE highp vec3 inverse;  // dust: the inverse covariance (xx, xy, yy, pixels); gas: scale length, softening
+ATTRIBUTE highp vec3 color;    // light in the scene at the center
+ATTRIBUTE highp float profile; // 0 Gaussian, 1 Haser
+uniform highp vec4 viewport;
+VARYING highp vec2 vOffset;
+VARYING highp vec3 vInverse;
+VARYING highp vec3 vColor;
+VARYING highp float vProfile;
+void main(void)
+{
+	vOffset = position - center;
+	vInverse = inverse;
+	vColor = color;
+	vProfile = profile;
+	gl_Position = vec4((position - viewport.xy)/viewport.zw*2. - 1., 0., 1.);
+}
+)";
+	const QByteArray frag = StelOpenGL::globalShaderPrefix(StelOpenGL::FRAGMENT_SHADER) + R"(
+VARYING highp vec2 vOffset;
+VARYING highp vec3 vInverse;
+VARYING highp vec3 vColor;
+VARYING highp float vProfile;
+void main(void)
+{
+	highp float f;
+	if (vProfile < 0.5)
+	{
+		highp float q = vInverse.x*vOffset.x*vOffset.x + 2.*vInverse.y*vOffset.x*vOffset.y + vInverse.z*vOffset.y*vOffset.y;
+		f = q < 18. ? exp(-0.5*q) : 0.;
+	}
+	else
+	{
+		// column density of the Haser model (one generation): 1/rho exp(-rho/L), softened in the central pixel
+		highp float rho = length(vOffset);
+		f = exp(-rho/vInverse.x)/sqrt(rho*rho + vInverse.y*vInverse.y);
+	}
+	FRAG_COLOR = vec4(vColor*f, 1.);
+}
+)";
+	std::unique_ptr<QOpenGLShaderProgram> program(new QOpenGLShaderProgram);
+	if (!program->addShaderFromSourceCode(QOpenGLShader::Vertex, vert)
+	    || !program->addShaderFromSourceCode(QOpenGLShader::Fragment, frag))
+	{
+		qWarning() << "CometTailMgr: cannot compile the shaders:" << program->log();
+		return false;
+	}
+	program->bindAttributeLocation("position", 0);
+	program->bindAttributeLocation("center", 1);
+	program->bindAttributeLocation("inverse", 2);
+	program->bindAttributeLocation("color", 3);
+	program->bindAttributeLocation("profile", 4);
+	if (!program->link())
+	{
+		qWarning() << "CometTailMgr: cannot link the shaders:" << program->log();
+		return false;
+	}
+	splatBuffer.reset(new QOpenGLBuffer(QOpenGLBuffer::VertexBuffer));
+	splatBuffer->create();
+	splatBuffer->setUsagePattern(QOpenGLBuffer::StreamDraw);
+	splatVao.reset(new QOpenGLVertexArrayObject);
+	splatVao->create();
+	splatProgram = std::move(program);
+	return true;
+}
+
+void CometTailMgr::drawLight(StelCore* core, const Comet* comet)
+{
+	StelSkyDrawer* drawer = core->getSkyDrawer();
+	const double jde = core->getJDE();
+	const Vec3d observer = core->getObserverHeliocentricEclipticPos();
+	const double lt = lightTime(comet, jde, observer);
+	Vec3d nucleus, vel;
+	comet->computePosition(jde - lt, nucleus, vel);
+	const DustGrid& grid = dustGrid(comet, jde, lt);
+
+	const StelProjectorP prj = core->getProjection(StelCore::FrameJ2000);
+	const double pixPerRad = static_cast<double>(prj->getPixelPerRadAtCenter());
+	const float sceneScale = drawer->getPhotoSceneScale();
+	const Extinction& extinction = drawer->getExtinction();
+	const bool withExtinction = drawer->getFlagHasAtmosphere() && extinction.getExtinctionCoefficient() >= 0.01f;
+	const bool withTint = withExtinction && drawer->getFlagPhotoExtinctionColorActive();
+	const auto transmission = [&](const Vec3d& j2000) {
+		if (!withExtinction)
+			return Vec3f(1.f);
+		Vec3d altAz = core->j2000ToAltAz(j2000, StelCore::RefractionOff);
+		altAz.normalize();
+		float mag = 0.f;
+		extinction.forward(altAz, &mag);
+		const float f = std::pow(10.f, -0.4f*mag);
+		return withTint ? drawer->getPhotoExtinctionTint(altAz)*f : Vec3f(f);
+	};
+	const double viewX = prj->getViewportPosX(), viewY = prj->getViewportPosY();
+	const double viewW = prj->getViewportWidth(), viewH = prj->getViewportHeight();
+
+	// The whole light of the comet, from its magnitude (illuminance in lux)
+	const double delta = (nucleus - observer).norm();
+	const double total = IlluminanceMag0*std::pow(10., -0.4*static_cast<double>(comet->getVMagnitude(core)));
+	Vec3d sight = nucleus - observer;
+	sight.normalize();
+
+	// The grains as seen now
+	const int n = BetaCount*AgeCount;
+	std::vector<Vec3d> win(n);
+	std::vector<char> valid(n, 0);
+	std::vector<double> light(n, 0.);
+	std::vector<Vec3d> direction(n);
+	double inside = 0.;
+	for (int i = 0; i < n; ++i)
+	{
+		const Vec3d& off = grid.offsets[i];
+		const Vec3d p = nucleus + off;
+		const Vec3d d = p - observer;
+		const double dist = d.norm();
+		const double r = p.norm();
+		if (!(dist > 1e-6) || !(r > 1e-3))
+			continue;
+		direction[i] = StelCore::matVsop87ToJ2000.multiplyWithoutTranslation(d/dist);
+		valid[i] = prj->project(direction[i], win[i]);
+		// the light of the grains relative to each other: their cross section, the distances
+		light[i] = static_cast<double>(grid.weights[i])/(r*r*dist*dist);
+		// the share in the coma (the aperture at the distance of the comet, across the line of sight)
+		const double rho = (off - sight*(off*sight)).norm();
+		// (the Gaussian of the splat in a disk of the aperture: exact in its center, about right off it)
+		const double s2 = std::pow(0.6*static_cast<double>(grid.spread[i]), 2) + 1e-30;
+		const double A2 = DustAperture*DustAperture;
+		const double frac = (1. - std::exp(-0.5*A2/s2))*std::exp(-rho*rho/(s2 + 0.5*A2));
+		inside += light[i]*frac;
+	}
+	if (!(inside > 0.))
+		return;
+	const double dustScale = DustFraction*total/inside;
+
+	vertexData.clear();
+	const auto addQuad = [this](const Vec3d& c, double ex, double ey, const Vec3f& inv, const Vec3f& color, float profile) {
+		const float corners[6][2] = {{-1, -1}, {1, -1}, {1, 1}, {-1, -1}, {1, 1}, {-1, 1}};
+		for (const auto& k : corners)
+		{
+			const float v[FloatsPerVertex] = {static_cast<float>(c[0] + k[0]*ex), static_cast<float>(c[1] + k[1]*ey),
+			                                  static_cast<float>(c[0]), static_cast<float>(c[1]),
+			                                  inv[0], inv[1], inv[2], color[0], color[1], color[2], profile};
+			vertexData.insert(vertexData.end(), v, v + FloatsPerVertex);
+		}
+	};
+	const auto outside = [&](const Vec3d& c, double ex, double ey) {
+		return c[0] + ex < viewX || c[0] - ex > viewX + viewW || c[1] + ey < viewY || c[1] - ey > viewY + viewH;
+	};
+
+	// The dust: a Gaussian per grain, as wide as the cloud from the speed of ejection and the spacing to the
+	// neighbors on the grid (along the syndyne and the synchrone), so that the splats join into a smooth tail
+	double reach = 0.;
+	Vec3d head;
+	const bool headVisible = prj->project(StelCore::matVsop87ToJ2000.multiplyWithoutTranslation(sight), head);
+	for (int j = 0; j < BetaCount; ++j)
+	{
+		for (int k = 0; k < AgeCount; ++k)
+		{
+			const int i = j*AgeCount + k;
+			if (!valid[i])
+				continue;
+			const auto neighbor = [&](int i0, int i1) {
+				if (i0 >= 0 && i1 >= 0 && valid[i0] && valid[i1])
+					return Vec3d((win[i1] - win[i0])*0.5);
+				if (i1 >= 0 && valid[i1])
+					return Vec3d(win[i1] - win[i]);
+				if (i0 >= 0 && valid[i0])
+					return Vec3d(win[i] - win[i0]);
+				return Vec3d(0.);
+			};
+			const Vec3d a = neighbor(k > 0 ? i - 1 : -1, k < AgeCount - 1 ? i + 1 : -1);
+			const Vec3d b = neighbor(j > 0 ? i - AgeCount : -1, j < BetaCount - 1 ? i + AgeCount : -1);
+			const Vec3d p = nucleus + grid.offsets[i];
+			const double dist = (p - observer).norm();
+			const double cloud = 0.6*static_cast<double>(grid.spread[i])/dist*pixPerRad;
+			const double iso = cloud*cloud + 0.36;
+			const double cxx = 0.36*(a[0]*a[0] + b[0]*b[0]) + iso;
+			const double cxy = 0.36*(a[0]*a[1] + b[0]*b[1]);
+			const double cyy = 0.36*(a[1]*a[1] + b[1]*b[1]) + iso;
+			const double det = cxx*cyy - cxy*cxy;
+			const double ex = 3.*std::sqrt(cxx), ey = 3.*std::sqrt(cyy);
+			if (!(det > 0.) || ex > 2e4 || ey > 2e4 || outside(win[i], ex, ey))
+				continue;
+			// the phase angle at the grain: between the Sun and the observer
+			const Vec3d toSun = -p/p.norm();
+			const Vec3d toObserver = (observer - p)/dist;
+			const double phase = dustPhase(toSun*toObserver)/DustPhaseReference;
+			const double illuminance = dustScale*light[i]*phase;
+			// peak luminance (cd/m^2): illuminance over the solid angle of the Gaussian
+			const double peak = illuminance*pixPerRad*pixPerRad/(2.*M_PI*std::sqrt(det));
+			const Vec3f t = transmission(direction[i]);
+			const Vec3f color = Vec3f(DustColor[0]*t[0], DustColor[1]*t[1], DustColor[2]*t[2])*static_cast<float>(peak*static_cast<double>(sceneScale));
+			addQuad(win[i], ex, ey, Vec3f(static_cast<float>(cyy/det), static_cast<float>(-cxy/det), static_cast<float>(cxx/det)), color, 0.f);
+			if (headVisible)
+				reach = std::max(reach, (win[i] - head).norm() + std::max(ex, ey));
+		}
+	}
+
+	// The gas of the coma: the rest of the light, with the profile of Haser (scale length growing with r^2)
+	if (headVisible)
+	{
+		const double r = nucleus.norm();
+		const double scale = std::max(GasScaleLength*r*r/delta*pixPerRad, 0.5);
+		const double gas = (1. - DustFraction)*total;
+		const double A = gas*pixPerRad*pixPerRad/(2.*M_PI*scale);
+		const double ex = std::min(7.*scale, 2e4);
+		if (!outside(head, ex, ex))
+		{
+			const Vec3f t = transmission(StelCore::matVsop87ToJ2000.multiplyWithoutTranslation(sight));
+			const Vec3f color = Vec3f(GasColor[0]*t[0], GasColor[1]*t[1], GasColor[2]*t[2])*static_cast<float>(A*static_cast<double>(sceneScale));
+			addQuad(head, ex, ex, Vec3f(static_cast<float>(scale), 0.5f, 0.f), color, 1.f);
+			reach = std::max(reach, ex);
+		}
+	}
+	if (vertexData.empty())
+		return;
+
+	// With a star trail or a lens out of focus, the light is drawn into an image of its own that is then trailed
+	// (and added to the scene, see StelSkyDrawer::beginPhotoBodyImage())
+	const bool image = headVisible && drawer->beginPhotoBodyImage(StelCore::matVsop87ToJ2000.multiplyWithoutTranslation(sight), static_cast<float>(reach), true);
+
+	auto& gl = *QOpenGLContext::currentContext()->functions();
+	splatProgram->bind();
+	splatProgram->setUniformValue("viewport", QVector4D(static_cast<float>(viewX), static_cast<float>(viewY), static_cast<float>(viewW), static_cast<float>(viewH)));
+	splatVao->bind();
+	splatBuffer->bind();
+	splatBuffer->allocate(vertexData.data(), static_cast<int>(vertexData.size()*sizeof(float)));
+	const int stride = FloatsPerVertex*sizeof(float);
+	const int sizes[5] = {2, 2, 3, 3, 1};
+	size_t offset = 0;
+	for (int a = 0; a < 5; ++a)
+	{
+		gl.glVertexAttribPointer(a, sizes[a], GL_FLOAT, GL_FALSE, stride, reinterpret_cast<const void*>(offset*sizeof(float)));
+		gl.glEnableVertexAttribArray(a);
+		offset += sizes[a];
+	}
+	gl.glEnable(GL_BLEND);
+	gl.glBlendFunc(GL_ONE, GL_ONE);
+	gl.glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vertexData.size()/FloatsPerVertex));
+	gl.glDisable(GL_BLEND);
+	for (int a = 0; a < 5; ++a)
+		gl.glDisableVertexAttribArray(a);
+	splatBuffer->release();
+	splatVao->release();
+	splatProgram->release();
+
+	if (image)
+		drawer->endPhotoBodyImage();
+}
+
 void CometTailMgr::draw(StelCore* core)
 {
-	if (!flagShowGuides)
+	const bool photo = flagShow && core->getSkyDrawer()->getFlagPhotographicModeActive();
+	if (!flagShowGuides && !photo)
 		return;
 	static SolarSystem* ssystem = GETSTELMODULE(SolarSystem);
 	if (!ssystem)
 		return;
+	if (photo)
+		initSplats();
 	const QList<StelObjectP>& selected = StelApp::getInstance().getStelObjectMgr().getSelectedObject();
 	for (const PlanetP& p : ssystem->getAllMinorBodies())
 	{
 		if (p->getPlanetType() != Planet::isComet)
 			continue;
 		const Comet* comet = static_cast<const Comet*>(p.data());
+		if (photo && drawsComet(core, comet))
+			drawLight(core, comet);
+		if (!flagShowGuides)
+			continue;
 		bool isSelected = false;
 		for (const StelObjectP& s : selected)
 			isSelected = isSelected || s.data() == p.data();

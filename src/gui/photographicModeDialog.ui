@@ -1388,6 +1388,16 @@
          </property>
          <layout class="QGridLayout" name="cometTailsGridLayout">
           <item row="0" column="0">
+           <widget class="QCheckBox" name="cometTailsCheckBox">
+            <property name="toolTip">
+             <string>Draw the light of the comets brighter than magnitude 10 from a physical model instead of their usual drawing: the dust tail from many grains of different sizes and ages (Finson and Probstein), the dust coma, and the gas coma. Dust and gas give the magnitude of the comet in its coma; forward scattering brightens the dust seen towards the Sun.</string>
+            </property>
+            <property name="text">
+             <string>Physical model of the light</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="0">
            <widget class="QCheckBox" name="cometTailGuidesCheckBox">
             <property name="toolTip">
              <string>Draw the shape of the dust and ion tails of the bright comets (and of the selected one) as lines: syndynes (grains of one size, released over 90 days; beta is the ratio of the radiation pressure to the gravitation, small grains near 1), synchrones (grains of all sizes released at one time) and the direction of the ion tail in the solar wind (Finson and Probstein 1968).</string>

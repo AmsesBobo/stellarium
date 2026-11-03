@@ -24,6 +24,8 @@
 #include "VecMath.hpp"
 
 #include <vector>
+#include <QMap>
+#include <memory>
 
 class StelCore;
 class Comet;
@@ -42,10 +44,18 @@ class Comet;
 //! The ion tail follows the solar wind: away from the Sun, aberrated by the motion of the comet against the wind
 //! (about 400 km/s).
 //!
-//! This first step draws them as guide lines in the sky, to compare their shapes with pictures of comets.
+//! The guide lines show these shapes in the sky, to compare them with pictures of comets.
+//!
+//! In the photographic mode the module draws the light of the bright comets (in place of the drawing of Comet): the
+//! dust as many grains on a grid of beta and age, each spread out by the speed it left the nucleus with (the coma
+//! of the dust with its 1/rho profile comes from the young grains), with the size distribution of the grains, the
+//! production of dust with the distance from the Sun, and the phase function of cometary dust (forward scattering);
+//! and the gas of the coma (Haser profile). Dust and gas together give the magnitude of the comet in the coma.
 class CometTailMgr : public StelModule
 {
 	Q_OBJECT
+	//! Draw the light of the bright comets in the photographic mode (in place of their usual drawing)
+	Q_PROPERTY(bool flagShow READ getFlagShow WRITE setFlagShow NOTIFY flagShowChanged)
 	//! Draw the syndynes, synchrones and the direction of the ion tail of the bright comets as lines
 	Q_PROPERTY(bool flagShowGuides READ getFlagShowGuides WRITE setFlagShowGuides NOTIFY flagShowGuidesChanged)
 
@@ -59,6 +69,9 @@ public:
 	double getCallOrder(StelModuleActionName actionName) const override;
 
 	bool getFlagShowGuides() const {return flagShowGuides;}
+	bool getFlagShow() const {return flagShow;}
+	//! Whether this module draws the light of the comet now (photographic mode): Comet then draws only its marks
+	bool drawsComet(const StelCore* core, const Comet* comet) const;
 
 	//! Position after the time dt (days) of a body at r0 (AU) with the velocity v0 (AU/day) in the field of a central
 	//! mass with the gravitational parameter mu (AU^3/day^2, 0 for no force): the Kepler problem in universal
@@ -73,12 +86,38 @@ public:
 
 public slots:
 	void setFlagShowGuides(bool b);
+	void setFlagShow(bool b);
 
 signals:
 	void flagShowGuidesChanged(bool b);
+	void flagShowChanged(bool b);
 
 private:
 	bool flagShowGuides = false;
+	bool flagShow = true;
+
+	//! The grains of the dust of a comet, computed for one time (they are kept while the time changes little)
+	struct DustGrid
+	{
+		double jde = -1e30;          //!< the time of the observation they were computed for
+		std::vector<Vec3d> offsets;  //!< positions relative to the nucleus (AU), beta by beta, age by age
+		std::vector<float> weights;  //!< cross section of the grains a splat stands for (relative)
+		std::vector<float> spread;   //!< the radius of the cloud from the speed of ejection (AU)
+	};
+	mutable QMap<const Comet*, DustGrid> grids;
+	const DustGrid& dustGrid(const Comet* comet, double jde, double lightTime) const;
+	//! Draw the light of the comet (photographic mode)
+	void drawLight(StelCore* core, const Comet* comet);
+	//! Light time to the comet (days) at the time jde
+	static double lightTime(const Comet* comet, double jde, const Vec3d& observer);
+
+	//! The splats of the light: quads with a Gaussian (dust) or a Haser profile (gas)
+	std::unique_ptr<class QOpenGLShaderProgram> splatProgram;
+	std::unique_ptr<class QOpenGLBuffer> splatBuffer;
+	std::unique_ptr<class QOpenGLVertexArrayObject> splatVao;
+	bool splatProgramTried = false;
+	bool initSplats();
+	std::vector<float> vertexData;
 
 	//! A guide line: heliocentric ecliptic positions (AU) of the grains, with a color and a label at its end
 	struct Guide

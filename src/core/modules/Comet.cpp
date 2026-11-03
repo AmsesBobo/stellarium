@@ -19,6 +19,7 @@
  */
  
 #include "Comet.hpp"
+#include "CometTailMgr.hpp"
 #include "Orbit.hpp"
 #include "SolarSystem.hpp"
 
@@ -557,6 +558,9 @@ void Comet::draw(StelCore* core, float maxMagLabels, const QFont& planetNameFont
 	}
 	if (!static_cast<KeplerOrbit*>(orbitPtr)->objectDateGoodEnoughForOrbits(core->getJDE())) return; // don't draw at all if out of useful date range. This allows having hundreds of comet elements.
 
+	static CometTailMgr* cometTails = GETSTELMODULE(CometTailMgr);
+	const bool photoLight = cometTails && cometTails->drawsComet(core, this);
+
 	Mat4d mat = Mat4d::translation(eclipticPos+aberrationPush) * rotLocalToParent;
 	// This removed totally the Planet shaking bug!!!
 	StelProjector::ModelViewTranformP transfo = core->getHeliocentricEclipticModelViewTransform();
@@ -594,7 +598,9 @@ void Comet::draw(StelCore* core, float maxMagLabels, const QFont& planetNameFont
 				ss->drawAsteroidMarker(core, &sPainter, screenPos[0], screenPos[1], color); // This does not draw directly, but record an entry to be drawn in a batch.
 		}
 
-		draw3dModel(core,transfo,static_cast<float>(screenRd), 1.0);
+		// In the photographic mode the light of a bright comet comes from CometTailMgr
+		if (!photoLight)
+			draw3dModel(core,transfo,static_cast<float>(screenRd), 1.0);
 	}
 	else
 		if (!projectionValid && prj.data()->getNameI18() == q_("Orthographic"))
@@ -609,6 +615,9 @@ void Comet::draw(StelCore* core, float maxMagLabels, const QFont& planetNameFont
 	{
 		return;
 	}
+
+	if (photoLight)
+		return;
 
 	// but tails should also be drawn if comet core is off-screen...
 	if (tailActive && tailBright)
