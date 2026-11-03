@@ -36,6 +36,7 @@
 #include "LandscapeMgr.hpp"
 #include "LightDomes.hpp"
 #include "AuroraMgr.hpp"
+#include "CometTailMgr.hpp"
 #include "CustomObjectMgr.hpp"
 #include "HighlightMgr.hpp"
 #include "GridLinesMgr.hpp"
@@ -660,6 +661,11 @@ void StelApp::init(QSettings* conf)
 	AuroraMgr* auroraMgr = new AuroraMgr();
 	auroraMgr->init();
 	getModuleMgr().registerModule(auroraMgr);
+
+	// Comet tails
+	CometTailMgr* cometTailMgr = new CometTailMgr();
+	cometTailMgr->init();
+	getModuleMgr().registerModule(cometTailMgr);
 	// Only now we can switch to auto-landscape. (GH:#3550)
 	if (landscape->getFlagLandscapeAutoSelection() && (confSettings->value("init_location/location", "auto").toString() == "auto"))
 	{

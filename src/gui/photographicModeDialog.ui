@@ -1382,6 +1382,25 @@
         </widget>
        </item>
        <item>
+        <widget class="QGroupBox" name="cometTailsGroupBox">
+         <property name="title">
+          <string>Comet tails</string>
+         </property>
+         <layout class="QGridLayout" name="cometTailsGridLayout">
+          <item row="0" column="0">
+           <widget class="QCheckBox" name="cometTailGuidesCheckBox">
+            <property name="toolTip">
+             <string>Draw the shape of the dust and ion tails of the bright comets (and of the selected one) as lines: syndynes (grains of one size, released over 90 days; beta is the ratio of the radiation pressure to the gravitation, small grains near 1), synchrones (grains of all sizes released at one time) and the direction of the ion tail in the solar wind (Finson and Probstein 1968).</string>
+            </property>
+            <property name="text">
+             <string>Guide lines (syndynes, synchrones, ion tail)</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
         <spacer name="rightColumnSpacer">
          <property name="orientation">
           <enum>Qt::Vertical</enum>
