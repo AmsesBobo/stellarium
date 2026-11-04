@@ -509,6 +509,9 @@ bool CometTailMgr::drawsComet(const StelCore* core, const Comet* comet) const
 		return false;
 	if (core->getCurrentPlanet().data() == comet || !(comet->getVMagnitude(core) < LightMagnitude))
 		return false;
+	// as Comet::draw(): not with orbital elements far from their epoch (orbit_good), e.g. of other apparitions
+	if (!comet->hasValidPositionalData(core->getJDE(), Planet::PositionQuality::OrbitPlotting))
+		return false;
 	return comet->getHeliocentricEclipticPos().norm() < MaxDistance;
 }
 
@@ -1016,7 +1019,7 @@ void CometTailMgr::draw(StelCore* core)
 		const Comet* comet = static_cast<const Comet*>(p.data());
 		if (photo && drawsComet(core, comet))
 			drawLight(core, comet);
-		if (!flagShowGuides)
+		if (!flagShowGuides || !comet->hasValidPositionalData(core->getJDE(), Planet::PositionQuality::OrbitPlotting))
 			continue;
 		bool isSelected = false;
 		for (const StelObjectP& s : selected)
