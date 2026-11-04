@@ -68,7 +68,7 @@ void stumpff(double z, double& C, double& S)
 constexpr std::array<double, 6> SyndyneBetas = {1., 0.3, 0.1, 0.03, 0.01, 0.003};
 constexpr std::array<double, 6> SynchroneAges = {2., 5., 10., 20., 40., 80.}; // days before the observation
 constexpr double MaxAge = 90.;          // days: the oldest grains of the syndynes
-constexpr int SyndynePoints = 60;
+constexpr int SyndynePoints = 120;
 constexpr int SynchronePoints = 40;
 constexpr double IonTailLength = 0.5;   // AU
 constexpr double GuideMagnitude = 8.;   // comets brighter than this get guide lines (and the selected one)
@@ -132,6 +132,51 @@ double noise(double x, int seed)
 	const double i = std::floor(x), f = x - i;
 	const double u = f*f*(3. - 2.*f);
 	return hash(i)*(1. - u) + hash(i + 1.)*u;
+}
+
+// Grains evaporate close to the Sun: refractory dust survives from about 4 solar radii, most of it from 10
+constexpr double SublimationInner = 0.02, SublimationOuter = 0.05; // AU
+double survival(double r)
+{
+	const double x = std::clamp((r - SublimationInner)/(SublimationOuter - SublimationInner), 0., 1.);
+	return x*x*(3. - 2.*x);
+}
+
+// The ages (days, with the span each stands for) at which grains are released: closer together where the comet
+// turns fast around the Sun (near the perihelion, above all of a sungrazer), where grains released a little apart
+// in time go very different ways
+void releaseAges(const Comet* comet, double t, double maxAge, int count, std::vector<double>& ages, std::vector<double>& dAges)
+{
+	constexpr int Fine = 1024;
+	constexpr double TurnWeight = 0.5;  // the share of a half turn around the Sun against the whole span
+	std::array<double, Fine + 1> tau, measure;
+	measure[0] = 0.;
+	double previousRate = 0.;
+	for (int f = 0; f <= Fine; ++f)
+	{
+		const double u = static_cast<double>(f)/Fine;
+		tau[f] = maxAge*u*u;
+		Vec3d pos, vel;
+		comet->computePosition(t - tau[f], pos, vel);
+		const double rate = (pos^vel).norm()/(pos*pos); // radians per day around the Sun
+		if (f > 0)
+			measure[f] = measure[f - 1] + 1./Fine + TurnWeight*0.5*(rate + previousRate)*(tau[f] - tau[f - 1])/M_PI;
+		previousRate = rate;
+	}
+	const auto ageAt = [&](double m) {
+		const auto it = std::lower_bound(measure.begin(), measure.end(), m);
+		const int f = std::clamp(static_cast<int>(it - measure.begin()), 1, Fine);
+		const double x = (m - measure[f - 1])/std::max(measure[f] - measure[f - 1], 1e-300);
+		return tau[f - 1] + std::clamp(x, 0., 1.)*(tau[f] - tau[f - 1]);
+	};
+	ages.resize(count);
+	dAges.resize(count);
+	const double total = measure[Fine];
+	for (int k = 0; k < count; ++k)
+	{
+		ages[k] = ageAt(total*(k + 0.5)/count);
+		dAges[k] = ageAt(total*(k + 1.)/count) - ageAt(total*static_cast<double>(k)/count);
+	}
 }
 
 // Distance (AU) an ion has travelled in the frame of the comet after the time age (days)
@@ -254,16 +299,16 @@ std::vector<CometTailMgr::Guide> CometTailMgr::computeGuides(const Comet* comet,
 	};
 
 	// Syndynes: one beta, all ages
+	std::vector<double> syndyneAges, spans;
+	releaseAges(comet, t, MaxAge, SyndynePoints, syndyneAges, spans);
 	for (const double beta : SyndyneBetas)
 	{
 		Guide g;
 		g.color = Vec3f(1.f, 0.75f, 0.3f);
 		g.label = QString("β %1").arg(beta);
-		for (int i = 0; i <= SyndynePoints; ++i)
-		{
-			const double f = static_cast<double>(i)/SyndynePoints;
-			g.points.push_back(grain(beta, MaxAge*f*f));
-		}
+		g.points.push_back(grain(beta, 0.));
+		for (const double age : syndyneAges)
+			g.points.push_back(grain(beta, age));
 		guides.push_back(std::move(g));
 	}
 	// Synchrones: one age, all beta from 0.001 to 1
@@ -370,24 +415,37 @@ const CometTailMgr::DustGrid& CometTailMgr::dustGrid(const Comet* comet, double 
 	const double t = jde - lightTime;
 	Vec3d nucleus, vel;
 	comet->computePosition(t, nucleus, vel);
+	std::vector<double> ages, dAges;
+	releaseAges(comet, t, MaxGrainAge, AgeCount, ages, dAges);
 	for (int k = 0; k < AgeCount; ++k)
 	{
-		const double u = (k + 0.5)/AgeCount;
-		const double age = MaxGrainAge*u*u;
-		const double dAge = 2.*MaxGrainAge*u/AgeCount;
+		const double age = ages[k];
 		Vec3d pos;
 		comet->computePosition(t - age, pos, vel);
-		const double r = std::max(pos.norm(), 0.05);
-		// the production of dust falls with the distance from the Sun (about r^-3, from 4 AU on much faster)
-		const double production = std::pow(r, -3.)*(r > 4. ? std::exp(-(r - 4.)) : 1.);
+		const double r = pos.norm();
+		// the production of dust falls with the distance from the Sun (about r^-3, from 4 AU on much faster);
+		// closer than a few solar radii the grains evaporate
+		const double production = std::pow(std::max(r, 0.02), -3.)*(r > 4. ? std::exp(-(r - 4.)) : 1.)*survival(r);
 		for (int j = 0; j < BetaCount; ++j)
 		{
 			const double beta = std::pow(10., -3. + 3.*(j + 0.5)/BetaCount);
 			const int i = j*AgeCount + k;
-			grid.offsets[i] = propagate(pos, vel, SunMu*(1. - beta), age) - nucleus;
+			const double mu = SunMu*(1. - beta);
+			const Vec3d grain = propagate(pos, vel, mu, age);
+			grid.offsets[i] = grain - nucleus;
+			// a grain that has passed close to the Sun since its release has evaporated
+			double passage = 1.;
+			if (pos*vel < 0.)
+			{
+				const Vec3d h = pos^vel;
+				const Vec3d ecc = (vel^h)/mu - pos/r;
+				const double q = (h*h)/(mu*(1. + ecc.norm()));
+				if (q < SublimationOuter && propagate(pos, vel, mu, age*0.999).norm() < grain.norm())
+					passage = survival(q);
+			}
 			// grains of the size distribution n(s) ~ s^-3.5: their cross section per interval of ln(beta) ~ beta^0.5
-			grid.weights[i] = static_cast<float>(std::sqrt(beta)*production*dAge);
-			grid.spread[i] = static_cast<float>(EjectionSpeed*std::sqrt(beta/r)*age);
+			grid.weights[i] = static_cast<float>(std::sqrt(beta)*production*passage*dAges[k]);
+			grid.spread[i] = static_cast<float>(EjectionSpeed*std::sqrt(beta/std::max(r, 0.02))*age);
 		}
 	}
 	return grid;
