@@ -87,12 +87,58 @@ constexpr double DustFraction = 0.5;    // share of the dust in the light of the
 constexpr double DustAperture = 1e5/KmPerAU;   // the coma in which the dust gives its share of the magnitude (AU)
 constexpr double GasScaleLength = 8e4/KmPerAU; // Haser scale length of C2 at 1 AU (AU, grows with r^2)
 constexpr double IlluminanceMag0 = 2.54e-6;    // lux of a star of magnitude 0 (V)
-constexpr int FloatsPerVertex = 11;     // position 2, center 2, inverse 3, color 3, profile 1
+constexpr int FloatsPerVertex = 11;
+constexpr double SplatFloor = 2e-5;     // light in the scene (1 is white) below which a splat is not drawn     // position 2, center 2, inverse 3, color 3, profile 1
 
 // The colors (linear sRGB, luminance 1): sunlight reddened a little by the dust; the Swan bands of C2 with CN and
 // the continuum, as cameras record comae (cyan-green)
 const Vec3f DustColor(1.07f, 0.99f, 0.89f);
 const Vec3f GasColor(0.2f/0.8065f, 1.f/0.8065f, 0.6f/0.8065f);
+// The comet tail bands of CO+ (about 380-480 nm, strongest at 401, 427 and 456 nm) brought into the gamut with
+// their luminance (deep blue, a little violet), as cameras record them (their blue channel reaches into the green)
+const Vec3f IonColor(0.53f, 0.43f, 8.0f);
+
+// The ion tail: ions of CO+ picked up by the solar wind, accelerated from about 10 km/s to some 200 km/s within a
+// few tenths of a day, glowing for a day or two
+constexpr double IonFraction = 0.05;    // share of the luminance of the comet in its ion tail
+constexpr double IonStartSpeed = 10.*86400./KmPerAU;   // AU/day
+constexpr double IonFinalSpeed = 200.*86400./KmPerAU;  // AU/day
+constexpr double IonAcceleration = 0.3; // days to reach the final speed (e-folding)
+constexpr double IonLifetime = 4.;      // days (the tail fades with this age)
+constexpr double IonMaxAge = 12.;       // days
+constexpr int IonAgeCount = 140;
+constexpr double IonWidth = 5e4/KmPerAU;  // width of the tail at the head (AU) ...
+constexpr double IonOpening = 0.06;       // ... growing with the distance from the head
+// Streamers: the main tail and rays at angles to it that fold onto the axis
+struct IonStream {double angle, azimuth, strength, width, period;};
+constexpr std::array<IonStream, 7> IonStreams = {{
+	{0., 0., 1., 1., 3.},
+	{5., 0.3, 0.35, 0.4, 5.},
+	{-6., 0.1, 0.3, 0.4, 7.},
+	{11., -0.2, 0.25, 0.3, 4.},
+	{-13., 0.4, 0.2, 0.3, 6.},
+	{19., 0.1, 0.15, 0.25, 9.},
+	{-22., -0.3, 0.12, 0.25, 8.},
+}};
+constexpr double IonFolding = 0.12;     // days for a ray to fold onto the axis (e-folding)
+
+// Smooth noise in [0, 1] of a time (in units of its scale), for the changes of the solar wind
+double noise(double x, int seed)
+{
+	const auto hash = [seed](double i) {
+		const double h = std::sin(i*127.1 + seed*311.7)*43758.5453;
+		return h - std::floor(h);
+	};
+	const double i = std::floor(x), f = x - i;
+	const double u = f*f*(3. - 2.*f);
+	return hash(i)*(1. - u) + hash(i + 1.)*u;
+}
+
+// Distance (AU) an ion has travelled in the frame of the comet after the time age (days)
+double ionDistance(double age)
+{
+	return IonStartSpeed*age + (IonFinalSpeed - IonStartSpeed)*(age - IonAcceleration*(1. - std::exp(-age/IonAcceleration)));
+}
 
 // The phase function of cometary dust (Marcus 2007): two Henyey-Greenstein terms, forward (g 0.9) and backward
 // (g -0.6), as a function of the phase angle (radians)
@@ -498,6 +544,12 @@ void CometTailMgr::drawLight(StelCore* core, const Comet* comet)
 			vertexData.insert(vertexData.end(), v, v + FloatsPerVertex);
 		}
 	};
+	// How many sigmas of a Gaussian splat with this light at its center are worth drawing: down to a light far
+	// below what the exposure shows (at most 3; none for a splat that faint everywhere)
+	const auto cutoff = [](const Vec3f& color) {
+		const double brightest = static_cast<double>(std::max(color[0], std::max(color[1], color[2])));
+		return brightest > SplatFloor ? std::sqrt(std::min(9., 2.*std::log(brightest/SplatFloor))) : 0.;
+	};
 	const auto outside = [&](const Vec3d& c, double ex, double ey) {
 		return c[0] + ex < viewX || c[0] - ex > viewX + viewW || c[1] + ey < viewY || c[1] - ey > viewY + viewH;
 	};
@@ -534,7 +586,7 @@ void CometTailMgr::drawLight(StelCore* core, const Comet* comet)
 			const double cyy = 0.36*(a[1]*a[1] + b[1]*b[1]) + iso;
 			const double det = cxx*cyy - cxy*cxy;
 			const double ex = 3.*std::sqrt(cxx), ey = 3.*std::sqrt(cyy);
-			if (!(det > 0.) || ex > 2e4 || ey > 2e4 || outside(win[i], ex, ey))
+			if (!(det > 0.) || outside(win[i], ex, ey))
 				continue;
 			// the phase angle at the grain: between the Sun and the observer
 			const Vec3d toSun = -p/p.norm();
@@ -545,16 +597,118 @@ void CometTailMgr::drawLight(StelCore* core, const Comet* comet)
 			const double peak = illuminance*pixPerRad*pixPerRad/(2.*M_PI*std::sqrt(det));
 			const Vec3f t = transmission(direction[i]);
 			const Vec3f color = Vec3f(DustColor[0]*t[0], DustColor[1]*t[1], DustColor[2]*t[2])*static_cast<float>(peak*static_cast<double>(sceneScale));
-			addQuad(win[i], ex, ey, Vec3f(static_cast<float>(cyy/det), static_cast<float>(-cxy/det), static_cast<float>(cxx/det)), color, 0.f);
+			// the quad only as far as its light is seen
+			const double cut = cutoff(color);
+			const double ex2 = cut*std::sqrt(cxx), ey2 = cut*std::sqrt(cyy);
+			if (!(cut > 0.) || ex2 > 2e4 || ey2 > 2e4 || outside(win[i], ex2, ey2))
+				continue;
+			addQuad(win[i], ex2, ey2, Vec3f(static_cast<float>(cyy/det), static_cast<float>(-cxy/det), static_cast<float>(cxx/det)), color, 0.f);
 			if (headVisible)
-				reach = std::max(reach, (win[i] - head).norm() + std::max(ex, ey));
+				reach = std::max(reach, (win[i] - head).norm() + std::max(ex2, ey2));
+		}
+	}
+
+	// The ion tail: streams of ions released at earlier times, each along the solar wind as the comet saw it then
+	// (its direction and speed change with time, so knots and kinks move down the tail)
+	const double r = nucleus.norm();
+	const double ionActivity = r < 2. ? 1. : (r < 4. ? 0.5 + 0.5*std::cos((r - 2.)*M_PI/2.) : 0.);
+	if (ionActivity > 0.)
+	{
+		const Vec3d radial = nucleus/r;
+		Vec3d axis = radial*SolarWindSpeed - vel;
+		axis.normalize();
+		// two directions across the tail: in the plane of the orbit and out of it
+		Vec3d e1 = vel - axis*(vel*axis);
+		e1.normalize();
+		const Vec3d e2 = axis^e1;
+		const double t = jde - lt;
+		const int seed = static_cast<int>(qHash(comet->getEnglishName()) % 1000u);
+		// the light of the ions: released evenly in time, glowing while they live
+		std::vector<Vec3d> ionPos(IonStreams.size()*IonAgeCount);
+		std::vector<double> ionLight(ionPos.size(), 0.), ionWidth(ionPos.size(), 0.);
+		double sum = 0.;
+		for (size_t m = 0; m < IonStreams.size(); ++m)
+		{
+			const IonStream& st = IonStreams[m];
+			for (int k = 0; k < IonAgeCount; ++k)
+			{
+				const double u = (k + 0.5)/IonAgeCount;
+				const double age = IonMaxAge*u*u;
+				const double dAge = 2.*IonMaxAge*u/IonAgeCount;
+				const double release = (t - age)*24.; // hours
+				// the wind as the ions met it: direction off by a few degrees, its speed 300-600 km/s
+				const double speed = SolarWindSpeed*(0.75 + 0.75*noise(release/11., seed + 7));
+				Vec3d dir = radial*speed - vel;
+				dir.normalize();
+				const double dx = (noise(release/13., seed + 1) - 0.5)*0.02, dy = (noise(release/17., seed + 2) - 0.5)*0.02;
+				// a ray leaves the head at its angle and folds onto the axis with age
+				const double angle = st.angle*M_PI/180.*std::exp(-age/IonFolding);
+				const Vec3d side = e1*std::cos(st.azimuth*M_PI) + e2*std::sin(st.azimuth*M_PI);
+				dir = dir*std::cos(angle) + side*std::sin(angle) + e1*dx + e2*dy;
+				dir.normalize();
+				const double s = ionDistance(age);
+				// rays come and go: each is lit for a few hours now and then; the main tail varies less
+				const double lit = m == 0 ? 0.6 + 0.8*noise(release/st.period, seed + 3)
+				                          : std::max(0., noise(release/st.period, seed + 11*static_cast<int>(m)) - 0.4)*2.5;
+				const size_t i = m*IonAgeCount + k;
+				ionPos[i] = nucleus + dir*s;
+				ionLight[i] = st.strength*lit*dAge*std::exp(-age/IonLifetime);
+				ionWidth[i] = st.width*(IonWidth + IonOpening*s);
+				sum += ionLight[i];
+			}
+		}
+		const double ionScale = sum > 0. ? IonFraction*ionActivity*total*delta*delta/sum : 0.;
+		std::vector<Vec3d> ionWin(ionPos.size());
+		std::vector<char> ionValid(ionPos.size(), 0);
+		std::vector<Vec3d> ionDir(ionPos.size());
+		for (size_t i = 0; i < ionPos.size(); ++i)
+		{
+			Vec3d d = ionPos[i] - observer;
+			d.normalize();
+			ionDir[i] = StelCore::matVsop87ToJ2000.multiplyWithoutTranslation(d);
+			ionValid[i] = prj->project(ionDir[i], ionWin[i]);
+		}
+		for (size_t m = 0; m < IonStreams.size() && ionScale > 0.; ++m)
+		{
+			for (int k = 0; k < IonAgeCount; ++k)
+			{
+				const size_t i = m*IonAgeCount + k;
+				if (!ionValid[i] || !(ionLight[i] > 0.))
+					continue;
+				Vec3d a(0.);
+				if (k > 0 && k < IonAgeCount - 1 && ionValid[i - 1] && ionValid[i + 1])
+					a = (ionWin[i + 1] - ionWin[i - 1])*0.5;
+				else if (k < IonAgeCount - 1 && ionValid[i + 1])
+					a = ionWin[i + 1] - ionWin[i];
+				else if (k > 0 && ionValid[i - 1])
+					a = ionWin[i] - ionWin[i - 1];
+				const double dist = (ionPos[i] - observer).norm();
+				const double w = ionWidth[i]/dist*pixPerRad;
+				const double iso = w*w + 0.36;
+				const double cxx = 0.36*a[0]*a[0] + iso, cxy = 0.36*a[0]*a[1], cyy = 0.36*a[1]*a[1] + iso;
+				const double det = cxx*cyy - cxy*cxy;
+				const double ex = 3.*std::sqrt(cxx), ey = 3.*std::sqrt(cyy);
+				if (!(det > 0.) || outside(ionWin[i], ex, ey))
+					continue;
+				const double illuminance = ionScale*ionLight[i]/(dist*dist);
+				const double peak = illuminance*pixPerRad*pixPerRad/(2.*M_PI*std::sqrt(det));
+				const Vec3f tr = transmission(ionDir[i]);
+				const Vec3f color = Vec3f(IonColor[0]*tr[0], IonColor[1]*tr[1], IonColor[2]*tr[2])*static_cast<float>(peak*static_cast<double>(sceneScale));
+				// the quad only as far as its light is seen
+				const double cut = cutoff(color);
+				const double ex2 = cut*std::sqrt(cxx), ey2 = cut*std::sqrt(cyy);
+				if (!(cut > 0.) || ex2 > 2e4 || ey2 > 2e4 || outside(ionWin[i], ex2, ey2))
+					continue;
+				addQuad(ionWin[i], ex2, ey2, Vec3f(static_cast<float>(cyy/det), static_cast<float>(-cxy/det), static_cast<float>(cxx/det)), color, 0.f);
+				if (headVisible)
+					reach = std::max(reach, (ionWin[i] - head).norm() + std::max(ex2, ey2));
+			}
 		}
 	}
 
 	// The gas of the coma: the rest of the light, with the profile of Haser (scale length growing with r^2)
 	if (headVisible)
 	{
-		const double r = nucleus.norm();
 		const double scale = std::max(GasScaleLength*r*r/delta*pixPerRad, 0.5);
 		const double gas = (1. - DustFraction)*total;
 		const double A = gas*pixPerRad*pixPerRad/(2.*M_PI*scale);

@@ -51,6 +51,9 @@ class Comet;
 //! of the dust with its 1/rho profile comes from the young grains), with the size distribution of the grains, the
 //! production of dust with the distance from the Sun, and the phase function of cometary dust (forward scattering);
 //! and the gas of the coma (Haser profile). Dust and gas together give the magnitude of the comet in the coma.
+//! The ion tail is drawn from streams of CO+ ions released at earlier times along the solar wind as the comet saw
+//! it then: they accelerate to some 200 km/s and fade over a few days; the wind changes its direction and speed
+//! a little with time, so knots and kinks move down the tail, and rays leave the head at angles and fold onto it.
 class CometTailMgr : public StelModule
 {
 	Q_OBJECT
