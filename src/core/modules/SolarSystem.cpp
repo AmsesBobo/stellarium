@@ -1369,6 +1369,22 @@ bool SolarSystem::loadPlanets(const QString& filePath)
 			if (magnitude > -99.f)
 					comet->setAbsoluteMagnitudeAndSlope(magnitude, slope);
 
+			// optional parameters of the physical model of the tails (photographic mode, see CometTailMgr)
+			Comet::TailParameters tail;
+			const auto tailValue = [&pd, &secname](const char* key, double& value) {
+				if (pd.contains(secname + "/" + key))
+					value = pd.value(secname + "/" + key).toDouble();
+			};
+			tailValue("dust_fraction", tail.dustFraction);
+			tailValue("dust_afrho", tail.afrho);
+			tailValue("dust_beta_min", tail.betaMin);
+			tailValue("dust_beta_max", tail.betaMax);
+			tailValue("dust_size_index", tail.sizeIndex);
+			tailValue("dust_striae", tail.striae);
+			tailValue("ion_fraction", tail.ionFraction);
+			tailValue("sodium_fraction", tail.sodiumFraction);
+			comet->setTailParameters(tail);
+
 			QString iauDesignation = pd.value(secname+"/iau_designation", "").toString();
 			if (!iauDesignation.isEmpty())
 				comet->setIAUDesignation(iauDesignation);

@@ -101,6 +101,22 @@ public:
 	//! @param name of discoverer
 	void setDiscoveryData(const QString& date, const QString& name) { discoveryDate = date; discoverer = name; }
 
+	//! Optional parameters of the physical model of the tails in the photographic mode (see CometTailMgr), from
+	//! the keys of ssystem_minor.ini in parentheses. A negative value stands for the default of the model.
+	struct TailParameters
+	{
+		double dustFraction = -1.;   //!< share of the dust in the light of the inner coma (dust_fraction, default 0.5)
+		double afrho = -1.;          //!< Afrho of the dust at 1 AU from the Sun, cm: the dust then no longer follows the magnitude (dust_afrho)
+		double betaMin = -1.;        //!< radiation pressure (beta) of the largest grains (dust_beta_min, default 0.001) ...
+		double betaMax = -1.;        //!< ... and of the smallest (dust_beta_max, default 1)
+		double sizeIndex = -1.;      //!< size distribution of the grains n(s) ~ s^-index: smaller for more large grains (dust_size_index, default 3.5)
+		double striae = -1.;         //!< strength of the striae: dust released in bursts (dust_striae, default 0.3)
+		double ionFraction = -1.;    //!< share of the light of the comet in its ion tail (ion_fraction, default 0.05)
+		double sodiumFraction = -1.; //!< share of the light of the comet in its sodium tail at 1 AU from the Sun (sodium_fraction, default 0.003)
+	};
+	void setTailParameters(const TailParameters& parameters) { tailParameters = parameters; }
+	const TailParameters& getTailParameters() const { return tailParameters; }
+
 	//! renders the subscript in a comet discovery designation with HTML.
 	//! This subscript only ever appears in the super rare case when a comet is first labeled as asteroid.
 	static QString renderDiscoveryDesignationHtml(const QString& plainText);
@@ -176,6 +192,7 @@ private:
 	float dustTailWidthFactor;      //!< empirical individual broadening of the dust tail end, compared to the gas tail end. Actually, dust tail width=2*comaWidth*dustTailWidthFactor. Default 1.5
 	float dustTailLengthFactor;     //!< empirical individual length of dust tail relative to gas tail. Taken from ssystem.ini, typical value 0.3..0.5, default 0.4
 	float dustTailBrightnessFactor; //!< empirical individual brightness of dust tail relative to gas tail. Taken from ssystem.ini, default 1.5
+	TailParameters tailParameters;  //!< the physical model of the tails (photographic mode)
 	QVector<Vec3d> comaVertexArr;
 	QVector<Vec2f> comaTexCoordArr; //  --> 2014-08: could also be declared static, but it is filled by StelPainter...
 

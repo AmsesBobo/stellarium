@@ -54,6 +54,14 @@ class Comet;
 //! The ion tail is drawn from streams of CO+ ions released at earlier times along the solar wind as the comet saw
 //! it then: they accelerate to some 200 km/s and fade over a few days; the wind changes its direction and speed
 //! a little with time, so knots and kinks move down the tail, and rays leave the head at angles and fold onto it.
+//! The sodium tail is drawn from atoms pushed away from the Sun by the light they scatter in the D lines, weaker
+//! when the comet moves slowly to or from the Sun (Swings effect); the dust is released in bursts now and then,
+//! which give striae along the synchrones. The emissions (CO+, the gas of the coma, sodium) take the colors the
+//! color films record them with.
+//!
+//! A comet can have its own parameters of the model in ssystem_minor.ini (see Comet::TailParameters): the share of
+//! the dust in the coma or its Afrho, the range of beta and the size distribution of the grains, the strength of
+//! the striae, the shares of the ion and the sodium tails.
 class CometTailMgr : public StelModule
 {
 	Q_OBJECT

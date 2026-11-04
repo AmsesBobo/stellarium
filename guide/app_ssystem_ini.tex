@@ -525,6 +525,26 @@ You can finetune the appearance of the comet, both when zooming in all the way t
 \end{description}
 Some historical depictions show huge comets. If painted correctly, you can try to recreate such paintings.
 
+In the photographic mode, the tails of the bright comets are computed from their physics: dust grains on Kepler
+orbits around a Sun lessened by the pressure of its light (by the factor $1-\beta$), the ions of the solar wind,
+neutral sodium, and the gas of the coma. The magnitudes $H$ and $G$ above give their light. These optional keys
+change the model for one comet:\newFeature{26.3}
+\begin{description}
+\item[dust\_fraction] (default: 0.5) share of the dust in the light of the inner coma; the gas gives the rest.
+\item[dust\_afrho] (optional) $Af\rho$ of the dust in cm, reduced to 1\,AU from the Sun \citep{AHearn:1984}.
+	The dust then gets its light from this value, and the gas the rest of the magnitude.
+\item[dust\_beta\_min] (default: 0.001) $\beta$ of the largest grains (about 0.5\,mm). Smaller values give more
+	large grains far along the orbit, as in an anti-tail.
+\item[dust\_beta\_max] (default: 1) $\beta$ of the smallest grains (at most 1).
+\item[dust\_size\_index] (default: 3.5) index of the size distribution of the grains, $n(s)\propto s^{-3.5}$.
+	Smaller values give more large grains.
+\item[dust\_striae] (default: 0.3) strength of the striae: dust released in bursts, which shows as bands along the
+	synchrones (0: even release).
+\item[ion\_fraction] (default: 0.05) share of the light of the comet in its ion tail.
+\item[sodium\_fraction] (default: 0.003) share of the light of the comet in its sodium tail at 1\,AU from the Sun
+	(it grows as $r^{-2}$).
+\end{description}
+
 A large number of elements for historical comets is provided in the
 file \file{ssystem\_1000comets.ini} in the installation directory. You
 can copy\&paste what you need into your
