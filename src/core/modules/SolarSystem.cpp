@@ -1380,6 +1380,7 @@ bool SolarSystem::loadPlanets(const QString& filePath)
 			tailValue("dust_beta_min", tail.betaMin);
 			tailValue("dust_beta_max", tail.betaMax);
 			tailValue("dust_size_index", tail.sizeIndex);
+			tailValue("dust_production_index", tail.productionIndex);
 			tailValue("dust_striae", tail.striae);
 			tailValue("ion_fraction", tail.ionFraction);
 			tailValue("sodium_fraction", tail.sodiumFraction);

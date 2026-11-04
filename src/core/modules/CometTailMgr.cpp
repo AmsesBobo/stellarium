@@ -220,19 +220,20 @@ double smoothstep(double edge0, double edge1, double x)
 	return u*u*(3. - 2.*u);
 }
 
-// The production of dust (relative to 1 AU) with the distance from the Sun: r^-3.5 (the Afrho of NEOWISE fell as
-// r^-3.1 after perihelion, its production as about r^-3.6), from 4 AU on falling much faster; closer than a few
-// solar radii the grains evaporate
-constexpr double DustProductionIndex = 3.5;
-double dustProduction(double r)
+// The production of dust (relative to 1 AU) with the distance from the Sun: by default r^-4.5, steeper than the
+// Afrho of NEOWISE after perihelion (r^-3.1, a production of about r^-3.6) and less steep than its brightening
+// before it (r^-5.4 to r^-6.8 in SOHO, Battams et al., ATel 13853): the tails come mostly from the dust released
+// around perihelion. From 4 AU on it falls much faster; closer than a few solar radii the grains evaporate.
+constexpr double DefaultProductionIndex = 4.5;
+double dustProduction(double r, double index)
 {
-	return std::pow(std::max(r, 0.02), -DustProductionIndex)*(r > 4. ? std::exp(-(r - 4.)) : 1.)*survival(r);
+	return std::pow(std::max(r, 0.02), -index)*(r > 4. ? std::exp(-(r - 4.)) : 1.)*survival(r);
 }
 
 // The parameters of the model for a comet: its own (ssystem_minor.ini) or the defaults
 struct TailModel
 {
-	double dustFraction, afrho, betaMin, betaMax, sizeIndex, striae, ionFraction, sodiumFraction;
+	double dustFraction, afrho, betaMin, betaMax, sizeIndex, productionIndex, striae, ionFraction, sodiumFraction;
 	int seed;  // of the noise of the striae and the solar wind
 };
 TailModel tailModel(const Comet* comet)
@@ -249,6 +250,7 @@ TailModel tailModel(const Comet* comet)
 	if (!(m.betaMin < m.betaMax*0.99))
 		m.betaMin = m.betaMax*0.1;
 	m.sizeIndex = std::clamp(value(p.sizeIndex, DefaultSizeIndex), 2., 5.);
+	m.productionIndex = std::clamp(value(p.productionIndex, DefaultProductionIndex), 0., 8.);
 	m.striae = std::clamp(value(p.striae, DefaultStriae), 0., 2.);
 	m.ionFraction = value(p.ionFraction, IonFraction);
 	m.sodiumFraction = value(p.sodiumFraction, SodiumFraction);
@@ -572,7 +574,7 @@ const CometTailMgr::DustGrid& CometTailMgr::dustGrid(const Comet* comet, double 
 		Vec3d pos;
 		comet->computePosition(t - age, pos, vel);
 		const double r = pos.norm();
-		double production = dustProduction(r);
+		double production = dustProduction(r, model.productionIndex);
 		// the striae: bursts of dust at times (not in the inner coma, which gives the magnitude)
 		if (model.striae > 0.)
 		{
@@ -754,7 +756,7 @@ void CometTailMgr::drawLight(StelCore* core, const Comet* comet)
 	double gas = (1. - model.dustFraction)*total;
 	if (model.afrho > 0.)
 	{
-		const double afrho = model.afrho*dustProduction(r)*std::sqrt(std::max(r, 0.02));
+		const double afrho = model.afrho*dustProduction(r, model.productionIndex)*std::sqrt(std::max(r, 0.02));
 		dust = SunIlluminance*afrho*DustAperture*CmPerAU/std::pow(2.*delta*CmPerAU*r, 2);
 		gas = std::max(total - dust, 0.);
 	}
