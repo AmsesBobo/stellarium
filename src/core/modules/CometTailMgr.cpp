@@ -80,7 +80,10 @@ constexpr int BetaCount = 40;           // grains: beta from 0.001 to 1 (logarit
 constexpr int AgeCount = 120;           // ... and ages up to MaxGrainAge (closer where the comet turns fast, see releaseAges())
 constexpr double MaxGrainAge = 150.;    // days
 constexpr double DefaultBetaMin = 0.001, DefaultBetaMax = 1.;
-constexpr double DefaultSizeIndex = 3.5; // the size distribution of the grains: n(s) ~ s^-3.5
+// The size distribution of the grains, n(s) ~ s^-4: the light of the tails comes from grains of a few micrometers
+// (beta 0.1-0.7 in the tail of NEOWISE, sizes 1.7-12 micrometers: Manzini et al. 2021); s^-3.5 gives the large,
+// slow grains so much of the light of the coma that the tails become far too faint
+constexpr double DefaultSizeIndex = 4.;
 constexpr double KmPerAU = 1.495978707e8;
 // Speed of ejection of the grains: v0 sqrt(beta) / sqrt(r) (r in AU), about 0.55 km/s for the smallest grains at
 // 1 AU (Whipple 1951 scaled to the observed expansion of dust envelopes)
@@ -217,11 +220,13 @@ double smoothstep(double edge0, double edge1, double x)
 	return u*u*(3. - 2.*u);
 }
 
-// The production of dust (relative to 1 AU) with the distance from the Sun: about r^-3, from 4 AU on falling much
-// faster; closer than a few solar radii the grains evaporate
+// The production of dust (relative to 1 AU) with the distance from the Sun: r^-3.5 (the Afrho of NEOWISE fell as
+// r^-3.1 after perihelion, its production as about r^-3.6), from 4 AU on falling much faster; closer than a few
+// solar radii the grains evaporate
+constexpr double DustProductionIndex = 3.5;
 double dustProduction(double r)
 {
-	return std::pow(std::max(r, 0.02), -3.)*(r > 4. ? std::exp(-(r - 4.)) : 1.)*survival(r);
+	return std::pow(std::max(r, 0.02), -DustProductionIndex)*(r > 4. ? std::exp(-(r - 4.)) : 1.)*survival(r);
 }
 
 // The parameters of the model for a comet: its own (ssystem_minor.ini) or the defaults
@@ -238,7 +243,8 @@ TailModel tailModel(const Comet* comet)
 	m.dustFraction = std::clamp(value(p.dustFraction, DustFraction), 0., 1.);
 	m.afrho = p.afrho > 0. ? p.afrho : -1.;
 	// the grains on Kepler orbits: beta at most 1 (no force)
-	m.betaMax = std::clamp(value(p.betaMax, DefaultBetaMax), 1e-5, 1.);
+	// (beta above 1: small absorbing grains pushed away from the Sun, see propagate())
+	m.betaMax = std::clamp(value(p.betaMax, DefaultBetaMax), 1e-5, 3.);
 	m.betaMin = std::clamp(value(p.betaMin, DefaultBetaMin), 1e-6, 1.);
 	if (!(m.betaMin < m.betaMax*0.99))
 		m.betaMin = m.betaMax*0.1;
@@ -356,8 +362,36 @@ void CometTailMgr::setFlagShow(bool b)
 Vec3d CometTailMgr::propagate(const Vec3d& r0, const Vec3d& v0, double mu, double dt)
 {
 	// No force (beta = 1): a straight line
-	if (mu < 1e-12)
+	if (std::fabs(mu) < 1e-12)
 		return r0 + v0*dt;
+	// A force away from the Sun (beta > 1, small absorbing grains): integrated (Runge-Kutta, steps growing
+	// geometrically from the release, where the grain is closest to the Sun and the force strongest)
+	if (mu < 0.)
+	{
+		constexpr int Steps = 64;
+		const auto accel = [mu](const Vec3d& r) {const double rn = r.norm(); return r*(-mu/(rn*rn*rn));};
+		const double sign = dt >= 0. ? 1. : -1.;
+		const double span = std::fabs(dt);
+		const double first = std::min(span, std::max(1e-4, 0.002*r0.norm()*r0.norm()/std::max(v0.norm(), 1e-6)));
+		const double growth = span > first ? std::pow(span/first, 1./(Steps - 1)) : 1.;
+		Vec3d r = r0, v = v0;
+		double t = 0., h = first;
+		for (int i = 0; i < Steps && t < span; ++i)
+		{
+			if (i == Steps - 1 || t + h > span)
+				h = span - t;
+			const double hs = h*sign;
+			const Vec3d k1v = accel(r), k1r = v;
+			const Vec3d k2v = accel(r + k1r*(0.5*hs)), k2r = v + k1v*(0.5*hs);
+			const Vec3d k3v = accel(r + k2r*(0.5*hs)), k3r = v + k2v*(0.5*hs);
+			const Vec3d k4v = accel(r + k3r*hs), k4r = v + k3v*hs;
+			r += (k1r + k2r*2. + k3r*2. + k4r)*(hs/6.);
+			v += (k1v + k2v*2. + k3v*2. + k4v)*(hs/6.);
+			t += h;
+			h *= growth;
+		}
+		return r;
+	}
 	const double rn = r0.norm();
 	const double rv = r0*v0;
 	const double vr = rv/rn;
@@ -554,7 +588,7 @@ const CometTailMgr::DustGrid& CometTailMgr::dustGrid(const Comet* comet, double 
 			grid.offsets[i] = grain - nucleus;
 			// a grain that has passed close to the Sun since its release has evaporated
 			double passage = 1.;
-			if (pos*vel < 0.)
+			if (pos*vel < 0. && mu > 0.)
 			{
 				const Vec3d h = pos^vel;
 				const Vec3d ecc = (vel^h)/mu - pos/r;
@@ -562,7 +596,8 @@ const CometTailMgr::DustGrid& CometTailMgr::dustGrid(const Comet* comet, double 
 				if (q < SublimationOuter && propagate(pos, vel, mu, age*0.999).norm() < grain.norm())
 					passage = survival(q);
 			}
-			// grains of the size distribution n(s) ~ s^-3.5: their cross section per interval of ln(beta) ~ beta^0.5
+			// grains of the size distribution n(s) ~ s^-alpha (alpha 4 by default): their cross section per
+			// interval of ln(beta) ~ beta^(alpha - 3)
 			grid.weights[i] = static_cast<float>(std::pow(beta, model.sizeIndex - 3.)*production*passage*dAges[k]);
 			grid.spread[i] = static_cast<float>(EjectionSpeed*std::sqrt(beta/std::max(r, 0.02))*age);
 		}
@@ -724,6 +759,7 @@ void CometTailMgr::drawLight(StelCore* core, const Comet* comet)
 		gas = std::max(total - dust, 0.);
 	}
 	const double dustScale = dust/inside;
+
 
 	vertexData.clear();
 	const auto addQuad = [this](const Vec3d& c, double ex, double ey, const Vec3f& inv, const Vec3f& color, float profile) {

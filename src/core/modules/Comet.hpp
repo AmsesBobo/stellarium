@@ -108,8 +108,8 @@ public:
 		double dustFraction = -1.;   //!< share of the dust in the light of the inner coma (dust_fraction, default 0.5)
 		double afrho = -1.;          //!< Afrho of the dust at 1 AU from the Sun, cm: the dust then no longer follows the magnitude (dust_afrho)
 		double betaMin = -1.;        //!< radiation pressure (beta) of the largest grains (dust_beta_min, default 0.001) ...
-		double betaMax = -1.;        //!< ... and of the smallest (dust_beta_max, default 1)
-		double sizeIndex = -1.;      //!< size distribution of the grains n(s) ~ s^-index: smaller for more large grains (dust_size_index, default 3.5)
+		double betaMax = -1.;        //!< ... and of the smallest (dust_beta_max, default 1, at most 3)
+		double sizeIndex = -1.;      //!< size distribution of the grains n(s) ~ s^-index: smaller for more large grains (dust_size_index, default 4)
 		double striae = -1.;         //!< strength of the striae: dust released in bursts (dust_striae, default 0.3)
 		double ionFraction = -1.;    //!< share of the light of the comet in its ion tail (ion_fraction, default 0.05)
 		double sodiumFraction = -1.; //!< share of the light of the comet in its sodium tail at 1 AU from the Sun (sodium_fraction, default 0.003)

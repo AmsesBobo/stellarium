@@ -535,8 +535,9 @@ change the model for one comet:\newFeature{26.3}
 	The dust then gets its light from this value, and the gas the rest of the magnitude.
 \item[dust\_beta\_min] (default: 0.001) $\beta$ of the largest grains (about 0.5\,mm). Smaller values give more
 	large grains far along the orbit, as in an anti-tail.
-\item[dust\_beta\_max] (default: 1) $\beta$ of the smallest grains (at most 1).
-\item[dust\_size\_index] (default: 3.5) index of the size distribution of the grains, $n(s)\propto s^{-3.5}$.
+\item[dust\_beta\_max] (default: 1) $\beta$ of the smallest grains. Up to 3: small absorbing grains
+	that the light of the Sun pushes away (for $\beta>1$).
+\item[dust\_size\_index] (default: 4) index of the size distribution of the grains, $n(s)\propto s^{-4}$.
 	Smaller values give more large grains.
 \item[dust\_striae] (default: 0.3) strength of the striae: dust released in bursts, which shows as bands along the
 	synchrones (0: even release).
