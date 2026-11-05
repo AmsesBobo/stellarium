@@ -24,6 +24,7 @@
 #include "StelProjectorType.hpp"
 
 #include <memory>
+#include <vector>
 
 class StelCore;
 class QOpenGLShaderProgram;
@@ -31,8 +32,9 @@ class QOpenGLBuffer;
 class QOpenGLVertexArrayObject;
 
 //! @class CloudMgr
-//! The ordinary clouds of the Earth, in the photographic mode: a layer about 1.5 km above a spherical Earth, in front of
-//! the sky. So far it has simple test shapes.
+//! The ordinary clouds of the Earth, in the photographic mode: fair weather cumulus in a layer from 1.5 km above a
+//! spherical Earth, in front of the sky. The shader follows the line of sight through the layer over a height map (see
+//! CloudShape), so perspective alone packs the clouds together and shows their sides low over the horizon.
 //!
 //! All the other lights of the sky are added to the scene, the atmosphere too. Clouds must take light away instead: the
 //! stars and the sky behind them go, and their own light and that of the air in front of them come. With the transmission
@@ -45,6 +47,10 @@ class CloudMgr : public StelModule
 	Q_OBJECT
 	//! Show the clouds (photographic mode)
 	Q_PROPERTY(bool flagShow READ getFlagShow WRITE setFlagShow NOTIFY flagShowChanged)
+	//! How much of the sky the clouds cover, from 0 to 1 (a few broken clouds, not an overcast sky)
+	Q_PROPERTY(double cover READ getCover WRITE setCover NOTIFY coverChanged)
+	//! The size of the clouds against the usual ones (bodies of 0.6 to 2 km), from 0.4 to 2.5
+	Q_PROPERTY(double size READ getSize WRITE setSize NOTIFY sizeChanged)
 
 public:
 	CloudMgr();
@@ -54,6 +60,8 @@ public:
 	void update(double) override {}
 
 	bool getFlagShow() const {return flagShow;}
+	double getCover() const {return cover;}
+	double getSize() const {return size;}
 
 	//! The transmission of the clouds towards a direction (AltAz) at this moment, from 0 to 1, for what is drawn over them:
 	//! the lens effects of the bright bodies. The same field as the shader's.
@@ -64,15 +72,26 @@ public:
 
 public slots:
 	void setFlagShow(bool b);
+	void setCover(double value);
+	void setSize(double value);
 
 signals:
 	void flagShowChanged(bool b);
+	void coverChanged(double value);
+	void sizeChanged(double value);
 
 private:
 	bool isShown(const StelCore* core) const;
 	void setLightUniforms(const StelCore* core, QOpenGLShaderProgram& p) const;
 
 	bool flagShow = false;
+	double cover = 0.2;
+	double size = 1.;
+
+	//! The height map (see CloudShape), computed when it is first needed
+	mutable std::vector<float> tile;
+	unsigned int tileTexture = 0;
+	void bindTileTexture(int unit);
 
 	void buildProgram(const StelProjector& projector);
 	void drawQuad();

@@ -42,6 +42,9 @@
 //! 4.7 at the rural site (0.00025 cd/m^2) and 10.7 at the urban one (0.0025 cd/m^2): the power law between them gives
 //! the luminance of the cloud.
 //!
+//! Low over the horizon the sides of the clouds show. They are a white surface in the light of the sky, the ground, the Sun
+//! and the Moon.
+//!
 //! The air between the observer and the cloud dims it and adds its own light. It only scatters what reaches it: direct
 //! sunlight while it stands above the shadow of the Earth, moonlight, the light of the sky, and that of towns. With
 //! the extinction along the way, the light of each source is its illuminance E, a phase function and
@@ -74,6 +77,9 @@ public:
 		Rgb airSun = {0., 0., 0.};      //!< the same from the Sun, for a phase function of 1
 		Rgb airMoon = {0., 0., 0.};     //!< the same from the Moon
 		Rgb extinction = {0., 0., 0.};  //!< the optical depth of the air below the clouds per km
+		Rgb sideSky = {0., 0., 0.};     //!< the luminance of the sides of the clouds in the light of the sky and the ground
+		Rgb sideSun = {0., 0., 0.};     //!< the same in sunlight, on a side that faces the Sun
+		Rgb sideMoon = {0., 0., 0.};    //!< the same in moonlight
 	};
 
 	static Light compute(const Sources& sources);

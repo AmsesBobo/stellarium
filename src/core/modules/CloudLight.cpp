@@ -27,6 +27,7 @@ namespace
 constexpr double Reflectance = 0.77;    // of the base of the clouds
 constexpr double Transmittance = 0.23;  // diffuse, through the clouds
 constexpr double GroundAlbedo = 0.2;
+constexpr double SideReflectance = 0.85;
 constexpr double DegreesToRadians = M_PI/180.;
 // The air is below the layer, at sea level (Bucholtz 1995, at 612, 547 and 464 nm); the haze has about this scale height
 constexpr double RayleighDepth[3] = {0.058, 0.098, 0.183};
@@ -93,7 +94,10 @@ CloudLight::Light CloudLight::compute(const Sources& s)
 		light.cloud[i] = (Reflectance*GroundAlbedo*ground + Transmittance*above)/M_PI + cloudLight*s.lamp[i];
 		light.airSky[i] = skyLight*sky[i]/(4.*M_PI) + s.artificial*s.lamp[i];
 		light.airSun[i] = sunlitAir*s.sun[i]/(4.*M_PI);
-		light.airMoon[i] = s.moon[i]/(4.*M_PI);
+		light.airMoon[i] = (s.moonSine > 0. ? 1. : 0.)*s.moon[i]/(4.*M_PI);
+		light.sideSky[i] = SideReflectance*(skyLight*sky[i] + 0.5*GroundAlbedo*ground)/M_PI + 0.5*cloudLight*s.lamp[i];
+		light.sideSun[i] = sunlitAir*SideReflectance*s.sun[i]/M_PI;
+		light.sideMoon[i] = (s.moonSine > 0. ? SideReflectance : 0.)*s.moon[i]/M_PI;
 		light.extinction[i] = RayleighDepth[i]/RayleighHeight + hazeDepth*HazeColor[i]*(1. - std::exp(-1.))/HazeHeight;
 	}
 	return light;

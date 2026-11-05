@@ -242,6 +242,8 @@ SET(stellarium_lib_SRCS
      core/modules/CloudLight.cpp
      core/modules/CloudLight.hpp
      core/modules/CloudMgr.cpp
+     core/modules/CloudShape.cpp
+     core/modules/CloudShape.hpp
      core/modules/CloudMgr.hpp
      core/modules/NoctilucentCloudMgr.cpp
      core/modules/NoctilucentCloudMgr.hpp

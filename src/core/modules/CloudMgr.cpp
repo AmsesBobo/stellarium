@@ -19,6 +19,7 @@
 
 #include "CloudMgr.hpp"
 #include "CloudLight.hpp"
+#include "CloudShape.hpp"
 #include "StelApp.hpp"
 #include "StelCore.hpp"
 #include "StelLocation.hpp"
@@ -46,33 +47,12 @@
 namespace
 {
 constexpr double EarthRadius = 6371.;     // km
-constexpr double CloudHeight = 1.5;       // km
 constexpr int VertexAttribIndex = 0;
+}
 
-// The noise of the shader (see cloudHash(), cloudNoise() and cloudTransmission() there), in the same single precision
-float fract(float x)
-{
-	return x - std::floor(x);
-}
-float cloudHash(float x, float y)
-{
-	float a = fract(x*0.1031f), b = fract(y*0.1031f), c = a;
-	const float d = a*(b + 33.33f) + b*(c + 33.33f) + c*(a + 33.33f);
-	a += d;
-	b += d;
-	c += d;
-	return fract((a + b)*c);
-}
-float cloudNoise(float x, float y)
-{
-	const float ix = std::floor(x), iy = std::floor(y);
-	const float fx = x - ix, fy = y - iy;
-	const float u = fx*fx*(3.f - 2.f*fx), v = fy*fy*(3.f - 2.f*fy);
-	const float bottom = cloudHash(ix, iy) + u*(cloudHash(ix + 1.f, iy) - cloudHash(ix, iy));
-	const float top = cloudHash(ix, iy + 1.f) + u*(cloudHash(ix + 1.f, iy + 1.f) - cloudHash(ix, iy + 1.f));
-	return bottom + v*(top - bottom);
-}
-}
+#ifndef GL_RGBA32F
+#define GL_RGBA32F 0x8814
+#endif
 
 CloudMgr::CloudMgr()
 {
@@ -87,6 +67,8 @@ void CloudMgr::init()
 {
 	QSettings* conf = StelApp::getInstance().getSettings();
 	setFlagShow(conf->value("clouds/flag_show", false).toBool());
+	setCover(conf->value("clouds/cover", 0.2).toDouble());
+	setSize(conf->value("clouds/size", 1.).toDouble());
 	addAction("actionShow_Clouds", N_("Display Options"), N_("Clouds"), "flagShow");
 
 	// A full screen quad
@@ -118,6 +100,49 @@ void CloudMgr::setFlagShow(bool b)
 		StelApp::immediateSave("clouds/flag_show", b);
 		emit flagShowChanged(b);
 	}
+}
+
+void CloudMgr::setCover(double value)
+{
+	value = std::clamp(value, 0., 1.);
+	if (!qFuzzyCompare(value, cover))
+	{
+		cover = value;
+		StelApp::immediateSave("clouds/cover", value);
+		emit coverChanged(value);
+	}
+}
+
+void CloudMgr::setSize(double value)
+{
+	value = std::clamp(value, 0.4, 2.5);
+	if (!qFuzzyCompare(value, size))
+	{
+		size = value;
+		StelApp::immediateSave("clouds/size", value);
+		emit sizeChanged(value);
+	}
+}
+
+void CloudMgr::bindTileTexture(int unit)
+{
+	auto& gl = *QOpenGLContext::currentContext()->functions();
+	gl.glActiveTexture(GL_TEXTURE0 + static_cast<GLenum>(unit));
+	if (!tileTexture)
+	{
+		if (tile.empty())
+			tile = CloudShape::computeTile();
+		gl.glGenTextures(1, &tileTexture);
+		gl.glBindTexture(GL_TEXTURE_2D, tileTexture);
+		gl.glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, CloudShape::TileTexels, CloudShape::TileTexels, 0, GL_RGBA, GL_FLOAT, tile.data());
+		gl.glGenerateMipmap(GL_TEXTURE_2D);
+		gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+		gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+		gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	}
+	gl.glBindTexture(GL_TEXTURE_2D, tileTexture);
+	gl.glActiveTexture(GL_TEXTURE0);
 }
 
 void CloudMgr::buildProgram(const StelProjector& projector)
@@ -152,38 +177,52 @@ uniform highp mat4 projectionMatrixInverse;
 uniform highp vec3 cloudSouth;      // the axes of the frame in the Earth-fixed one
 uniform highp vec3 cloudEast;
 uniform highp vec3 cloudUp;
-uniform highp vec4 cloudRadii;      // of the observer and the layer (km); the height of the layer above the observer
-                                    // (km); the size of a pixel (radians)
+uniform highp vec4 cloudRadii;      // the observer's radius; the radius of the base; c of the base and of the top of the
+                                    // layer: (r - observer)(r + observer) (km)
+uniform highp float cloudPixel;     // the size of a pixel (radians)
 uniform highp vec3 cloudSun;        // unit vectors towards the Sun and the Moon
 uniform highp vec3 cloudMoon;
 uniform highp vec3 cloudLight;      // the light of the clouds and the air (see CloudLight), for the scene
+uniform highp vec3 sideSky;
+uniform highp vec3 sideSun;
+uniform highp vec3 sideMoon;
 uniform highp vec3 airSky;
 uniform highp vec3 airSun;
 uniform highp vec3 airMoon;
 uniform highp vec3 airExtinction;   // per km
+const int CloudSubsteps = 6;
+uniform sampler2D cloudTile;        // the height map (see CloudShape)
+uniform highp vec4 cloudTileScale;  // 1/km: of the tile, of its two cover sizes, of the fine lobes
+uniform highp float cloudSize;      // the scale of the clouds against those of the tile
+uniform highp vec4 cloudCover;      // cover offset: constant, per noise; the mean size of a texel of the tile (km); the
+                                    // extinction in the clouds (per km)
 
-// Value noise on a map of the layer in km: hash (Dave Hoskins, "Hash without Sine")
-highp float cloudHash(highp vec2 p)
+// The place on the map: a polar stereographic projection, in km, of each hemisphere
+highp vec2 cloudMap(highp vec3 p)
 {
-	highp vec3 p3 = fract(vec3(p.xyx)*0.1031);
-	p3 += dot(p3, p3.yzx + 33.33);
-	return fract((p3.x + p3.y)*p3.z);
-}
-highp float cloudNoise(highp vec2 p)
-{
-	highp vec2 i = floor(p), f = p - i;
-	highp float a = cloudHash(i), b = cloudHash(i + vec2(1, 0)), c = cloudHash(i + vec2(0, 1)), d = cloudHash(i + vec2(1, 1));
-	f = f*f*(3. - 2.*f);
-	return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+	highp vec3 earth = p.x*cloudSouth + p.y*cloudEast + p.z*cloudUp;
+	return 2.*cloudRadii.y*earth.xy/(length(earth) + abs(earth.z));
 }
 
-// The test shapes: patches of about 1.5 km, opaque with sharp edges, which blend into a mean where a pixel covers
-// more than a patch (foot: its size on the layer, km)
-highp float cloudTransmission(highp vec2 map, highp float foot)
+// The heights over the base of the top and the underside of the cloud at a place (km, the top below 0 outside the clouds),
+// from the shape at the level of detail lod. near: how much the fine lobes count
+highp vec2 cloudHeights(highp vec2 map, highp float lod, highp float near)
 {
-	highp float n = 0.7*cloudNoise(map/1.6) + 0.3*cloudNoise(map/0.6 + 37.);
-	highp float edge = 0.015 + 0.3*foot/1.6;
-	return 1. - smoothstep(0.56 - edge, 0.56 + edge, n);
+	highp vec4 f = textureLod(cloudTile, map*cloudTileScale.x, lod);
+	highp float noise = 0.6*textureLod(cloudTile, map*cloudTileScale.y, 2.).z + 0.4*textureLod(cloudTile, map*cloudTileScale.z, 2.).z;
+	highp float s = f.x + min(cloudCover.x + cloudCover.y*noise, 0.34); // (it never fills the clear parts of the map)
+	if (near > 0.)
+		s += near*0.12*(textureLod(cloudTile, map*cloudTileScale.w, 0.).w - 0.62);
+	// a rounded top, and an underside that is flat but for its rim
+	highp float height = cloudSize*f.y;
+	highp float top = height*s/pow(abs(s) + 0.01, 0.3);
+	return vec2(top, 0.3*height*pow(1. - clamp(s/0.35, 0., 1.), 2.));
+}
+
+highp float shellDistance(highp float b, highp float c)
+{
+	// from inside the shell, in this form to keep the precision over short ways
+	return c/(b + sqrt(b*b + c));
 }
 
 void main(void)
@@ -197,34 +236,96 @@ void main(void)
 		return;
 	}
 	altAz = normalize(altAz);
-	// Below the horizon the line of sight meets the Earth. Near it the refraction carries it on along the Earth: the
-	// layer ends there, at about 140 km
+	// Below the horizon the line of sight meets the Earth. Near it the refraction carries it on along the Earth
 	if (altAz.z < -0.015)
 	{
 		FRAG_COLOR = vec4(0., 0., 0., 1.);
 		return;
 	}
+	// (a level line of sight still reaches the layer, however far away)
+	if (altAz.z < 0.008)
+		altAz.z = 0.008*exp(altAz.z/0.008 - 1.);
 	highp float r0 = cloudRadii.x;
-	highp float b = r0*max(altAz.z, 0.);
-	// where the line of sight, from inside the shell, leaves it (in this form to keep the precision over short ways)
-	highp float c = cloudRadii.z*(cloudRadii.x + cloudRadii.y);
-	highp float t = c/(b + sqrt(b*b + c));
-	highp vec3 p = vec3(0., 0., r0) + t*vec3(altAz.xy, max(altAz.z, 0.));
-	// a slanted line of sight sees more of the layer in a pixel
-	highp float slant = length(p)/dot(p, normalize(p - vec3(0., 0., r0)));
+	highp float b = r0*altAz.z;
+	highp float t0 = shellDistance(b, cloudRadii.z), t1 = shellDistance(b, cloudRadii.w);
+	int steps = int(clamp(ceil((t1 - t0)/0.12), 1., 24.));
+	highp float ds = (t1 - t0)/float(steps);
 
-	// the place on the map: a polar stereographic projection, in km, of each hemisphere
-	highp vec3 earth = p.x*cloudSouth + p.y*cloudEast + p.z*cloudUp;
-	highp vec3 unit = earth/length(earth);
-	highp vec2 map = 2.*cloudRadii.y*unit.xy/(1. + abs(unit.z));
-	highp float T = cloudTransmission(map, t*cloudRadii.w*slant);
+	// Through the layer, until the clouds are opaque; the first place in a cloud is the one we see. Long steps look for
+	// the clouds, short ones find their surface
+	highp float depth = 0., hitT = -1., hitZ = 0., hitTop = 0., hitUnder = 0., hitLod = 0.;
+	for (int k = 0; k < steps && depth < 7.; ++k)
+	{
+		highp float t = t0 + float(k)*ds;
+		highp vec3 p = vec3(altAz.xy*t, r0 + altAz.z*t);
+		highp float z = length(p) - cloudRadii.y;
+		highp float foot = max(t*cloudPixel, 0.1*ds);
+		highp float lod = max(log2(foot/cloudCover.z), 0.);
+		highp float near = 1. - smoothstep(0.03, 0.12, foot);
+		// A blurred look at the map tells whether a cloud lies anywhere near this step (the clear parts are clamped)
+		if (textureLod(cloudTile, cloudMap(p + 0.5*ds*altAz)*cloudTileScale.x, log2(2.*ds/cloudCover.z)).x > -0.345)
+		{
+			highp float dt = ds/float(CloudSubsteps);
+			for (int j = 0; j < CloudSubsteps && depth < 7.; ++j)
+			{
+				highp float u = t + (float(j) + 0.5)*dt;
+				highp vec3 q = vec3(altAz.xy*u, r0 + altAz.z*u);
+				highp float height = length(q) - cloudRadii.y;
+				highp vec2 h = cloudHeights(cloudMap(q), lod, near);
+				highp float e = max(0.012, foot);
+				highp float inside = smoothstep(-e, e, min(h.x - height, height - h.y));
+				depth += cloudCover.w*dt*inside;
+				if (hitT < 0. && inside > 0.3)
+				{
+					// the surface lies between this place and the last one
+					highp float inner = u, outer = u - dt;
+					for (int n = 0; n < 4; ++n)
+					{
+						highp float mid = 0.5*(inner + outer);
+						q = vec3(altAz.xy*mid, r0 + altAz.z*mid);
+						height = length(q) - cloudRadii.y;
+						h = cloudHeights(cloudMap(q), lod, near);
+						if (min(h.x - height, height - h.y) > 0.)
+							inner = mid;
+						else
+							outer = mid;
+					}
+					hitT = inner;
+					hitZ = height;
+					hitTop = h.x;
+					hitUnder = h.y;
+					hitLod = lod;
+				}
+			}
+		}
+	}
+	if (hitT < 0.)
+	{
+		FRAG_COLOR = vec4(0., 0., 0., 1.);
+		return;
+	}
+	highp float T = exp(-depth);
+
+	// The base, or a side with its normal from the slope of the top: the clouds stand on the local level
+	highp vec3 p = vec3(altAz.xy*hitT, r0 + altAz.z*hitT);
+	highp float delta = max(0.04, hitT*cloudPixel);
+	highp vec2 map = cloudMap(p);
+	highp vec2 slope = vec2(cloudHeights(cloudMap(p + vec3(delta, 0., 0.)), hitLod, 0.).x, cloudHeights(cloudMap(p + vec3(0., delta, 0.)), hitLod, 0.).x) - cloudHeights(map, hitLod, 0.).x;
+	highp vec3 normal = normalize(vec3(-slope/delta, 1.));
+	highp float high = clamp(hitZ/max(hitTop, 0.05), 0., 1.);
+	highp vec3 side = sideSky*(0.45 + 0.35*normal.z + 0.2*high)
+	                + sideSun*max(dot(normal, cloudSun), 0.) + sideMoon*max(dot(normal, cloudMoon), 0.);
+	// (from below the line of sight meets the underside, and the thin rim lets more through)
+	highp float fromBelow = smoothstep(0.08, -0.02, hitZ - hitUnder)*(1. - smoothstep(0.1, 0.4, hitZ));
+	highp float rim = clamp(hitUnder/0.1, 0., 1.);
+	highp vec3 light = mix(side, cloudLight + 0.4*rim*(side - cloudLight), fromBelow);
 
 	// The way through the air dims the cloud and adds the light of the air (Rayleigh phase function)
-	highp vec3 way = exp(-airExtinction*t);
+	highp vec3 way = exp(-airExtinction*hitT);
 	highp float sunCos = dot(altAz, cloudSun), moonCos = dot(altAz, cloudMoon);
 	highp vec3 air = (1. - way)*(airSky + airSun*0.75*(1. + sunCos*sunCos) + airMoon*0.75*(1. + moonCos*moonCos));
 	// out = source + scene x alpha
-	FRAG_COLOR = vec4((cloudLight*way + air)*(1. - T), T);
+	FRAG_COLOR = vec4((light*way + air)*(1. - T), T);
 }
 )";
 	if (!newProgram->addShaderFromSourceCode(QOpenGLShader::Fragment, frag))
@@ -247,35 +348,23 @@ bool CloudMgr::isShown(const StelCore* core) const
 	// spherical Earth, is below the layer)
 	return drawer->getFlagPhotographicModeActive() && drawer->getFlagHasAtmosphere()
 	       && core->getCurrentPlanet()->getEnglishName() == QStringLiteral("Earth")
-	       && core->getCurrentLocation().altitude*0.001 < CloudHeight;
+	       && core->getCurrentLocation().altitude*0.001 < CloudShape::BaseHeight;
 }
 
 double CloudMgr::getTransmission(const StelCore* core, Vec3d altAz) const
 {
 	if (!isShown(core))
 		return 1.;
+	if (tile.empty())
+		tile = CloudShape::computeTile();
 	altAz.normalize();
-	if (altAz[2] < -0.015)
-		return 1.;
 	const StelLocation& location = core->getCurrentLocation();
-	const double r0 = EarthRadius + std::max(0., location.altitude*0.001);
-	const double rc = EarthRadius + CloudHeight;
-	const double b = r0*std::max(altAz[2], 0.);
-	const double c = (rc - r0)*(rc + r0);
-	const double t = c/(b + std::sqrt(b*b + c));
-	const Vec3d p(t*altAz[0], t*altAz[1], r0 + t*std::max(altAz[2], 0.));
 	const double phi = static_cast<double>(location.getLatitude())*M_PI/180.;
 	const double lambda = static_cast<double>(location.getLongitude())*M_PI/180.;
-	const Vec3d up(std::cos(phi)*std::cos(lambda), std::cos(phi)*std::sin(lambda), std::sin(phi));
-	const Vec3d east(-std::sin(lambda), std::cos(lambda), 0.);
-	const Vec3d south(std::sin(phi)*std::cos(lambda), std::sin(phi)*std::sin(lambda), -std::cos(phi));
-	Vec3d unit = south*p[0] + east*p[1] + up*p[2];
-	unit.normalize();
-	const double scale = 2.*rc/(1. + std::fabs(unit[2]));
-	const float x = static_cast<float>(scale*unit[0]), y = static_cast<float>(scale*unit[1]);
-	const float n = 0.7f*cloudNoise(x/1.6f, y/1.6f) + 0.3f*cloudNoise(x/0.6f + 37.f, y/0.6f + 37.f);
-	const double e = std::clamp((static_cast<double>(n) - 0.545)/0.03, 0., 1.);
-	return 1. - e*e*(3. - 2.*e);
+	const std::array<double, 3> up = {std::cos(phi)*std::cos(lambda), std::cos(phi)*std::sin(lambda), std::sin(phi)};
+	const std::array<double, 3> east = {-std::sin(lambda), std::cos(lambda), 0.};
+	const std::array<double, 3> south = {std::sin(phi)*std::cos(lambda), std::sin(phi)*std::sin(lambda), -std::cos(phi)};
+	return CloudShape::transmission(tile, cover, size, EarthRadius + std::max(0., location.altitude*0.001), {altAz[0], altAz[1], altAz[2]}, south, east, up);
 }
 
 void CloudMgr::setLightUniforms(const StelCore* core, QOpenGLShaderProgram& p) const
@@ -329,6 +418,9 @@ void CloudMgr::setLightUniforms(const StelCore* core, QOpenGLShaderProgram& p) c
 	p.setUniformValue("cloudSun", direction(sun));
 	p.setUniformValue("cloudMoon", direction(moon));
 	p.setUniformValue("cloudLight", scene(light.cloud));
+	p.setUniformValue("sideSky", scene(light.sideSky));
+	p.setUniformValue("sideSun", scene(light.sideSun));
+	p.setUniformValue("sideMoon", scene(light.sideMoon));
 	p.setUniformValue("airSky", scene(light.airSky));
 	p.setUniformValue("airSun", scene(light.airSun));
 	p.setUniformValue("airMoon", scene(light.airMoon));
@@ -369,9 +461,20 @@ void CloudMgr::drawOverSky(StelCore* core)
 	p.setUniformValue("cloudSouth", vec(south));
 	p.setUniformValue("cloudEast", vec(east));
 	p.setUniformValue("cloudUp", vec(up));
-	p.setUniformValue("cloudRadii", QVector4D(static_cast<float>(EarthRadius + observerHeight), static_cast<float>(EarthRadius + CloudHeight),
-	                                          static_cast<float>(CloudHeight - observerHeight),
-	                                          static_cast<float>(1./static_cast<double>(prj->getPixelPerRadAtCenter()))));
+	const double r0 = EarthRadius + observerHeight;
+	const double base = EarthRadius + CloudShape::BaseHeight, top = base + CloudShape::LayerThickness*size;
+	p.setUniformValue("cloudRadii", QVector4D(static_cast<float>(r0), static_cast<float>(base), static_cast<float>((base - r0)*(base + r0)),
+	                                          static_cast<float>((top - r0)*(top + r0))));
+	p.setUniformValue("cloudPixel", static_cast<float>(1./static_cast<double>(prj->getPixelPerRadAtCenter())));
+	bindTileTexture(2);
+	p.setUniformValue("cloudTile", 2);
+	p.setUniformValue("cloudTileScale", QVector4D(static_cast<float>(1./(size*CloudShape::TileSize)), static_cast<float>(1./CloudShape::CoverScaleLarge),
+	                                              static_cast<float>(1./CloudShape::CoverScaleSmall), static_cast<float>(1./(size*CloudShape::FineScale))));
+	p.setUniformValue("cloudSize", static_cast<float>(size));
+	// the offset of the cover is linear in the noise: two points give it
+	const float coverStart = static_cast<float>(CloudShape::coverOffset(cover, 0.));
+	p.setUniformValue("cloudCover", QVector4D(coverStart, static_cast<float>(CloudShape::coverOffset(cover, 1.)) - coverStart,
+	                                          static_cast<float>(size*CloudShape::TileSize/CloudShape::TileTexels), static_cast<float>(CloudShape::Extinction)));
 
 	// out = source + scene x alpha; the alpha of the scene stays as it is. The state of the blending goes back to what it
 	// was: StelPainter remembers it and would not set it again

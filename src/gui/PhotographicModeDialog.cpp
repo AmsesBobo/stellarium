@@ -343,6 +343,8 @@ void PhotographicModeDialog::createDialogContent()
 		connect(clouds, &NoctilucentCloudMgr::occurrenceInfoChanged, ui->noctilucentCloudsInfoLabel, &QLabel::setText);
 	}
 	connectBoolProperty(ui->cloudsCheckBox,           "CloudMgr.flagShow");
+	connectDoubleProperty(ui->cloudsCoverSpinBox,     "CloudMgr.cover");
+	connectDoubleProperty(ui->cloudsSizeSpinBox,      "CloudMgr.size");
 	connectBoolProperty(ui->cometTailsCheckBox,       "CometTailMgr.flagShow");
 	connectBoolProperty(ui->cometTailGuidesCheckBox,  "CometTailMgr.flagShowGuides");
 	// The aurorae: the activity is a preset or a custom Kp; the substorm cycle shows where it stands
