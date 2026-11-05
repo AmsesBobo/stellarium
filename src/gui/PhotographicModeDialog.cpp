@@ -78,7 +78,7 @@ const QVector<double> PhotographicModeDialog::isoValues = {
 	50, 64, 80, 100, 125, 160, 200, 250, 320, 400, 500, 640, 800, 1000, 1250, 1600, 2000, 2500,
 	3200, 4000, 5000, 6400, 8000, 10000, 12800, 16000, 20000, 25600, 51200, 102400, 204800 };
 
-PhotographicModeDialog::PhotographicModeDialog(QObject* parent) : StelDialog("PhotographicMode", parent)
+PhotographicModeDialog::PhotographicModeDialog(QObject* parent) : StelDialog("CameraSettings", parent)
 {
 	ui = new Ui_PhotographicModeDialogForm;
 }

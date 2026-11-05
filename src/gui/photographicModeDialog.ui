@@ -34,308 +34,476 @@
     </widget>
    </item>
    <item>
-    <!-- Two columns, so that the window fits on the screen: the camera and the star images on the left, the lens and the light domes on the right -->
-    <layout class="QHBoxLayout" name="columnsLayout">
-     <property name="spacing">
+    <!-- Two tabs with two columns each, so that the window fits on the screen -->
+    <widget class="QTabWidget" name="settingsTabWidget">
+     <property name="currentIndex">
       <number>0</number>
      </property>
-     <item>
-      <layout class="QVBoxLayout" name="leftColumnLayout">
+     <widget class="QWidget" name="cameraTab">
+      <attribute name="title">
+       <string>Camera</string>
+      </attribute>
+      <layout class="QHBoxLayout" name="columnsLayout">
        <property name="spacing">
         <number>0</number>
        </property>
+       <property name="leftMargin">
+        <number>0</number>
+       </property>
+       <property name="topMargin">
+        <number>0</number>
+       </property>
+       <property name="rightMargin">
+        <number>0</number>
+       </property>
+       <property name="bottomMargin">
+        <number>0</number>
+       </property>
        <item>
-        <widget class="QGroupBox" name="cameraGroupBox">
-         <property name="title">
-          <string>Camera</string>
+        <layout class="QVBoxLayout" name="leftColumnLayout">
+         <property name="spacing">
+          <number>0</number>
          </property>
-         <layout class="QGridLayout" name="cameraGridLayout">
-          <item row="0" column="0" colspan="2">
-           <widget class="QCheckBox" name="photographicModeCheckBox">
-            <property name="toolTip">
-             <string>Render the sky like a camera: linear sensor, fixed exposure, no eye adaptation. Needs OpenGL 3 or later.</string>
-            </property>
-            <property name="text">
-             <string>Photographic (camera-like) rendering</string>
-            </property>
-           </widget>
-          </item>
-          <item row="1" column="0">
-           <widget class="QLabel" name="exposureModeLabel">
-            <property name="text">
-             <string>Exposure mode:</string>
-            </property>
-           </widget>
-          </item>
-          <item row="1" column="1">
-           <widget class="QComboBox" name="exposureModeComboBox">
-            <property name="toolTip">
-             <string>Manual (M): you set the time, the aperture and the ISO. Aperture priority (Av, A): the camera meters the picture and sets the exposure time (1/8000 s to 30 s) for your aperture and ISO. Program (P) with automatic ISO: the camera sets all three, from ISO 100 and f/8 in daylight, through a wider aperture at dusk and longer times (on a fixed tripod as long as the stars stay points, the "500 rule"), up to ISO 6400 at night (both limits can be changed under Program limits). The exposure compensation acts in both automatic modes.</string>
-            </property>
-           </widget>
-          </item>
-          <item row="2" column="0">
-           <widget class="QLabel" name="meteringLabel">
-            <property name="text">
-             <string>Metering:</string>
-            </property>
-           </widget>
-          </item>
-          <item row="2" column="1">
-           <widget class="QComboBox" name="meteringComboBox">
-            <property name="toolTip">
-             <string>Center-weighted: most of the weight in the middle of the picture, like a classic camera meter. Spot: only a small circle in the middle. Highlight-weighted: the brightest part of the picture must not burn out.</string>
-            </property>
-           </widget>
-          </item>
-          <item row="3" column="0">
-           <widget class="QLabel" name="programLimitsLabel">
-            <property name="text">
-             <string>Program limits:</string>
-            </property>
-           </widget>
-          </item>
-          <item row="3" column="1">
-           <layout class="QHBoxLayout" name="programLimitsLayout">
-            <item>
-             <widget class="QComboBox" name="programMaxIsoComboBox">
+         <item>
+          <widget class="QGroupBox" name="cameraGroupBox">
+           <property name="title">
+            <string>Camera</string>
+           </property>
+           <layout class="QGridLayout" name="cameraGridLayout">
+            <item row="0" column="0" colspan="2">
+             <widget class="QCheckBox" name="photographicModeCheckBox">
               <property name="toolTip">
-               <string>Program mode: the highest ISO the automatic ISO may use, like the "maximum sensitivity" in a camera's auto-ISO menu. Beyond the longest time and this ISO the picture is underexposed. A film keeps its own speed.</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QComboBox" name="programMaxTimeComboBox">
-              <property name="toolTip">
-               <string>Program mode: the longest exposure time the camera may use. On a fixed tripod the "500 rule" may give a shorter time, so that the stars stay points.</string>
-              </property>
-             </widget>
-            </item>
-           </layout>
-          </item>
-          <item row="4" column="0">
-           <widget class="QLabel" name="exposureTimeLabel">
-            <property name="text">
-             <string>Exposure time:</string>
-            </property>
-           </widget>
-          </item>
-          <item row="4" column="1">
-           <widget class="QComboBox" name="exposureTimeComboBox">
-            <property name="toolTip">
-             <string>Shutter speed of the virtual camera</string>
-            </property>
-           </widget>
-          </item>
-          <item row="5" column="0">
-           <widget class="QLabel" name="apertureLabel">
-            <property name="text">
-             <string>Aperture:</string>
-            </property>
-           </widget>
-          </item>
-          <item row="5" column="1">
-           <layout class="QHBoxLayout" name="apertureLayout">
-            <item>
-             <widget class="QComboBox" name="apertureComboBox">
-              <property name="toolTip">
-               <string>f-number of the lens. The field of view of the screen acts as the focal length.</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QCheckBox" name="programApertureLockCheckBox">
-              <property name="text">
-               <string>Keep in P</string>
-              </property>
-              <property name="toolTip">
-               <string>Program mode: keep this aperture and let the camera choose only the exposure time and the ISO, as aperture priority with automatic ISO does on a camera.</string>
-              </property>
-             </widget>
-            </item>
-           </layout>
-          </item>
-          <item row="6" column="0">
-           <widget class="QLabel" name="isoLabel">
-            <property name="text">
-             <string>ISO:</string>
-            </property>
-           </widget>
-          </item>
-          <item row="6" column="1">
-           <widget class="QComboBox" name="isoComboBox">
-            <property name="toolTip">
-             <string>Sensitivity of the sensor</string>
-            </property>
-           </widget>
-          </item>
-          <item row="7" column="0">
-           <widget class="QLabel" name="evLabel">
-            <property name="text">
-             <string>Exposure compensation:</string>
-            </property>
-           </widget>
-          </item>
-          <item row="7" column="1">
-           <widget class="QDoubleSpinBox" name="evDoubleSpinBox">
-            <property name="toolTip">
-             <string>Brighten (+) or darken (-) the picture in photographic stops. Keyboard: Alt+X / Alt+Shift+X</string>
-            </property>
-            <property name="alignment">
-             <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
-            </property>
-            <property name="suffix">
-             <string> EV</string>
-            </property>
-            <property name="decimals">
-             <number>1</number>
-            </property>
-            <property name="minimum">
-             <double>-12.000000000000000</double>
-            </property>
-            <property name="maximum">
-             <double>12.000000000000000</double>
-            </property>
-            <property name="singleStep">
-             <double>0.333333333333333</double>
-            </property>
-           </widget>
-          </item>
-          <item row="8" column="0" colspan="2">
-           <widget class="QLabel" name="exposureValueLabel">
-            <property name="toolTip">
-             <string>Exposure value at ISO 100, including the compensation. Bright daylight is about 15, a moonless night sky about -6.</string>
-            </property>
-            <property name="text">
-             <string notr="true">EV100</string>
-            </property>
-           </widget>
-          </item>
-          <item row="9" column="0">
-           <widget class="QLabel" name="toneCurveLabel">
-            <property name="text">
-             <string>Tone curve:</string>
-            </property>
-           </widget>
-          </item>
-          <item row="9" column="1">
-           <widget class="QComboBox" name="toneCurveComboBox">
-            <property name="toolTip">
-             <string>How the camera turns the recorded light into the picture. Linear: proportional, with a soft roll-off of the highlights. Standard: like the JPEG of a camera (measured on a Canon EOS R6), with more contrast: darker shadows, and the highlights clipping about 3.6 stops above middle grey. Film: like negative film, softer, with room for 6 stops above middle grey.</string>
-            </property>
-           </widget>
-          </item>
-          <item row="10" column="0">
-           <widget class="QLabel" name="whiteBalanceLabel">
-            <property name="text">
-             <string>White balance:</string>
-            </property>
-           </widget>
-          </item>
-          <item row="10" column="1">
-           <widget class="QComboBox" name="whiteBalanceComboBox">
-            <property name="toolTip">
-             <string>The color of light that the camera turns into neutral white, as on a camera. Daylight keeps sunsets orange and the sky blue; automatic follows the mean color of the picture; neutral shows the colors as rendered.</string>
-            </property>
-           </widget>
-          </item>
-          <item row="11" column="0">
-           <widget class="QLabel" name="whiteBalanceKelvinLabel">
-            <property name="text">
-             <string>Color temperature:</string>
-            </property>
-           </widget>
-          </item>
-          <item row="11" column="1">
-           <widget class="QSpinBox" name="whiteBalanceKelvinSpinBox">
-            <property name="toolTip">
-             <string>Color temperature of the custom white balance. Lower values make the picture bluer, higher values warmer.</string>
-            </property>
-            <property name="alignment">
-             <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
-            </property>
-            <property name="suffix">
-             <string> K</string>
-            </property>
-            <property name="minimum">
-             <number>2000</number>
-            </property>
-            <property name="maximum">
-             <number>12000</number>
-            </property>
-            <property name="singleStep">
-             <number>100</number>
-            </property>
-           </widget>
-          </item>
-          <item row="12" column="0" colspan="2">
-           <layout class="QHBoxLayout" name="atmosphereCheckBoxLayout">
-            <item>
-             <widget class="QCheckBox" name="extinctionColorCheckBox">
-              <property name="toolTip">
-               <string>Near the horizon the atmosphere takes the blue light first, so stars, planets, the Sun, the Moon, the Milky Way and the zodiacal light turn yellow, orange or red. The color comes from the spectral transmission of the atmosphere model; the amount of extinction follows the extinction coefficient.</string>
+               <string>Render the sky like a camera: linear sensor, fixed exposure, no eye adaptation. Needs OpenGL 3 or later.</string>
               </property>
               <property name="text">
-               <string>Color of the atmospheric extinction</string>
+               <string>Photographic (camera-like) rendering</string>
               </property>
              </widget>
             </item>
-            <item>
-             <widget class="QCheckBox" name="airglowCheckBox">
-              <property name="toolTip">
-               <string>The airglow: the faint light of the upper atmosphere, about 90 km high (oxygen, sodium, OH), which is the natural night sky at a dark site. About 22.3 magnitudes per square arc second at the zenith, brighter near the maximum of the solar cycle, brightest about 10 degrees above the horizon; a warm, brownish grey in daylight white balance. Below the end of the astronomical twilight the scattered sunlight then fades away. With the default (lightweight) atmosphere model.</string>
-              </property>
+            <item row="1" column="0">
+             <widget class="QLabel" name="exposureModeLabel">
               <property name="text">
-               <string>Airglow</string>
+               <string>Exposure mode:</string>
               </property>
              </widget>
             </item>
-            <item>
-             <widget class="QSpinBox" name="airglowStrengthSpinBox">
+            <item row="1" column="1">
+             <widget class="QComboBox" name="exposureModeComboBox">
               <property name="toolTip">
-               <string>The brightness of the airglow against its mean (100%: about 22.5 magnitudes per square arc second at the zenith at a mean solar activity). It changes from night to night by about a factor of two, and with the solar cycle by about 30% (that part is computed from the date).</string>
+               <string>Manual (M): you set the time, the aperture and the ISO. Aperture priority (Av, A): the camera meters the picture and sets the exposure time (1/8000 s to 30 s) for your aperture and ISO. Program (P) with automatic ISO: the camera sets all three, from ISO 100 and f/8 in daylight, through a wider aperture at dusk and longer times (on a fixed tripod as long as the stars stay points, the "500 rule"), up to ISO 6400 at night (both limits can be changed under Program limits). The exposure compensation acts in both automatic modes.</string>
+              </property>
+             </widget>
+            </item>
+            <item row="2" column="0">
+             <widget class="QLabel" name="meteringLabel">
+              <property name="text">
+               <string>Metering:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="2" column="1">
+             <widget class="QComboBox" name="meteringComboBox">
+              <property name="toolTip">
+               <string>Center-weighted: most of the weight in the middle of the picture, like a classic camera meter. Spot: only a small circle in the middle. Highlight-weighted: the brightest part of the picture must not burn out.</string>
+              </property>
+             </widget>
+            </item>
+            <item row="3" column="0">
+             <widget class="QLabel" name="programLimitsLabel">
+              <property name="text">
+               <string>Program limits:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="3" column="1">
+             <layout class="QHBoxLayout" name="programLimitsLayout">
+              <item>
+               <widget class="QComboBox" name="programMaxIsoComboBox">
+                <property name="toolTip">
+                 <string>Program mode: the highest ISO the automatic ISO may use, like the "maximum sensitivity" in a camera's auto-ISO menu. Beyond the longest time and this ISO the picture is underexposed. A film keeps its own speed.</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QComboBox" name="programMaxTimeComboBox">
+                <property name="toolTip">
+                 <string>Program mode: the longest exposure time the camera may use. On a fixed tripod the "500 rule" may give a shorter time, so that the stars stay points.</string>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </item>
+            <item row="4" column="0">
+             <widget class="QLabel" name="exposureTimeLabel">
+              <property name="text">
+               <string>Exposure time:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="4" column="1">
+             <widget class="QComboBox" name="exposureTimeComboBox">
+              <property name="toolTip">
+               <string>Shutter speed of the virtual camera</string>
+              </property>
+             </widget>
+            </item>
+            <item row="5" column="0">
+             <widget class="QLabel" name="apertureLabel">
+              <property name="text">
+               <string>Aperture:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="5" column="1">
+             <layout class="QHBoxLayout" name="apertureLayout">
+              <item>
+               <widget class="QComboBox" name="apertureComboBox">
+                <property name="toolTip">
+                 <string>f-number of the lens. The field of view of the screen acts as the focal length.</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QCheckBox" name="programApertureLockCheckBox">
+                <property name="text">
+                 <string>Keep in P</string>
+                </property>
+                <property name="toolTip">
+                 <string>Program mode: keep this aperture and let the camera choose only the exposure time and the ISO, as aperture priority with automatic ISO does on a camera.</string>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </item>
+            <item row="6" column="0">
+             <widget class="QLabel" name="isoLabel">
+              <property name="text">
+               <string>ISO:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="6" column="1">
+             <widget class="QComboBox" name="isoComboBox">
+              <property name="toolTip">
+               <string>Sensitivity of the sensor</string>
+              </property>
+             </widget>
+            </item>
+            <item row="7" column="0">
+             <widget class="QLabel" name="evLabel">
+              <property name="text">
+               <string>Exposure compensation:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="7" column="1">
+             <widget class="QDoubleSpinBox" name="evDoubleSpinBox">
+              <property name="toolTip">
+               <string>Brighten (+) or darken (-) the picture in photographic stops. Keyboard: Alt+X / Alt+Shift+X</string>
               </property>
               <property name="alignment">
                <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
               </property>
-              <property name="keyboardTracking">
-               <bool>false</bool>
-              </property>
               <property name="suffix">
-               <string> %</string>
+               <string> EV</string>
+              </property>
+              <property name="decimals">
+               <number>1</number>
               </property>
               <property name="minimum">
-               <number>25</number>
+               <double>-12.000000000000000</double>
               </property>
               <property name="maximum">
-               <number>200</number>
+               <double>12.000000000000000</double>
               </property>
               <property name="singleStep">
-               <number>5</number>
+               <double>0.333333333333333</double>
               </property>
-              <property name="value">
+             </widget>
+            </item>
+            <item row="8" column="0" colspan="2">
+             <widget class="QLabel" name="exposureValueLabel">
+              <property name="toolTip">
+               <string>Exposure value at ISO 100, including the compensation. Bright daylight is about 15, a moonless night sky about -6.</string>
+              </property>
+              <property name="text">
+               <string notr="true">EV100</string>
+              </property>
+             </widget>
+            </item>
+            <item row="9" column="0">
+             <widget class="QLabel" name="toneCurveLabel">
+              <property name="text">
+               <string>Tone curve:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="9" column="1">
+             <widget class="QComboBox" name="toneCurveComboBox">
+              <property name="toolTip">
+               <string>How the camera turns the recorded light into the picture. Linear: proportional, with a soft roll-off of the highlights. Standard: like the JPEG of a camera (measured on a Canon EOS R6), with more contrast: darker shadows, and the highlights clipping about 3.6 stops above middle grey. Film: like negative film, softer, with room for 6 stops above middle grey.</string>
+              </property>
+             </widget>
+            </item>
+            <item row="10" column="0">
+             <widget class="QLabel" name="whiteBalanceLabel">
+              <property name="text">
+               <string>White balance:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="10" column="1">
+             <widget class="QComboBox" name="whiteBalanceComboBox">
+              <property name="toolTip">
+               <string>The color of light that the camera turns into neutral white, as on a camera. Daylight keeps sunsets orange and the sky blue; automatic follows the mean color of the picture; neutral shows the colors as rendered.</string>
+              </property>
+             </widget>
+            </item>
+            <item row="11" column="0">
+             <widget class="QLabel" name="whiteBalanceKelvinLabel">
+              <property name="text">
+               <string>Color temperature:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="11" column="1">
+             <widget class="QSpinBox" name="whiteBalanceKelvinSpinBox">
+              <property name="toolTip">
+               <string>Color temperature of the custom white balance. Lower values make the picture bluer, higher values warmer.</string>
+              </property>
+              <property name="alignment">
+               <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+              </property>
+              <property name="suffix">
+               <string> K</string>
+              </property>
+              <property name="minimum">
+               <number>2000</number>
+              </property>
+              <property name="maximum">
+               <number>12000</number>
+              </property>
+              <property name="singleStep">
                <number>100</number>
               </property>
              </widget>
             </item>
-           </layout>
-          </item>
-          <item row="13" column="0">
-           <widget class="QCheckBox" name="humidityCheckBox">
-            <property name="toolTip">
-             <string>Model the humidity and the haze: the haze grows with the humidity, it lies over the sky of the atmosphere model (which holds almost no aerosols) as a whitish veil and a glow around the Sun and the Moon, and gives aureoles. Off: the extinction and the sky as set, as without these.</string>
-            </property>
-            <property name="text">
-             <string>Humidity:</string>
-            </property>
-           </widget>
-          </item>
-          <item row="13" column="1">
-           <layout class="QHBoxLayout" name="humidityLayout" stretch="1,0">
-            <item>
-             <widget class="QSpinBox" name="humiditySpinBox">
+            <item row="12" column="0" colspan="2">
+             <layout class="QHBoxLayout" name="atmosphereCheckBoxLayout">
+              <item>
+               <widget class="QCheckBox" name="extinctionColorCheckBox">
+                <property name="toolTip">
+                 <string>Near the horizon the atmosphere takes the blue light first, so stars, planets, the Sun, the Moon, the Milky Way and the zodiacal light turn yellow, orange or red. The color comes from the spectral transmission of the atmosphere model; the amount of extinction follows the extinction coefficient.</string>
+                </property>
+                <property name="text">
+                 <string>Color of the atmospheric extinction</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QCheckBox" name="airglowCheckBox">
+                <property name="toolTip">
+                 <string>The airglow: the faint light of the upper atmosphere, about 90 km high (oxygen, sodium, OH), which is the natural night sky at a dark site. About 22.3 magnitudes per square arc second at the zenith, brighter near the maximum of the solar cycle, brightest about 10 degrees above the horizon; a warm, brownish grey in daylight white balance. Below the end of the astronomical twilight the scattered sunlight then fades away. With the default (lightweight) atmosphere model.</string>
+                </property>
+                <property name="text">
+                 <string>Airglow</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QSpinBox" name="airglowStrengthSpinBox">
+                <property name="toolTip">
+                 <string>The brightness of the airglow against its mean (100%: about 22.5 magnitudes per square arc second at the zenith at a mean solar activity). It changes from night to night by about a factor of two, and with the solar cycle by about 30% (that part is computed from the date).</string>
+                </property>
+                <property name="alignment">
+                 <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+                </property>
+                <property name="keyboardTracking">
+                 <bool>false</bool>
+                </property>
+                <property name="suffix">
+                 <string> %</string>
+                </property>
+                <property name="minimum">
+                 <number>25</number>
+                </property>
+                <property name="maximum">
+                 <number>200</number>
+                </property>
+                <property name="singleStep">
+                 <number>5</number>
+                </property>
+                <property name="value">
+                 <number>100</number>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </item>
+            <item row="13" column="0">
+             <widget class="QCheckBox" name="humidityCheckBox">
               <property name="toolTip">
-               <string>The relative humidity of the air near the ground. The particles of the haze take up water and grow when the air is humid (above about 80% much more): the sky scatters more light, whiter and more forwards, the stars and the Moon are dimmed more but less reddened near the horizon, and the light domes of towns and the light pollution of the sky become brighter and larger. The extinction coefficient and the light pollution (Bortle) settings are those of a normal humidity of 60%: at 60% they are as set (the aureoles come from all the haze). Mist and fog are not modelled.</string>
+               <string>Model the humidity and the haze: the haze grows with the humidity, it lies over the sky of the atmosphere model (which holds almost no aerosols) as a whitish veil and a glow around the Sun and the Moon, and gives aureoles. Off: the extinction and the sky as set, as without these.</string>
+              </property>
+              <property name="text">
+               <string>Humidity:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="13" column="1">
+             <layout class="QHBoxLayout" name="humidityLayout" stretch="1,0">
+              <item>
+               <widget class="QSpinBox" name="humiditySpinBox">
+                <property name="toolTip">
+                 <string>The relative humidity of the air near the ground. The particles of the haze take up water and grow when the air is humid (above about 80% much more): the sky scatters more light, whiter and more forwards, the stars and the Moon are dimmed more but less reddened near the horizon, and the light domes of towns and the light pollution of the sky become brighter and larger. The extinction coefficient and the light pollution (Bortle) settings are those of a normal humidity of 60%: at 60% they are as set (the aureoles come from all the haze). Mist and fog are not modelled.</string>
+                </property>
+                <property name="alignment">
+                 <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+                </property>
+                <property name="keyboardTracking">
+                 <bool>false</bool>
+                </property>
+                <property name="suffix">
+                 <string> %</string>
+                </property>
+                <property name="minimum">
+                 <number>20</number>
+                </property>
+                <property name="maximum">
+                 <number>98</number>
+                </property>
+                <property name="singleStep">
+                 <number>5</number>
+                </property>
+                <property name="value">
+                 <number>60</number>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QCheckBox" name="aureoleCheckBox">
+                <property name="toolTip">
+                 <string>The aureole of the haze: the light that the aerosols scatter forwards makes a glow of some degrees around the Moon, the planets and the bright stars (and the Sun). It is stronger in a hazier and more humid air and near the horizon, where the light passes through more air. Its profile is that of the aerosols of the default atmosphere model.</string>
+                </property>
+                <property name="text">
+                 <string>Aureoles</string>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </item>
+            <item row="14" column="0" colspan="2">
+             <widget class="QCheckBox" name="infoLineCheckBox">
+              <property name="toolTip">
+               <string>Show the exposure time, aperture, ISO and exposure value in use at the top of the screen</string>
+              </property>
+              <property name="text">
+               <string>Show the camera settings on the screen</string>
+              </property>
+             </widget>
+            </item>
+            <item row="15" column="0">
+             <widget class="QLabel" name="mountLabel">
+              <property name="text">
+               <string>Camera mount:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="15" column="1">
+             <widget class="QComboBox" name="mountComboBox">
+              <property name="toolTip">
+               <string>What happens while the Earth turns during the exposure (centered on the current time). "No motion": the picture of an instant. "Fixed tripod": the stars, planets and nebulae draw arcs around the celestial pole; the longer the exposure and the focal length, the longer the trails, and faint stars fade as their light is spread out. "Star tracker": the camera turns with the sky, so the stars stay sharp and the landscape blurs instead. "As the view's mount": a fixed tripod while the view is on the alt-azimuthal mount, a star tracker on the equatorial one (switch the mount of the view with Ctrl+M).</string>
+              </property>
+             </widget>
+            </item>
+            <item row="16" column="0">
+             <widget class="QLabel" name="noiseLabel">
+              <property name="text">
+               <string>Sensor noise:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="16" column="1">
+             <widget class="QComboBox" name="noiseComboBox">
+              <property name="toolTip">
+               <string>The grain of a real sensor: the photons arrive at random (photon noise), plus the noise of the electronics and of the dark current, and a few hot pixels in long exposures. A high ISO is noisy because the sensor has caught fewer photons for the same brightness in the picture. Red and blue are noisier than green (Bayer mosaic). The dark current grows with the temperature (the air temperature of the atmosphere settings, plus a few degrees). "Whole picture": as the picture looks on the screen, where a screen pixel holds many sensor pixels. "100% view": one sensor pixel per screen pixel, as when you zoom in on a photo.</string>
+              </property>
+             </widget>
+            </item>
+            <item row="17" column="0">
+             <widget class="QLabel" name="sensorLabel">
+              <property name="text">
+               <string>Sensor:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="17" column="1">
+             <layout class="QHBoxLayout" name="sensorLayout">
+              <item>
+               <widget class="QComboBox" name="sensorComboBox">
+                <property name="toolTip">
+                 <string>The size of the sensor. For the same field of view a smaller sensor needs a shorter lens, which gives more depth of field; at the same f-number and exposure time it collects less light for the picture, which gives more noise (APS-C about 1.2 stops, Micro Four Thirds 2, 1-inch 3, the small sensors of compact cameras 4 to 5 more than full frame; medium format 0.7 less). Changing the sensor keeps the lens: the field of view changes by the crop factor.</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QCheckBox" name="halphaModifiedCheckBox">
+                <property name="text">
+                 <string>H-alpha modified</string>
+                </property>
+                <property name="toolTip">
+                 <string>A camera whose infrared-cut filter has been replaced by a clear one, as astrophotographers do: it records the red H-alpha light of emission nebulae about three times as well. A stock camera sees H-alpha with about a third of its red and the green and blue lines too, so emission nebulae come out pink; modified, they are red. Only for the digital sensor (a color film has its own colors).</string>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </item>
+            <item row="18" column="0">
+             <widget class="QLabel" name="filmLabel">
+              <property name="text">
+               <string>Film:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="18" column="1">
+             <layout class="QHBoxLayout" name="filmLayout">
+              <item>
+               <widget class="QComboBox" name="filmComboBox">
+                <property name="toolTip">
+                 <string>Film in the camera instead of the digital sensor (35 mm). The film sets the speed (ISO), the color balance (daylight, 5500 K) and its own characteristic curve: slide film is steep and has little room for highlights, a negative printed on paper is soft. Long exposures lose speed (reciprocity failure, from the data sheets): a 10 minute exposure on Tri-X counts as about 1.5 minutes; the exposure meter does not know it. Some slide films also shift in color in long exposures (Provia 400F: towards magenta). The faintest stars are those that stand out of the grain of the film.</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QComboBox" name="filmPushComboBox">
+                <property name="toolTip">
+                 <string>Push processing: the film exposed at a higher speed and developed longer, as astrophotographers often did. Each stop doubles the speed (ISO), makes the picture more contrasty and the grain coarser.</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QCheckBox" name="filmSpectralSkyCheckBox">
+                <property name="text">
+                 <string>Spectral sky</string>
+                </property>
+                <property name="toolTip">
+                 <string>Color film: the sky from its spectrum, as the film's three layers see it (ShowMySky's colors and its scotopic luminance; the lightweight atmosphere estimates the latter). It gives the twilight more red and violet. Off: the sky from its color, like the rest of the scene, which matches slides of the twilight better (deep blue over an orange horizon).</string>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </item>
+            <item row="19" column="0">
+             <widget class="QLabel" name="focalLengthLabel">
+              <property name="text">
+               <string>Focal length:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="19" column="1">
+             <widget class="QDoubleSpinBox" name="focalLengthSpinBox">
+              <property name="toolTip">
+               <string>The focal length of the lens: sets the field of view for the sensor. Zooming with the mouse changes it, like a zoom lens.</string>
               </property>
               <property name="alignment">
                <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
@@ -344,1107 +512,1023 @@
                <bool>false</bool>
               </property>
               <property name="suffix">
-               <string> %</string>
-              </property>
-              <property name="minimum">
-               <number>20</number>
-              </property>
-              <property name="maximum">
-               <number>98</number>
-              </property>
-              <property name="singleStep">
-               <number>5</number>
-              </property>
-              <property name="value">
-               <number>60</number>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QCheckBox" name="aureoleCheckBox">
-              <property name="toolTip">
-               <string>The aureole of the haze: the light that the aerosols scatter forwards makes a glow of some degrees around the Moon, the planets and the bright stars (and the Sun). It is stronger in a hazier and more humid air and near the horizon, where the light passes through more air. Its profile is that of the aerosols of the default atmosphere model.</string>
-              </property>
-              <property name="text">
-               <string>Aureoles</string>
-              </property>
-             </widget>
-            </item>
-           </layout>
-          </item>
-          <item row="14" column="0" colspan="2">
-           <widget class="QCheckBox" name="infoLineCheckBox">
-            <property name="toolTip">
-             <string>Show the exposure time, aperture, ISO and exposure value in use at the top of the screen</string>
-            </property>
-            <property name="text">
-             <string>Show the camera settings on the screen</string>
-            </property>
-           </widget>
-          </item>
-          <item row="15" column="0">
-           <widget class="QLabel" name="mountLabel">
-            <property name="text">
-             <string>Camera mount:</string>
-            </property>
-           </widget>
-          </item>
-          <item row="15" column="1">
-           <widget class="QComboBox" name="mountComboBox">
-            <property name="toolTip">
-             <string>What happens while the Earth turns during the exposure (centered on the current time). "No motion": the picture of an instant. "Fixed tripod": the stars, planets and nebulae draw arcs around the celestial pole; the longer the exposure and the focal length, the longer the trails, and faint stars fade as their light is spread out. "Star tracker": the camera turns with the sky, so the stars stay sharp and the landscape blurs instead. "As the view's mount": a fixed tripod while the view is on the alt-azimuthal mount, a star tracker on the equatorial one (switch the mount of the view with Ctrl+M).</string>
-            </property>
-           </widget>
-          </item>
-          <item row="16" column="0">
-           <widget class="QLabel" name="noiseLabel">
-            <property name="text">
-             <string>Sensor noise:</string>
-            </property>
-           </widget>
-          </item>
-          <item row="16" column="1">
-           <widget class="QComboBox" name="noiseComboBox">
-            <property name="toolTip">
-             <string>The grain of a real sensor: the photons arrive at random (photon noise), plus the noise of the electronics and of the dark current, and a few hot pixels in long exposures. A high ISO is noisy because the sensor has caught fewer photons for the same brightness in the picture. Red and blue are noisier than green (Bayer mosaic). The dark current grows with the temperature (the air temperature of the atmosphere settings, plus a few degrees). "Whole picture": as the picture looks on the screen, where a screen pixel holds many sensor pixels. "100% view": one sensor pixel per screen pixel, as when you zoom in on a photo.</string>
-            </property>
-           </widget>
-          </item>
-          <item row="17" column="0">
-           <widget class="QLabel" name="sensorLabel">
-            <property name="text">
-             <string>Sensor:</string>
-            </property>
-           </widget>
-          </item>
-          <item row="17" column="1">
-           <layout class="QHBoxLayout" name="sensorLayout">
-            <item>
-             <widget class="QComboBox" name="sensorComboBox">
-              <property name="toolTip">
-               <string>The size of the sensor. For the same field of view a smaller sensor needs a shorter lens, which gives more depth of field; at the same f-number and exposure time it collects less light for the picture, which gives more noise (APS-C about 1.2 stops, Micro Four Thirds 2, 1-inch 3, the small sensors of compact cameras 4 to 5 more than full frame; medium format 0.7 less). Changing the sensor keeps the lens: the field of view changes by the crop factor.</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QCheckBox" name="halphaModifiedCheckBox">
-              <property name="text">
-               <string>H-alpha modified</string>
-              </property>
-              <property name="toolTip">
-               <string>A camera whose infrared-cut filter has been replaced by a clear one, as astrophotographers do: it records the red H-alpha light of emission nebulae about three times as well. A stock camera sees H-alpha with about a third of its red and the green and blue lines too, so emission nebulae come out pink; modified, they are red. Only for the digital sensor (a color film has its own colors).</string>
-              </property>
-             </widget>
-            </item>
-           </layout>
-          </item>
-          <item row="18" column="0">
-           <widget class="QLabel" name="filmLabel">
-            <property name="text">
-             <string>Film:</string>
-            </property>
-           </widget>
-          </item>
-          <item row="18" column="1">
-           <layout class="QHBoxLayout" name="filmLayout">
-            <item>
-             <widget class="QComboBox" name="filmComboBox">
-              <property name="toolTip">
-               <string>Film in the camera instead of the digital sensor (35 mm). The film sets the speed (ISO), the color balance (daylight, 5500 K) and its own characteristic curve: slide film is steep and has little room for highlights, a negative printed on paper is soft. Long exposures lose speed (reciprocity failure, from the data sheets): a 10 minute exposure on Tri-X counts as about 1.5 minutes; the exposure meter does not know it. Some slide films also shift in color in long exposures (Provia 400F: towards magenta). The faintest stars are those that stand out of the grain of the film.</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QComboBox" name="filmPushComboBox">
-              <property name="toolTip">
-               <string>Push processing: the film exposed at a higher speed and developed longer, as astrophotographers often did. Each stop doubles the speed (ISO), makes the picture more contrasty and the grain coarser.</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QCheckBox" name="filmSpectralSkyCheckBox">
-              <property name="text">
-               <string>Spectral sky</string>
-              </property>
-              <property name="toolTip">
-               <string>Color film: the sky from its spectrum, as the film's three layers see it (ShowMySky's colors and its scotopic luminance; the lightweight atmosphere estimates the latter). It gives the twilight more red and violet. Off: the sky from its color, like the rest of the scene, which matches slides of the twilight better (deep blue over an orange horizon).</string>
-              </property>
-             </widget>
-            </item>
-           </layout>
-          </item>
-          <item row="19" column="0">
-           <widget class="QLabel" name="focalLengthLabel">
-            <property name="text">
-             <string>Focal length:</string>
-            </property>
-           </widget>
-          </item>
-          <item row="19" column="1">
-           <widget class="QDoubleSpinBox" name="focalLengthSpinBox">
-            <property name="toolTip">
-             <string>The focal length of the lens: sets the field of view for the sensor. Zooming with the mouse changes it, like a zoom lens.</string>
-            </property>
-            <property name="alignment">
-             <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
-            </property>
-            <property name="keyboardTracking">
-             <bool>false</bool>
-            </property>
-            <property name="suffix">
-             <string> mm</string>
-            </property>
-            <property name="decimals">
-             <number>0</number>
-            </property>
-            <property name="minimum">
-             <double>3.000000000000000</double>
-            </property>
-            <property name="maximum">
-             <double>5000.000000000000000</double>
-            </property>
-            <property name="value">
-             <double>50.000000000000000</double>
-            </property>
-           </widget>
-          </item>
-          <item row="20" column="0">
-           <widget class="QLabel" name="zoomStepsLabel">
-            <property name="text">
-             <string>Mouse wheel zoom:</string>
-            </property>
-           </widget>
-          </item>
-          <item row="20" column="1">
-           <widget class="QComboBox" name="zoomStepsComboBox">
-            <property name="toolTip">
-             <string>How the mouse wheel changes the focal length: freely, in whole millimeters as on the scale of a zoom lens, or between the focal lengths of common lenses and telescopes (8, 10, 12, 14 ... 50, 70, 85 ... 200, 300, 400 ... 3000 mm). In whole millimeters each step of the wheel changes it by at least one millimeter, between common focal lengths it takes the next one.</string>
-            </property>
-           </widget>
-          </item>
-          <item row="21" column="0">
-           <widget class="QLabel" name="frameLabel">
-            <property name="text">
-             <string>Frame:</string>
-            </property>
-           </widget>
-          </item>
-          <item row="21" column="1">
-           <layout class="QHBoxLayout" name="frameLayout">
-            <item>
-             <widget class="QComboBox" name="frameOrientationComboBox">
-              <property name="toolTip">
-               <string>How the camera is held: landscape (the long side of the sensor horizontal) or portrait (turned upright). The frame is the largest rectangle with the proportions of the sensor that fits in the window; the picture is what lies inside it, and the focal length, the corners of the lens and the exposure meter refer to it.</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QCheckBox" name="frameMaskCheckBox">
-              <property name="toolTip">
-               <string>Dim the view outside the frame of the sensor, like a viewfinder: it shows what the picture holds.</string>
-              </property>
-              <property name="text">
-               <string>Dim outside</string>
-              </property>
-             </widget>
-            </item>
-           </layout>
-          </item>
-          <item row="22" column="0">
-           <widget class="QLabel" name="detectionSnrLabel">
-            <property name="text">
-             <string>Faintest stars:</string>
-            </property>
-           </widget>
-          </item>
-          <item row="22" column="1">
-           <widget class="QDoubleSpinBox" name="detectionSnrSpinBox">
-            <property name="toolTip">
-             <string>The detection limit: a star is drawn only when its light stands out of the noise of the sky and the sensor by this factor (signal to noise ratio). 3: the faintest stars are barely seen in the grain. 5: the usual limit of detection in astronomy, about half a magnitude brighter and faster to draw. Higher values leave out stars that would be seen in the picture. Off: all stars are drawn, as without noise (slow in wide fields).</string>
-            </property>
-            <property name="alignment">
-             <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
-            </property>
-            <property name="keyboardTracking">
-             <bool>false</bool>
-            </property>
-            <property name="specialValueText">
-             <string>Off</string>
-            </property>
-            <property name="prefix">
-             <string>S/N </string>
-            </property>
-            <property name="decimals">
-             <number>1</number>
-            </property>
-            <property name="minimum">
-             <double>0.000000000000000</double>
-            </property>
-            <property name="maximum">
-             <double>20.000000000000000</double>
-            </property>
-            <property name="singleStep">
-             <double>0.500000000000000</double>
-            </property>
-            <property name="value">
-             <double>3.000000000000000</double>
-            </property>
-           </widget>
-          </item>
-         </layout>
-        </widget>
-       </item>
-       <item>
-        <widget class="QGroupBox" name="starsGroupBox">
-         <property name="title">
-          <string>Star images</string>
-         </property>
-         <layout class="QGridLayout" name="starsGridLayout">
-          <item row="0" column="0">
-           <widget class="QLabel" name="fwhmLabel">
-            <property name="text">
-             <string>Sharpest star image:</string>
-            </property>
-           </widget>
-          </item>
-          <item row="0" column="1">
-           <widget class="QDoubleSpinBox" name="fwhmDoubleSpinBox">
-            <property name="toolTip">
-             <string>Smallest width (FWHM) of a star image in pixels, given by sensor and optics</string>
-            </property>
-            <property name="alignment">
-             <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
-            </property>
-            <property name="suffix">
-             <string> px</string>
-            </property>
-            <property name="decimals">
-             <number>1</number>
-            </property>
-            <property name="minimum">
-             <double>0.800000000000000</double>
-            </property>
-            <property name="maximum">
-             <double>10.000000000000000</double>
-            </property>
-            <property name="singleStep">
-             <double>0.100000000000000</double>
-            </property>
-           </widget>
-          </item>
-          <item row="1" column="0">
-           <widget class="QLabel" name="seeingLabel">
-            <property name="text">
-             <string>Seeing:</string>
-            </property>
-           </widget>
-          </item>
-          <item row="1" column="1">
-           <widget class="QDoubleSpinBox" name="seeingDoubleSpinBox">
-            <property name="toolTip">
-             <string>Blurring by the atmosphere (FWHM). It matters only at small fields of view.</string>
-            </property>
-            <property name="alignment">
-             <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
-            </property>
-            <property name="suffix">
-             <string notr="true">″</string>
-            </property>
-            <property name="decimals">
-             <number>1</number>
-            </property>
-            <property name="minimum">
-             <double>0.000000000000000</double>
-            </property>
-            <property name="maximum">
-             <double>60.000000000000000</double>
-            </property>
-            <property name="singleStep">
-             <double>0.500000000000000</double>
-            </property>
-           </widget>
-          </item>
-          <item row="2" column="0">
-           <widget class="QLabel" name="haloLabel">
-            <property name="text">
-             <string>Lens halo:</string>
-            </property>
-           </widget>
-          </item>
-          <item row="2" column="1">
-           <widget class="QDoubleSpinBox" name="haloDoubleSpinBox">
-            <property name="toolTip">
-             <string>Share of a star's light that the lens scatters into a wide, faint glow. A film camera keeps its own value (default 0.3%): in front of a digital sensor lies a stack of filters, whose reflections add to the glow of the lens.</string>
-            </property>
-            <property name="alignment">
-             <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
-            </property>
-            <property name="suffix">
-             <string notr="true"> %</string>
-            </property>
-            <property name="decimals">
-             <number>1</number>
-            </property>
-            <property name="minimum">
-             <double>0.000000000000000</double>
-            </property>
-            <property name="maximum">
-             <double>30.000000000000000</double>
-            </property>
-            <property name="singleStep">
-             <double>0.500000000000000</double>
-            </property>
-           </widget>
-          </item>
-          <item row="3" column="0">
-           <widget class="QLabel" name="spikesLabel">
-            <property name="text">
-             <string>Aperture blades:</string>
-            </property>
-           </widget>
-          </item>
-          <item row="3" column="1">
-           <widget class="QComboBox" name="spikesComboBox">
-            <property name="toolTip">
-             <string>Blades of the lens diaphragm. Stopped down, their straight edges make diffraction spikes: as many as there are blades for an even number, twice as many for an odd number. Wide open the aperture is round and there are no spikes; the spikes appear when you stop down and grow longer at large f-numbers.</string>
-            </property>
-           </widget>
-          </item>
-          <item row="4" column="0">
-           <widget class="QLabel" name="spikeStrengthLabel">
-            <property name="text">
-             <string>Spike strength:</string>
-            </property>
-           </widget>
-          </item>
-          <item row="4" column="1">
-           <widget class="QDoubleSpinBox" name="spikeStrengthDoubleSpinBox">
-            <property name="toolTip">
-             <string>Share of a star's light that goes into the diffraction spikes when the lens is stopped down (two stops or more). Wide open there are no spikes.</string>
-            </property>
-            <property name="alignment">
-             <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
-            </property>
-            <property name="suffix">
-             <string notr="true"> %</string>
-            </property>
-            <property name="decimals">
-             <number>1</number>
-            </property>
-            <property name="minimum">
-             <double>0.000000000000000</double>
-            </property>
-            <property name="maximum">
-             <double>10.000000000000000</double>
-            </property>
-            <property name="singleStep">
-             <double>0.100000000000000</double>
-            </property>
-           </widget>
-          </item>
-          <item row="5" column="0" colspan="2">
-           <widget class="QCheckBox" name="bloomCheckBox">
-            <property name="toolTip">
-             <string>Compute the lens halo and the inner part of the spikes from the whole image (bloom). This gives the right shape for bright extended objects such as a lunar crescent or the Sun behind branches.</string>
-            </property>
-            <property name="text">
-             <string>Halo and spikes from the whole image (bloom)</string>
-            </property>
-           </widget>
-          </item>
-          <item row="6" column="0">
-           <widget class="QLabel" name="eclipseAtmosphereLabel">
-            <property name="text">
-             <string>Lunar eclipses:</string>
-            </property>
-           </widget>
-          </item>
-          <item row="6" column="1">
-           <widget class="QComboBox" name="eclipseAtmosphereComboBox">
-            <property name="toolTip">
-             <string>In the shadow of the Earth the Moon is lit by sunlight that the Earth's atmosphere bends into the shadow, reddened on its long way through the air, with a turquoise band from ozone at the edge of the umbra. How bright and how red the totality is depends on the state of the atmosphere: aerosols in the stratosphere (after volcanic eruptions) and clouds take light away. Clean air gives a bright orange totality (Danjon L about 3 to 4), a typical one copper red (L about 2); after volcanic eruptions it is dark red (L about 1), after a major eruption such as Pinatubo 1991 the Moon nearly disappears (L about 0).</string>
-            </property>
-           </widget>
-          </item>
-         </layout>
-        </widget>
-       </item>
-       <item>
-        <spacer name="leftColumnSpacer">
-         <property name="orientation">
-          <enum>Qt::Vertical</enum>
-         </property>
-         <property name="sizeHint" stdset="0">
-          <size>
-           <width>0</width>
-           <height>0</height>
-          </size>
-         </property>
-        </spacer>
-       </item>
-      </layout>
-     </item>
-     <item>
-      <layout class="QVBoxLayout" name="rightColumnLayout">
-       <property name="spacing">
-        <number>0</number>
-       </property>
-       <item>
-        <widget class="QGroupBox" name="lensGroupBox">
-         <property name="title">
-          <string>Lens</string>
-         </property>
-         <layout class="QGridLayout" name="lensGridLayout">
-          <item row="0" column="0" colspan="2">
-           <widget class="QCheckBox" name="vignettingCheckBox">
-            <property name="toolTip">
-             <string>The picture gets darker towards the corners: the natural falloff of a wide-angle lens, and the optical vignetting of a fast lens, which goes away when you stop down.</string>
-            </property>
-            <property name="text">
-             <string>Vignetting</string>
-            </property>
-           </widget>
-          </item>
-          <item row="1" column="0" colspan="2">
-           <widget class="QCheckBox" name="aberrationsCheckBox">
-            <property name="toolTip">
-             <string>Stars away from the center turn into small comets (coma) and short lines (astigmatism), most in the corners and with the lens wide open. Stopping down makes them sharp. Chromatic aberration: towards the corners the stars get red and blue edges (lateral), and wide open bright stars get purple fringes (axial, gone when stopped down).</string>
-            </property>
-            <property name="text">
-             <string>Coma, astigmatism and color fringes</string>
-            </property>
-           </widget>
-          </item>
-          <item row="2" column="0">
-           <widget class="QLabel" name="aberrationStrengthLabel">
-            <property name="text">
-             <string>Strength of the aberrations:</string>
-            </property>
-           </widget>
-          </item>
-          <item row="2" column="1">
-           <widget class="QSpinBox" name="aberrationStrengthSpinBox">
-            <property name="toolTip">
-             <string>100% is a typical fast lens. Less for a better (or stopped down) lens, more for a simple one.</string>
-            </property>
-            <property name="alignment">
-             <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
-            </property>
-            <property name="suffix">
-             <string> %</string>
-            </property>
-            <property name="maximum">
-             <number>300</number>
-            </property>
-            <property name="singleStep">
-             <number>10</number>
-            </property>
-           </widget>
-          </item>
-          <item row="3" column="0" colspan="2">
-           <widget class="QCheckBox" name="lensFlareCheckBox">
-            <property name="toolTip">
-             <string>Light of the Sun or the Moon reflected between the lens surfaces: colored images of the aperture on the line through the image center and the source, also when the source is just outside the frame. Computed for a real lens design (double Gauss).</string>
-            </property>
-            <property name="text">
-             <string>Lens reflections (ghosts)</string>
-            </property>
-           </widget>
-          </item>
-          <item row="4" column="0">
-           <widget class="QLabel" name="lensFlareStrengthLabel">
-            <property name="text">
-             <string>Strength of the reflections:</string>
-            </property>
-           </widget>
-          </item>
-          <item row="4" column="1">
-           <widget class="QSpinBox" name="lensFlareStrengthSpinBox">
-            <property name="toolTip">
-             <string>100% is a lens with a single-layer coating. A modern multi-coated lens reflects about a third or less.</string>
-            </property>
-            <property name="alignment">
-             <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
-            </property>
-            <property name="suffix">
-             <string> %</string>
-            </property>
-            <property name="maximum">
-             <number>300</number>
-            </property>
-            <property name="singleStep">
-             <number>10</number>
-            </property>
-           </widget>
-          </item>
-          <item row="5" column="0">
-           <widget class="QLabel" name="focusLabel">
-            <property name="text">
-             <string>Focus:</string>
-            </property>
-           </widget>
-          </item>
-          <item row="5" column="1">
-           <widget class="QLabel" name="focusValueLabel">
-            <property name="text">
-             <string notr="true">∞</string>
-            </property>
-            <property name="alignment">
-             <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
-            </property>
-           </widget>
-          </item>
-          <item row="6" column="0">
-           <widget class="QSlider" name="focusSlider">
-            <property name="toolTip">
-             <string>The focus ring of the lens. At infinity (∞) the stars are sharp. Focused nearer, each star becomes a blurred image of the aperture: a disk, or a polygon of the blades when stopped down, cut off in the corners (cat's eye). Faint stars fade away. A short lens forgives a lot, a long one almost nothing; stopping down helps. To the left of ∞ the ring turns beyond infinity, as many lenses allow.</string>
-            </property>
-            <property name="minimum">
-             <number>-100</number>
-            </property>
-            <property name="maximum">
-             <number>1000</number>
-            </property>
-            <property name="pageStep">
-             <number>10</number>
-            </property>
-            <property name="orientation">
-             <enum>Qt::Horizontal</enum>
-            </property>
-           </widget>
-          </item>
-          <item row="6" column="1">
-           <widget class="QPushButton" name="focusInfinityPushButton">
-            <property name="toolTip">
-             <string>Focus at infinity</string>
-            </property>
-            <property name="text">
-             <string notr="true">∞</string>
-            </property>
-           </widget>
-          </item>
-          <item row="7" column="0">
-           <widget class="QLabel" name="lensMaxApertureLabel">
-            <property name="text">
-             <string>Widest aperture:</string>
-            </property>
-           </widget>
-          </item>
-          <item row="7" column="1">
-           <widget class="QComboBox" name="lensMaxApertureComboBox">
-            <property name="toolTip">
-             <string>The widest aperture (smallest f-number) of the lens, as for a lens you own. Neither you nor the program mode can open wider. A slow lens wide open shows the same vignetting and aberrations as a fast lens wide open.</string>
-            </property>
-           </widget>
-          </item>
-         </layout>
-        </widget>
-       </item>
-       <item>
-        <widget class="QGroupBox" name="lightDomesGroupBox">
-         <property name="title">
-          <string>Light pollution: the light domes of towns</string>
-         </property>
-         <layout class="QGridLayout" name="lightDomesGridLayout">
-          <item row="0" column="0" colspan="2">
-           <widget class="QCheckBox" name="lightDomesCheckBox">
-            <property name="toolTip">
-             <string>Towns light the sky over the horizon in their direction: the light of their street lamps, scattered by the air and the haze (model of Garstang 1986/1991, with the curvature of the Earth). The dome grows the closer the town is, and white LEDs give a larger, bluer dome than sodium lamps, since the air scatters blue light more. The haze follows the extinction coefficient of the atmosphere settings. Only in the photographic mode. The light pollution setting of the sky is then the whole sky at the zenith: what the domes do not give there is spread evenly (local lights).</string>
-            </property>
-            <property name="text">
-             <string>Light domes of towns</string>
-            </property>
-           </widget>
-          </item>
-          <item row="1" column="0" colspan="2">
-           <layout class="QHBoxLayout" name="lightDomesDatabaseLayout">
-            <item>
-             <widget class="QCheckBox" name="lightDomesDatabaseCheckBox">
-              <property name="toolTip">
-               <string>Take the towns within 400 km from the location database of Stellarium, with their population (places of about 15000 inhabitants and more; the smaller ones are part of the even light pollution). The database lists the districts of large cities as places of their own, while the city has the population of the whole: places inside the area of a larger town are counted in it. Found again when the location changes. The towns of the table below are added to them.</string>
-              </property>
-              <property name="text">
-               <string>Towns from the location database</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <spacer name="lightDomesDatabaseSpacer">
-              <property name="orientation">
-               <enum>Qt::Horizontal</enum>
-              </property>
-              <property name="sizeHint" stdset="0">
-               <size>
-                <width>10</width>
-                <height>10</height>
-               </size>
-              </property>
-             </spacer>
-            </item>
-            <item>
-             <widget class="QLabel" name="lightDomesDatabaseLampLabel">
-              <property name="text">
-               <string>Street lamps:</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QComboBox" name="lightDomesDatabaseLampComboBox">
-              <property name="toolTip">
-               <string>The kind of street lamps of the towns from the location database</string>
-              </property>
-             </widget>
-            </item>
-           </layout>
-          </item>
-          <item row="2" column="0" colspan="2">
-           <layout class="QHBoxLayout" name="lightDomesSourceLayout">
-            <item>
-             <widget class="QLabel" name="lightDomesSourceLabel">
-              <property name="text">
-               <string>Light of the towns:</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QComboBox" name="lightDomesSourceComboBox">
-              <property name="toolTip">
-               <string>Where the light of the towns comes from: their population (1000 lumens per inhabitant, see below), or the light measured by the VIIRS satellite (night lights of 2024, 15 arc seconds), which also has the villages, roads, industries and greenhouses, calibrated to the same lumens per inhabitant with Swedish towns. The satellite data are downloaded only for the places you ask for (below 1 MB for 400 km around).</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QPushButton" name="lightDomesDownloadPushButton">
-              <property name="toolTip">
-               <string>Download the satellite map of the night lights within 400 km of the current location (from zenodo.org; kept in the cache directory)</string>
-              </property>
-              <property name="text">
-               <string>Download satellite data</string>
-              </property>
-             </widget>
-            </item>
-           </layout>
-          </item>
-          <item row="3" column="0" colspan="2">
-           <widget class="QLabel" name="lightDomesSatelliteLabel">
-            <property name="text">
-             <string notr="true">-</string>
-            </property>
-            <property name="wordWrap">
-             <bool>true</bool>
-            </property>
-           </widget>
-          </item>
-          <item row="4" column="0" colspan="2">
-           <widget class="QTableWidget" name="lightDomesDatabaseTableWidget">
-            <property name="toolTip">
-             <string>The towns from the location database, the brightest domes first (population divided by the distance to the power 2.5). A town missing here (or a bright industrial area) can be added in your own towns below.</string>
-            </property>
-            <property name="minimumSize">
-             <size>
-              <width>0</width>
-              <height>90</height>
-             </size>
-            </property>
-            <property name="editTriggers">
-             <set>QAbstractItemView::NoEditTriggers</set>
-            </property>
-            <property name="selectionBehavior">
-             <enum>QAbstractItemView::SelectRows</enum>
-            </property>
-            <column>
-             <property name="text">
-              <string>Town</string>
-             </property>
-            </column>
-            <column>
-             <property name="text">
-              <string>Azimuth (°)</string>
-             </property>
-            </column>
-            <column>
-             <property name="text">
-              <string>Distance (km)</string>
-             </property>
-            </column>
-            <column>
-             <property name="text">
-              <string>Inhabitants</string>
-             </property>
-            </column>
-           </widget>
-          </item>
-          <item row="5" column="0" colspan="2">
-           <widget class="QLabel" name="lightDomesDatabaseInfoLabel">
-            <property name="text">
-             <string notr="true">-</string>
-            </property>
-            <property name="wordWrap">
-             <bool>true</bool>
-            </property>
-           </widget>
-          </item>
-          <item row="6" column="0" colspan="2">
-           <layout class="QHBoxLayout" name="lightDomesDatabaseButtonLayout">
-            <item>
-             <widget class="QCheckBox" name="lightDomesLabelsCheckBox">
-              <property name="toolTip">
-               <string>Write the names of the towns whose domes show (5 degrees above the horizon at least 2% of a dark natural sky) at the horizon, like the gazetteer of a landscape and in its colors (font size and angle of the landscape labels). The brightest domes first: a name that would overlap a brighter one is left out.</string>
-              </property>
-              <property name="text">
-               <string>Names of the towns at the horizon</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <spacer name="lightDomesDatabaseButtonSpacer">
-              <property name="orientation">
-               <enum>Qt::Horizontal</enum>
-              </property>
-              <property name="sizeHint" stdset="0">
-               <size>
-                <width>10</width>
-                <height>10</height>
-               </size>
-              </property>
-             </spacer>
-            </item>
-            <item>
-             <widget class="QPushButton" name="lightDomesRecomputePushButton">
-              <property name="toolTip">
-               <string>Find the towns around the current location again and compute the domes anew</string>
-              </property>
-              <property name="text">
-               <string>Recompute</string>
-              </property>
-             </widget>
-            </item>
-           </layout>
-          </item>
-          <item row="7" column="0" colspan="2">
-           <widget class="QLabel" name="lightDomesOwnLabel">
-            <property name="text">
-             <string>Your own towns:</string>
-            </property>
-           </widget>
-          </item>
-          <item row="8" column="0" colspan="2">
-           <widget class="QTableWidget" name="lightDomesTableWidget">
-            <property name="toolTip">
-             <string>The towns: their direction (azimuth from north towards east), distance, number of inhabitants and kind of street lamps. Double-click a value to change it.</string>
-            </property>
-            <property name="minimumSize">
-             <size>
-              <width>0</width>
-              <height>90</height>
-             </size>
-            </property>
-            <property name="selectionBehavior">
-             <enum>QAbstractItemView::SelectRows</enum>
-            </property>
-            <column>
-             <property name="text">
-              <string>Azimuth (°)</string>
-             </property>
-            </column>
-            <column>
-             <property name="text">
-              <string>Distance (km)</string>
-             </property>
-            </column>
-            <column>
-             <property name="text">
-              <string>Inhabitants</string>
-             </property>
-            </column>
-            <column>
-             <property name="text">
-              <string>Street lamps</string>
-             </property>
-            </column>
-           </widget>
-          </item>
-          <item row="9" column="0" colspan="2">
-           <layout class="QHBoxLayout" name="lightDomesButtonLayout">
-            <item>
-             <widget class="QPushButton" name="lightDomesAddPushButton">
-              <property name="text">
-               <string>Add town</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QPushButton" name="lightDomesRemovePushButton">
-              <property name="text">
-               <string>Remove</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QLabel" name="lightDomesLumensLabel">
-              <property name="text">
-               <string>Lumens per inhabitant:</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QDoubleSpinBox" name="lightDomesLumensDoubleSpinBox">
-              <property name="toolTip">
-               <string>The light of the street lamps per inhabitant. 1000 lumens reproduce Walker's law (the sky 45 degrees above the horizon towards a town brightens by 1% of the natural sky times the population, divided by the distance in km to the power 2.5). Towns with much lighting (or seen with old, unshielded lamps) more, towns with shielded lamps and lights switched off at night less.</string>
+               <string> mm</string>
               </property>
               <property name="decimals">
                <number>0</number>
               </property>
               <property name="minimum">
-               <double>50.000000000000000</double>
+               <double>3.000000000000000</double>
               </property>
               <property name="maximum">
-               <double>10000.000000000000000</double>
-              </property>
-              <property name="singleStep">
-               <double>50.000000000000000</double>
+               <double>5000.000000000000000</double>
               </property>
               <property name="value">
-               <double>1000.000000000000000</double>
+               <double>50.000000000000000</double>
+              </property>
+             </widget>
+            </item>
+            <item row="20" column="0">
+             <widget class="QLabel" name="zoomStepsLabel">
+              <property name="text">
+               <string>Mouse wheel zoom:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="20" column="1">
+             <widget class="QComboBox" name="zoomStepsComboBox">
+              <property name="toolTip">
+               <string>How the mouse wheel changes the focal length: freely, in whole millimeters as on the scale of a zoom lens, or between the focal lengths of common lenses and telescopes (8, 10, 12, 14 ... 50, 70, 85 ... 200, 300, 400 ... 3000 mm). In whole millimeters each step of the wheel changes it by at least one millimeter, between common focal lengths it takes the next one.</string>
+              </property>
+             </widget>
+            </item>
+            <item row="21" column="0">
+             <widget class="QLabel" name="frameLabel">
+              <property name="text">
+               <string>Frame:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="21" column="1">
+             <layout class="QHBoxLayout" name="frameLayout">
+              <item>
+               <widget class="QComboBox" name="frameOrientationComboBox">
+                <property name="toolTip">
+                 <string>How the camera is held: landscape (the long side of the sensor horizontal) or portrait (turned upright). The frame is the largest rectangle with the proportions of the sensor that fits in the window; the picture is what lies inside it, and the focal length, the corners of the lens and the exposure meter refer to it.</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QCheckBox" name="frameMaskCheckBox">
+                <property name="toolTip">
+                 <string>Dim the view outside the frame of the sensor, like a viewfinder: it shows what the picture holds.</string>
+                </property>
+                <property name="text">
+                 <string>Dim outside</string>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </item>
+            <item row="22" column="0">
+             <widget class="QLabel" name="detectionSnrLabel">
+              <property name="text">
+               <string>Faintest stars:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="22" column="1">
+             <widget class="QDoubleSpinBox" name="detectionSnrSpinBox">
+              <property name="toolTip">
+               <string>The detection limit: a star is drawn only when its light stands out of the noise of the sky and the sensor by this factor (signal to noise ratio). 3: the faintest stars are barely seen in the grain. 5: the usual limit of detection in astronomy, about half a magnitude brighter and faster to draw. Higher values leave out stars that would be seen in the picture. Off: all stars are drawn, as without noise (slow in wide fields).</string>
+              </property>
+              <property name="alignment">
+               <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
               </property>
               <property name="keyboardTracking">
                <bool>false</bool>
               </property>
+              <property name="specialValueText">
+               <string>Off</string>
+              </property>
+              <property name="prefix">
+               <string>S/N </string>
+              </property>
+              <property name="decimals">
+               <number>1</number>
+              </property>
+              <property name="minimum">
+               <double>0.000000000000000</double>
+              </property>
+              <property name="maximum">
+               <double>20.000000000000000</double>
+              </property>
+              <property name="singleStep">
+               <double>0.500000000000000</double>
+              </property>
+              <property name="value">
+               <double>3.000000000000000</double>
+              </property>
              </widget>
             </item>
            </layout>
-          </item>
-          <item row="10" column="0" colspan="2">
-           <widget class="QLabel" name="lightDomesZenithLabel">
-            <property name="toolTip">
-             <string>The light of the domes at the zenith (artificial only, without the natural sky)</string>
-            </property>
-            <property name="text">
-             <string notr="true">-</string>
-            </property>
-           </widget>
-          </item>
-         </layout>
-        </widget>
+          </widget>
+         </item>
+         <item>
+          <spacer name="leftColumnSpacer">
+           <property name="orientation">
+            <enum>Qt::Vertical</enum>
+           </property>
+           <property name="sizeHint" stdset="0">
+            <size>
+             <width>0</width>
+             <height>0</height>
+            </size>
+           </property>
+          </spacer>
+         </item>
+        </layout>
        </item>
        <item>
-        <widget class="QGroupBox" name="auroraGroupBox">
-         <property name="title">
-          <string>Aurorae</string>
+        <layout class="QVBoxLayout" name="rightColumnLayout">
+         <property name="spacing">
+          <number>0</number>
          </property>
-         <layout class="QGridLayout" name="auroraGridLayout">
-          <item row="0" column="0">
-           <widget class="QCheckBox" name="auroraCheckBox">
-            <property name="toolTip">
-             <string>The light of the northern and southern lights in the auroral ovals: arcs, curtains and rays along the magnetic field, green around 110 km, red higher up, a purple lower border in strong storms. They brighten and break up in substorms every two to three hours and pulsate afterwards; the forms come from the date and time, so a moment always looks the same. The exposure averages what changes during it (not with the mount "No motion").</string>
-            </property>
-            <property name="text">
-             <string>Show aurorae</string>
-            </property>
-           </widget>
-          </item>
-          <item row="0" column="1">
-           <widget class="QCheckBox" name="auroraOvalCheckBox">
-            <property name="toolTip">
-             <string>Draw the boundaries of the auroral oval (Starkov 1994) as lines in the sky, also outside the photographic mode: green at 115 km (the green and blue emissions, poleward and equatorward boundaries, the diffuse aurora dimmer), red at 300 km (the red emission)</string>
-            </property>
-            <property name="text">
-             <string>Oval lines</string>
-            </property>
-           </widget>
-          </item>
-          <item row="1" column="0">
-           <widget class="QLabel" name="auroraActivityLabel">
-            <property name="text">
-             <string>Geomagnetic activity:</string>
-            </property>
-           </widget>
-          </item>
-          <item row="1" column="1">
-           <widget class="QComboBox" name="auroraActivityComboBox">
-            <property name="toolTip">
-             <string>The geomagnetic activity, by the planetary index Kp (0 to 9): it sets the size of the ovals, the brightness of the aurorae and how often substorms come. Quiet: the oval over the far north (northern Norway, Iceland). Moderate: often seen from northern Scandinavia. Storm: low in the north from southern Sweden. Extreme storm: Kp 9 with Dst -250 nT, the aurora overhead in southern Scandinavia. Superstorm: as on 10-11 May 2024 (Kp 9, Dst -412 nT), aurorae as far as Spain and Mexico.</string>
-            </property>
-            <item>
-             <property name="text">
-              <string>Quiet (Kp 1)</string>
-             </property>
+         <item>
+          <widget class="QGroupBox" name="lensGroupBox">
+           <property name="title">
+            <string>Lens</string>
+           </property>
+           <layout class="QGridLayout" name="lensGridLayout">
+            <item row="0" column="0" colspan="2">
+             <widget class="QCheckBox" name="vignettingCheckBox">
+              <property name="toolTip">
+               <string>The picture gets darker towards the corners: the natural falloff of a wide-angle lens, and the optical vignetting of a fast lens, which goes away when you stop down.</string>
+              </property>
+              <property name="text">
+               <string>Vignetting</string>
+              </property>
+             </widget>
             </item>
-            <item>
-             <property name="text">
-              <string>Moderate (Kp 3)</string>
-             </property>
+            <item row="1" column="0" colspan="2">
+             <widget class="QCheckBox" name="aberrationsCheckBox">
+              <property name="toolTip">
+               <string>Stars away from the center turn into small comets (coma) and short lines (astigmatism), most in the corners and with the lens wide open. Stopping down makes them sharp. Chromatic aberration: towards the corners the stars get red and blue edges (lateral), and wide open bright stars get purple fringes (axial, gone when stopped down).</string>
+              </property>
+              <property name="text">
+               <string>Coma, astigmatism and color fringes</string>
+              </property>
+             </widget>
             </item>
-            <item>
-             <property name="text">
-              <string>Storm (Kp 6)</string>
-             </property>
+            <item row="2" column="0">
+             <widget class="QLabel" name="aberrationStrengthLabel">
+              <property name="text">
+               <string>Strength of the aberrations:</string>
+              </property>
+             </widget>
             </item>
-            <item>
-             <property name="text">
-              <string>Extreme storm (Kp 9)</string>
-             </property>
+            <item row="2" column="1">
+             <widget class="QSpinBox" name="aberrationStrengthSpinBox">
+              <property name="toolTip">
+               <string>100% is a typical fast lens. Less for a better (or stopped down) lens, more for a simple one.</string>
+              </property>
+              <property name="alignment">
+               <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+              </property>
+              <property name="suffix">
+               <string> %</string>
+              </property>
+              <property name="maximum">
+               <number>300</number>
+              </property>
+              <property name="singleStep">
+               <number>10</number>
+              </property>
+             </widget>
             </item>
-            <item>
-             <property name="text">
-              <string>Superstorm (May 2024)</string>
-             </property>
+            <item row="3" column="0" colspan="2">
+             <widget class="QCheckBox" name="lensFlareCheckBox">
+              <property name="toolTip">
+               <string>Light of the Sun or the Moon reflected between the lens surfaces: colored images of the aperture on the line through the image center and the source, also when the source is just outside the frame. Computed for a real lens design (double Gauss).</string>
+              </property>
+              <property name="text">
+               <string>Lens reflections (ghosts)</string>
+              </property>
+             </widget>
             </item>
-            <item>
-             <property name="text">
-              <string>Custom</string>
-             </property>
+            <item row="4" column="0">
+             <widget class="QLabel" name="lensFlareStrengthLabel">
+              <property name="text">
+               <string>Strength of the reflections:</string>
+              </property>
+             </widget>
             </item>
-           </widget>
-          </item>
-          <item row="2" column="0">
-           <widget class="QLabel" name="auroraKpLabel">
-            <property name="text">
-             <string>Kp:</string>
-            </property>
-           </widget>
-          </item>
-          <item row="2" column="1">
-           <widget class="QDoubleSpinBox" name="auroraKpDoubleSpinBox">
-            <property name="toolTip">
-             <string>The planetary index Kp of the custom activity: 0-2 quiet, 3-4 active, 5-6 storm, 7-9 strong to extreme storm</string>
-            </property>
-            <property name="alignment">
-             <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
-            </property>
-            <property name="decimals">
-             <number>1</number>
-            </property>
-            <property name="maximum">
-             <double>9.000000000000000</double>
-            </property>
-            <property name="singleStep">
-             <double>0.300000000000000</double>
-            </property>
-            <property name="value">
-             <double>3.000000000000000</double>
-            </property>
-           </widget>
-          </item>
-          <item row="3" column="0">
-           <widget class="QLabel" name="auroraDstLabel">
-            <property name="text">
-             <string>Dst (nT):</string>
-            </property>
-           </widget>
-          </item>
-          <item row="3" column="1">
-           <widget class="QDoubleSpinBox" name="auroraDstDoubleSpinBox">
-            <property name="toolTip">
-             <string>The storm index Dst of the custom activity: the ring current of a great storm, which widens the auroral ovals beyond what Kp gives (the Kp scale ends at 9). About -50 nT in a moderate storm, -100 to -200 nT in a strong one, -250 to -400 nT in the greatest storms of a solar cycle (May 2024: -412 nT, aurorae down to about 30 degrees of magnetic latitude).</string>
-            </property>
-            <property name="alignment">
-             <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
-            </property>
-            <property name="decimals">
-             <number>0</number>
-            </property>
-            <property name="minimum">
-             <double>-1000.000000000000000</double>
-            </property>
-            <property name="maximum">
-             <double>0.000000000000000</double>
-            </property>
-            <property name="singleStep">
-             <double>10.000000000000000</double>
-            </property>
-            <property name="value">
-             <double>-20.000000000000000</double>
-            </property>
-           </widget>
-          </item>
-          <item row="5" column="0" colspan="2">
-           <widget class="QCheckBox" name="auroraHalfResolutionCheckBox">
-            <property name="toolTip">
-             <string>Compute the light of the aurorae at half the resolution of the screen and scale it up: about a quarter of the work for the graphics card, the thinnest arcs and rays a little softer.</string>
-            </property>
-            <property name="text">
-             <string>Half resolution (faster)</string>
-            </property>
-           </widget>
-          </item>
-          <item row="4" column="0" colspan="2">
-           <widget class="QLabel" name="auroraSubstormLabel">
-            <property name="toolTip">
-             <string>Where the substorm cycle stands at the current time: a growth phase with calm arcs, the onset and expansion (bright, folded aurorae with rays, about a quarter of an hour, strongest near magnetic midnight), and the recovery with pulsating aurora. The cycles come from the date and time.</string>
-            </property>
-            <property name="text">
-             <string notr="true"/>
-            </property>
-           </widget>
-          </item>
-         </layout>
-        </widget>
-       </item>
-       <item>
-        <widget class="QGroupBox" name="noctilucentCloudsGroupBox">
-         <property name="title">
-          <string>Noctilucent clouds</string>
-         </property>
-         <layout class="QGridLayout" name="noctilucentCloudsGridLayout">
-          <item row="0" column="0">
-           <widget class="QCheckBox" name="noctilucentCloudsCheckBox">
-            <property name="toolTip">
-             <string>The thin layer of ice clouds about 82 km up, which still stands in the sunlight when the observer is in the dark: seen with the Sun 6 to 16 degrees below the horizon, the stars shining through. For now an even veil of a fixed brightness, at all times of the year.</string>
-            </property>
-            <property name="text">
-             <string>Show noctilucent clouds</string>
-            </property>
-           </widget>
-          </item>
-         </layout>
-        </widget>
-       </item>
-       <item>
-        <widget class="QGroupBox" name="cometTailsGroupBox">
-         <property name="title">
-          <string>Comet tails</string>
-         </property>
-         <layout class="QGridLayout" name="cometTailsGridLayout">
-          <item row="0" column="0">
-           <widget class="QCheckBox" name="cometTailsCheckBox">
-            <property name="toolTip">
-             <string>Draw the light of the comets brighter than magnitude 10 from a physical model instead of their usual drawing: the dust tail from many grains of different sizes and ages (Finson and Probstein), the dust coma, and the gas coma. Dust and gas give the magnitude of the comet in its coma; forward scattering brightens the dust seen towards the Sun.</string>
-            </property>
-            <property name="text">
-             <string>Physical model of the light</string>
-            </property>
-           </widget>
-          </item>
-          <item row="1" column="0">
-           <widget class="QCheckBox" name="cometTailGuidesCheckBox">
-            <property name="toolTip">
-             <string>Draw the shape of the dust and ion tails of the bright comets (and of the selected one) as lines: syndynes (grains of one size, released over 90 days; beta is the ratio of the radiation pressure to the gravitation, small grains near 1), synchrones (grains of all sizes released at one time) and the direction of the ion tail in the solar wind (Finson and Probstein 1968).</string>
-            </property>
-            <property name="text">
-             <string>Guide lines (syndynes, synchrones, ion tail)</string>
-            </property>
-           </widget>
-          </item>
-         </layout>
-        </widget>
-       </item>
-       <item>
-        <spacer name="rightColumnSpacer">
-         <property name="orientation">
-          <enum>Qt::Vertical</enum>
-         </property>
-         <property name="sizeHint" stdset="0">
-          <size>
-           <width>0</width>
-           <height>0</height>
-          </size>
-         </property>
-        </spacer>
+            <item row="4" column="1">
+             <widget class="QSpinBox" name="lensFlareStrengthSpinBox">
+              <property name="toolTip">
+               <string>100% is a lens with a single-layer coating. A modern multi-coated lens reflects about a third or less.</string>
+              </property>
+              <property name="alignment">
+               <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+              </property>
+              <property name="suffix">
+               <string> %</string>
+              </property>
+              <property name="maximum">
+               <number>300</number>
+              </property>
+              <property name="singleStep">
+               <number>10</number>
+              </property>
+             </widget>
+            </item>
+            <item row="5" column="0">
+             <widget class="QLabel" name="focusLabel">
+              <property name="text">
+               <string>Focus:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="5" column="1">
+             <widget class="QLabel" name="focusValueLabel">
+              <property name="text">
+               <string notr="true">∞</string>
+              </property>
+              <property name="alignment">
+               <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+              </property>
+             </widget>
+            </item>
+            <item row="6" column="0">
+             <widget class="QSlider" name="focusSlider">
+              <property name="toolTip">
+               <string>The focus ring of the lens. At infinity (∞) the stars are sharp. Focused nearer, each star becomes a blurred image of the aperture: a disk, or a polygon of the blades when stopped down, cut off in the corners (cat's eye). Faint stars fade away. A short lens forgives a lot, a long one almost nothing; stopping down helps. To the left of ∞ the ring turns beyond infinity, as many lenses allow.</string>
+              </property>
+              <property name="minimum">
+               <number>-100</number>
+              </property>
+              <property name="maximum">
+               <number>1000</number>
+              </property>
+              <property name="pageStep">
+               <number>10</number>
+              </property>
+              <property name="orientation">
+               <enum>Qt::Horizontal</enum>
+              </property>
+             </widget>
+            </item>
+            <item row="6" column="1">
+             <widget class="QPushButton" name="focusInfinityPushButton">
+              <property name="toolTip">
+               <string>Focus at infinity</string>
+              </property>
+              <property name="text">
+               <string notr="true">∞</string>
+              </property>
+             </widget>
+            </item>
+            <item row="7" column="0">
+             <widget class="QLabel" name="lensMaxApertureLabel">
+              <property name="text">
+               <string>Widest aperture:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="7" column="1">
+             <widget class="QComboBox" name="lensMaxApertureComboBox">
+              <property name="toolTip">
+               <string>The widest aperture (smallest f-number) of the lens, as for a lens you own. Neither you nor the program mode can open wider. A slow lens wide open shows the same vignetting and aberrations as a fast lens wide open.</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+         </item>
+         <item>
+          <widget class="QGroupBox" name="starsGroupBox">
+           <property name="title">
+            <string>Star images</string>
+           </property>
+           <layout class="QGridLayout" name="starsGridLayout">
+            <item row="0" column="0">
+             <widget class="QLabel" name="fwhmLabel">
+              <property name="text">
+               <string>Sharpest star image:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="0" column="1">
+             <widget class="QDoubleSpinBox" name="fwhmDoubleSpinBox">
+              <property name="toolTip">
+               <string>Smallest width (FWHM) of a star image in pixels, given by sensor and optics</string>
+              </property>
+              <property name="alignment">
+               <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+              </property>
+              <property name="suffix">
+               <string> px</string>
+              </property>
+              <property name="decimals">
+               <number>1</number>
+              </property>
+              <property name="minimum">
+               <double>0.800000000000000</double>
+              </property>
+              <property name="maximum">
+               <double>10.000000000000000</double>
+              </property>
+              <property name="singleStep">
+               <double>0.100000000000000</double>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="0">
+             <widget class="QLabel" name="seeingLabel">
+              <property name="text">
+               <string>Seeing:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="1">
+             <widget class="QDoubleSpinBox" name="seeingDoubleSpinBox">
+              <property name="toolTip">
+               <string>Blurring by the atmosphere (FWHM). It matters only at small fields of view.</string>
+              </property>
+              <property name="alignment">
+               <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+              </property>
+              <property name="suffix">
+               <string notr="true">″</string>
+              </property>
+              <property name="decimals">
+               <number>1</number>
+              </property>
+              <property name="minimum">
+               <double>0.000000000000000</double>
+              </property>
+              <property name="maximum">
+               <double>60.000000000000000</double>
+              </property>
+              <property name="singleStep">
+               <double>0.500000000000000</double>
+              </property>
+             </widget>
+            </item>
+            <item row="2" column="0">
+             <widget class="QLabel" name="haloLabel">
+              <property name="text">
+               <string>Lens halo:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="2" column="1">
+             <widget class="QDoubleSpinBox" name="haloDoubleSpinBox">
+              <property name="toolTip">
+               <string>Share of a star's light that the lens scatters into a wide, faint glow. A film camera keeps its own value (default 0.3%): in front of a digital sensor lies a stack of filters, whose reflections add to the glow of the lens.</string>
+              </property>
+              <property name="alignment">
+               <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+              </property>
+              <property name="suffix">
+               <string notr="true"> %</string>
+              </property>
+              <property name="decimals">
+               <number>1</number>
+              </property>
+              <property name="minimum">
+               <double>0.000000000000000</double>
+              </property>
+              <property name="maximum">
+               <double>30.000000000000000</double>
+              </property>
+              <property name="singleStep">
+               <double>0.500000000000000</double>
+              </property>
+             </widget>
+            </item>
+            <item row="3" column="0">
+             <widget class="QLabel" name="spikesLabel">
+              <property name="text">
+               <string>Aperture blades:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="3" column="1">
+             <widget class="QComboBox" name="spikesComboBox">
+              <property name="toolTip">
+               <string>Blades of the lens diaphragm. Stopped down, their straight edges make diffraction spikes: as many as there are blades for an even number, twice as many for an odd number. Wide open the aperture is round and there are no spikes; the spikes appear when you stop down and grow longer at large f-numbers.</string>
+              </property>
+             </widget>
+            </item>
+            <item row="4" column="0">
+             <widget class="QLabel" name="spikeStrengthLabel">
+              <property name="text">
+               <string>Spike strength:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="4" column="1">
+             <widget class="QDoubleSpinBox" name="spikeStrengthDoubleSpinBox">
+              <property name="toolTip">
+               <string>Share of a star's light that goes into the diffraction spikes when the lens is stopped down (two stops or more). Wide open there are no spikes.</string>
+              </property>
+              <property name="alignment">
+               <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+              </property>
+              <property name="suffix">
+               <string notr="true"> %</string>
+              </property>
+              <property name="decimals">
+               <number>1</number>
+              </property>
+              <property name="minimum">
+               <double>0.000000000000000</double>
+              </property>
+              <property name="maximum">
+               <double>10.000000000000000</double>
+              </property>
+              <property name="singleStep">
+               <double>0.100000000000000</double>
+              </property>
+             </widget>
+            </item>
+            <item row="5" column="0" colspan="2">
+             <widget class="QCheckBox" name="bloomCheckBox">
+              <property name="toolTip">
+               <string>Compute the lens halo and the inner part of the spikes from the whole image (bloom). This gives the right shape for bright extended objects such as a lunar crescent or the Sun behind branches.</string>
+              </property>
+              <property name="text">
+               <string>Halo and spikes from the whole image (bloom)</string>
+              </property>
+             </widget>
+            </item>
+            <item row="6" column="0">
+             <widget class="QLabel" name="eclipseAtmosphereLabel">
+              <property name="text">
+               <string>Lunar eclipses:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="6" column="1">
+             <widget class="QComboBox" name="eclipseAtmosphereComboBox">
+              <property name="toolTip">
+               <string>In the shadow of the Earth the Moon is lit by sunlight that the Earth's atmosphere bends into the shadow, reddened on its long way through the air, with a turquoise band from ozone at the edge of the umbra. How bright and how red the totality is depends on the state of the atmosphere: aerosols in the stratosphere (after volcanic eruptions) and clouds take light away. Clean air gives a bright orange totality (Danjon L about 3 to 4), a typical one copper red (L about 2); after volcanic eruptions it is dark red (L about 1), after a major eruption such as Pinatubo 1991 the Moon nearly disappears (L about 0).</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+         </item>
+         <item>
+          <spacer name="rightColumnSpacer">
+           <property name="orientation">
+            <enum>Qt::Vertical</enum>
+           </property>
+           <property name="sizeHint" stdset="0">
+            <size>
+             <width>0</width>
+             <height>0</height>
+            </size>
+           </property>
+          </spacer>
+         </item>
+        </layout>
        </item>
       </layout>
-     </item>
-    </layout>
+     </widget>
+     <widget class="QWidget" name="skyTab">
+      <attribute name="title">
+       <string>Sky</string>
+      </attribute>
+      <layout class="QHBoxLayout" name="skyColumnsLayout">
+       <property name="spacing">
+        <number>0</number>
+       </property>
+       <property name="leftMargin">
+        <number>0</number>
+       </property>
+       <property name="topMargin">
+        <number>0</number>
+       </property>
+       <property name="rightMargin">
+        <number>0</number>
+       </property>
+       <property name="bottomMargin">
+        <number>0</number>
+       </property>
+       <item>
+        <layout class="QVBoxLayout" name="skyLeftColumnLayout">
+         <property name="spacing">
+          <number>0</number>
+         </property>
+         <item>
+          <widget class="QGroupBox" name="lightDomesGroupBox">
+           <property name="title">
+            <string>Light pollution: the light domes of towns</string>
+           </property>
+           <layout class="QGridLayout" name="lightDomesGridLayout">
+            <item row="0" column="0" colspan="2">
+             <widget class="QCheckBox" name="lightDomesCheckBox">
+              <property name="toolTip">
+               <string>Towns light the sky over the horizon in their direction: the light of their street lamps, scattered by the air and the haze (model of Garstang 1986/1991, with the curvature of the Earth). The dome grows the closer the town is, and white LEDs give a larger, bluer dome than sodium lamps, since the air scatters blue light more. The haze follows the extinction coefficient of the atmosphere settings. Only in the photographic mode. The light pollution setting of the sky is then the whole sky at the zenith: what the domes do not give there is spread evenly (local lights).</string>
+              </property>
+              <property name="text">
+               <string>Light domes of towns</string>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="0" colspan="2">
+             <layout class="QHBoxLayout" name="lightDomesDatabaseLayout">
+              <item>
+               <widget class="QCheckBox" name="lightDomesDatabaseCheckBox">
+                <property name="toolTip">
+                 <string>Take the towns within 400 km from the location database of Stellarium, with their population (places of about 15000 inhabitants and more; the smaller ones are part of the even light pollution). The database lists the districts of large cities as places of their own, while the city has the population of the whole: places inside the area of a larger town are counted in it. Found again when the location changes. The towns of the table below are added to them.</string>
+                </property>
+                <property name="text">
+                 <string>Towns from the location database</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <spacer name="lightDomesDatabaseSpacer">
+                <property name="orientation">
+                 <enum>Qt::Horizontal</enum>
+                </property>
+                <property name="sizeHint" stdset="0">
+                 <size>
+                  <width>10</width>
+                  <height>10</height>
+                 </size>
+                </property>
+               </spacer>
+              </item>
+              <item>
+               <widget class="QLabel" name="lightDomesDatabaseLampLabel">
+                <property name="text">
+                 <string>Street lamps:</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QComboBox" name="lightDomesDatabaseLampComboBox">
+                <property name="toolTip">
+                 <string>The kind of street lamps of the towns from the location database</string>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </item>
+            <item row="2" column="0" colspan="2">
+             <layout class="QHBoxLayout" name="lightDomesSourceLayout">
+              <item>
+               <widget class="QLabel" name="lightDomesSourceLabel">
+                <property name="text">
+                 <string>Light of the towns:</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QComboBox" name="lightDomesSourceComboBox">
+                <property name="toolTip">
+                 <string>Where the light of the towns comes from: their population (1000 lumens per inhabitant, see below), or the light measured by the VIIRS satellite (night lights of 2024, 15 arc seconds), which also has the villages, roads, industries and greenhouses, calibrated to the same lumens per inhabitant with Swedish towns. The satellite data are downloaded only for the places you ask for (below 1 MB for 400 km around).</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QPushButton" name="lightDomesDownloadPushButton">
+                <property name="toolTip">
+                 <string>Download the satellite map of the night lights within 400 km of the current location (from zenodo.org; kept in the cache directory)</string>
+                </property>
+                <property name="text">
+                 <string>Download satellite data</string>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </item>
+            <item row="3" column="0" colspan="2">
+             <widget class="QLabel" name="lightDomesSatelliteLabel">
+              <property name="text">
+               <string notr="true">-</string>
+              </property>
+              <property name="wordWrap">
+               <bool>true</bool>
+              </property>
+             </widget>
+            </item>
+            <item row="4" column="0" colspan="2">
+             <widget class="QTableWidget" name="lightDomesDatabaseTableWidget">
+              <property name="toolTip">
+               <string>The towns from the location database, the brightest domes first (population divided by the distance to the power 2.5). A town missing here (or a bright industrial area) can be added in your own towns below.</string>
+              </property>
+              <property name="minimumSize">
+               <size>
+                <width>0</width>
+                <height>90</height>
+               </size>
+              </property>
+              <property name="editTriggers">
+               <set>QAbstractItemView::NoEditTriggers</set>
+              </property>
+              <property name="selectionBehavior">
+               <enum>QAbstractItemView::SelectRows</enum>
+              </property>
+              <column>
+               <property name="text">
+                <string>Town</string>
+               </property>
+              </column>
+              <column>
+               <property name="text">
+                <string>Azimuth (°)</string>
+               </property>
+              </column>
+              <column>
+               <property name="text">
+                <string>Distance (km)</string>
+               </property>
+              </column>
+              <column>
+               <property name="text">
+                <string>Inhabitants</string>
+               </property>
+              </column>
+             </widget>
+            </item>
+            <item row="5" column="0" colspan="2">
+             <widget class="QLabel" name="lightDomesDatabaseInfoLabel">
+              <property name="text">
+               <string notr="true">-</string>
+              </property>
+              <property name="wordWrap">
+               <bool>true</bool>
+              </property>
+             </widget>
+            </item>
+            <item row="6" column="0" colspan="2">
+             <layout class="QHBoxLayout" name="lightDomesDatabaseButtonLayout">
+              <item>
+               <widget class="QCheckBox" name="lightDomesLabelsCheckBox">
+                <property name="toolTip">
+                 <string>Write the names of the towns whose domes show (5 degrees above the horizon at least 2% of a dark natural sky) at the horizon, like the gazetteer of a landscape and in its colors (font size and angle of the landscape labels). The brightest domes first: a name that would overlap a brighter one is left out.</string>
+                </property>
+                <property name="text">
+                 <string>Names of the towns at the horizon</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <spacer name="lightDomesDatabaseButtonSpacer">
+                <property name="orientation">
+                 <enum>Qt::Horizontal</enum>
+                </property>
+                <property name="sizeHint" stdset="0">
+                 <size>
+                  <width>10</width>
+                  <height>10</height>
+                 </size>
+                </property>
+               </spacer>
+              </item>
+              <item>
+               <widget class="QPushButton" name="lightDomesRecomputePushButton">
+                <property name="toolTip">
+                 <string>Find the towns around the current location again and compute the domes anew</string>
+                </property>
+                <property name="text">
+                 <string>Recompute</string>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </item>
+            <item row="7" column="0" colspan="2">
+             <widget class="QLabel" name="lightDomesOwnLabel">
+              <property name="text">
+               <string>Your own towns:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="8" column="0" colspan="2">
+             <widget class="QTableWidget" name="lightDomesTableWidget">
+              <property name="toolTip">
+               <string>The towns: their direction (azimuth from north towards east), distance, number of inhabitants and kind of street lamps. Double-click a value to change it.</string>
+              </property>
+              <property name="minimumSize">
+               <size>
+                <width>0</width>
+                <height>90</height>
+               </size>
+              </property>
+              <property name="selectionBehavior">
+               <enum>QAbstractItemView::SelectRows</enum>
+              </property>
+              <column>
+               <property name="text">
+                <string>Azimuth (°)</string>
+               </property>
+              </column>
+              <column>
+               <property name="text">
+                <string>Distance (km)</string>
+               </property>
+              </column>
+              <column>
+               <property name="text">
+                <string>Inhabitants</string>
+               </property>
+              </column>
+              <column>
+               <property name="text">
+                <string>Street lamps</string>
+               </property>
+              </column>
+             </widget>
+            </item>
+            <item row="9" column="0" colspan="2">
+             <layout class="QHBoxLayout" name="lightDomesButtonLayout">
+              <item>
+               <widget class="QPushButton" name="lightDomesAddPushButton">
+                <property name="text">
+                 <string>Add town</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QPushButton" name="lightDomesRemovePushButton">
+                <property name="text">
+                 <string>Remove</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QLabel" name="lightDomesLumensLabel">
+                <property name="text">
+                 <string>Lumens per inhabitant:</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QDoubleSpinBox" name="lightDomesLumensDoubleSpinBox">
+                <property name="toolTip">
+                 <string>The light of the street lamps per inhabitant. 1000 lumens reproduce Walker's law (the sky 45 degrees above the horizon towards a town brightens by 1% of the natural sky times the population, divided by the distance in km to the power 2.5). Towns with much lighting (or seen with old, unshielded lamps) more, towns with shielded lamps and lights switched off at night less.</string>
+                </property>
+                <property name="decimals">
+                 <number>0</number>
+                </property>
+                <property name="minimum">
+                 <double>50.000000000000000</double>
+                </property>
+                <property name="maximum">
+                 <double>10000.000000000000000</double>
+                </property>
+                <property name="singleStep">
+                 <double>50.000000000000000</double>
+                </property>
+                <property name="value">
+                 <double>1000.000000000000000</double>
+                </property>
+                <property name="keyboardTracking">
+                 <bool>false</bool>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </item>
+            <item row="10" column="0" colspan="2">
+             <widget class="QLabel" name="lightDomesZenithLabel">
+              <property name="toolTip">
+               <string>The light of the domes at the zenith (artificial only, without the natural sky)</string>
+              </property>
+              <property name="text">
+               <string notr="true">-</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+         </item>
+         <item>
+          <spacer name="skyLeftColumnSpacer">
+           <property name="orientation">
+            <enum>Qt::Vertical</enum>
+           </property>
+           <property name="sizeHint" stdset="0">
+            <size>
+             <width>0</width>
+             <height>0</height>
+            </size>
+           </property>
+          </spacer>
+         </item>
+        </layout>
+       </item>
+       <item>
+        <layout class="QVBoxLayout" name="skyRightColumnLayout">
+         <property name="spacing">
+          <number>0</number>
+         </property>
+         <item>
+          <widget class="QGroupBox" name="auroraGroupBox">
+           <property name="title">
+            <string>Aurorae</string>
+           </property>
+           <layout class="QGridLayout" name="auroraGridLayout">
+            <item row="0" column="0">
+             <widget class="QCheckBox" name="auroraCheckBox">
+              <property name="toolTip">
+               <string>The light of the northern and southern lights in the auroral ovals: arcs, curtains and rays along the magnetic field, green around 110 km, red higher up, a purple lower border in strong storms. They brighten and break up in substorms every two to three hours and pulsate afterwards; the forms come from the date and time, so a moment always looks the same. The exposure averages what changes during it (not with the mount "No motion").</string>
+              </property>
+              <property name="text">
+               <string>Show aurorae</string>
+              </property>
+             </widget>
+            </item>
+            <item row="0" column="1">
+             <widget class="QCheckBox" name="auroraOvalCheckBox">
+              <property name="toolTip">
+               <string>Draw the boundaries of the auroral oval (Starkov 1994) as lines in the sky, also outside the photographic mode: green at 115 km (the green and blue emissions, poleward and equatorward boundaries, the diffuse aurora dimmer), red at 300 km (the red emission)</string>
+              </property>
+              <property name="text">
+               <string>Oval lines</string>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="0">
+             <widget class="QLabel" name="auroraActivityLabel">
+              <property name="text">
+               <string>Geomagnetic activity:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="1">
+             <widget class="QComboBox" name="auroraActivityComboBox">
+              <property name="toolTip">
+               <string>The geomagnetic activity, by the planetary index Kp (0 to 9): it sets the size of the ovals, the brightness of the aurorae and how often substorms come. Quiet: the oval over the far north (northern Norway, Iceland). Moderate: often seen from northern Scandinavia. Storm: low in the north from southern Sweden. Extreme storm: Kp 9 with Dst -250 nT, the aurora overhead in southern Scandinavia. Superstorm: as on 10-11 May 2024 (Kp 9, Dst -412 nT), aurorae as far as Spain and Mexico.</string>
+              </property>
+              <item>
+               <property name="text">
+                <string>Quiet (Kp 1)</string>
+               </property>
+              </item>
+              <item>
+               <property name="text">
+                <string>Moderate (Kp 3)</string>
+               </property>
+              </item>
+              <item>
+               <property name="text">
+                <string>Storm (Kp 6)</string>
+               </property>
+              </item>
+              <item>
+               <property name="text">
+                <string>Extreme storm (Kp 9)</string>
+               </property>
+              </item>
+              <item>
+               <property name="text">
+                <string>Superstorm (May 2024)</string>
+               </property>
+              </item>
+              <item>
+               <property name="text">
+                <string>Custom</string>
+               </property>
+              </item>
+             </widget>
+            </item>
+            <item row="2" column="0">
+             <widget class="QLabel" name="auroraKpLabel">
+              <property name="text">
+               <string>Kp:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="2" column="1">
+             <widget class="QDoubleSpinBox" name="auroraKpDoubleSpinBox">
+              <property name="toolTip">
+               <string>The planetary index Kp of the custom activity: 0-2 quiet, 3-4 active, 5-6 storm, 7-9 strong to extreme storm</string>
+              </property>
+              <property name="alignment">
+               <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+              </property>
+              <property name="decimals">
+               <number>1</number>
+              </property>
+              <property name="maximum">
+               <double>9.000000000000000</double>
+              </property>
+              <property name="singleStep">
+               <double>0.300000000000000</double>
+              </property>
+              <property name="value">
+               <double>3.000000000000000</double>
+              </property>
+             </widget>
+            </item>
+            <item row="3" column="0">
+             <widget class="QLabel" name="auroraDstLabel">
+              <property name="text">
+               <string>Dst (nT):</string>
+              </property>
+             </widget>
+            </item>
+            <item row="3" column="1">
+             <widget class="QDoubleSpinBox" name="auroraDstDoubleSpinBox">
+              <property name="toolTip">
+               <string>The storm index Dst of the custom activity: the ring current of a great storm, which widens the auroral ovals beyond what Kp gives (the Kp scale ends at 9). About -50 nT in a moderate storm, -100 to -200 nT in a strong one, -250 to -400 nT in the greatest storms of a solar cycle (May 2024: -412 nT, aurorae down to about 30 degrees of magnetic latitude).</string>
+              </property>
+              <property name="alignment">
+               <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+              </property>
+              <property name="decimals">
+               <number>0</number>
+              </property>
+              <property name="minimum">
+               <double>-1000.000000000000000</double>
+              </property>
+              <property name="maximum">
+               <double>0.000000000000000</double>
+              </property>
+              <property name="singleStep">
+               <double>10.000000000000000</double>
+              </property>
+              <property name="value">
+               <double>-20.000000000000000</double>
+              </property>
+             </widget>
+            </item>
+            <item row="5" column="0" colspan="2">
+             <widget class="QCheckBox" name="auroraHalfResolutionCheckBox">
+              <property name="toolTip">
+               <string>Compute the light of the aurorae at half the resolution of the screen and scale it up: about a quarter of the work for the graphics card, the thinnest arcs and rays a little softer.</string>
+              </property>
+              <property name="text">
+               <string>Half resolution (faster)</string>
+              </property>
+             </widget>
+            </item>
+            <item row="4" column="0" colspan="2">
+             <widget class="QLabel" name="auroraSubstormLabel">
+              <property name="toolTip">
+               <string>Where the substorm cycle stands at the current time: a growth phase with calm arcs, the onset and expansion (bright, folded aurorae with rays, about a quarter of an hour, strongest near magnetic midnight), and the recovery with pulsating aurora. The cycles come from the date and time.</string>
+              </property>
+              <property name="text">
+               <string notr="true"/>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+         </item>
+         <item>
+          <widget class="QGroupBox" name="noctilucentCloudsGroupBox">
+           <property name="title">
+            <string>Noctilucent clouds</string>
+           </property>
+           <layout class="QGridLayout" name="noctilucentCloudsGridLayout">
+            <item row="0" column="0">
+             <widget class="QCheckBox" name="noctilucentCloudsCheckBox">
+              <property name="toolTip">
+               <string>The thin layer of ice clouds about 82 km up, which still stands in the sunlight when the observer is in the dark: seen with the Sun 6 to 16 degrees below the horizon, the stars shining through. For now an even veil of a fixed brightness, at all times of the year.</string>
+              </property>
+              <property name="text">
+               <string>Show noctilucent clouds</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+         </item>
+         <item>
+          <widget class="QGroupBox" name="cometTailsGroupBox">
+           <property name="title">
+            <string>Comet tails</string>
+           </property>
+           <layout class="QGridLayout" name="cometTailsGridLayout">
+            <item row="0" column="0">
+             <widget class="QCheckBox" name="cometTailsCheckBox">
+              <property name="toolTip">
+               <string>Draw the light of the comets brighter than magnitude 10 from a physical model instead of their usual drawing: the dust tail from many grains of different sizes and ages (Finson and Probstein), the dust coma, and the gas coma. Dust and gas give the magnitude of the comet in its coma; forward scattering brightens the dust seen towards the Sun.</string>
+              </property>
+              <property name="text">
+               <string>Physical model of the light</string>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="0">
+             <widget class="QCheckBox" name="cometTailGuidesCheckBox">
+              <property name="toolTip">
+               <string>Draw the shape of the dust and ion tails of the bright comets (and of the selected one) as lines: syndynes (grains of one size, released over 90 days; beta is the ratio of the radiation pressure to the gravitation, small grains near 1), synchrones (grains of all sizes released at one time) and the direction of the ion tail in the solar wind (Finson and Probstein 1968).</string>
+              </property>
+              <property name="text">
+               <string>Guide lines (syndynes, synchrones, ion tail)</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+         </item>
+         <item>
+          <spacer name="skyRightColumnSpacer">
+           <property name="orientation">
+            <enum>Qt::Vertical</enum>
+           </property>
+           <property name="sizeHint" stdset="0">
+            <size>
+             <width>0</width>
+             <height>0</height>
+            </size>
+           </property>
+          </spacer>
+         </item>
+        </layout>
+       </item>
+      </layout>
+     </widget>
+    </widget>
    </item>
    <item>
     <widget class="QPushButton" name="resetPushButton">
