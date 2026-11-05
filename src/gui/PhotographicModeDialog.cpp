@@ -381,6 +381,18 @@ void PhotographicModeDialog::createDialogContent()
 	connectBoolProperty(ui->aureoleCheckBox,          "StelSkyDrawer.flagPhotoAureole");
 	connectBoolProperty(ui->humidityCheckBox,         "StelSkyDrawer.flagPhotoHumidity");
 	connect(drawer, &StelSkyDrawer::flagPhotoHumidityChanged,         this, &PhotographicModeDialog::updateCameraWidgets);
+	// the extinction coefficient shown there follows the humidity and the haze layer one frame later
+	connect(drawer, &StelSkyDrawer::effectiveAtmosphereChanged,       this, &PhotographicModeDialog::updateCameraWidgets);
+	// The haze layer: presets, or a custom height
+	connectIntProperty(ui->hazeLayerComboBox, "StelSkyDrawer.hazeLayerPreset");
+	connectDoubleProperty(ui->hazeLayerHeightDoubleSpinBox, "StelSkyDrawer.hazeLayerHeight");
+	auto updateHazeLayer = [this](){
+		const bool custom = ui->hazeLayerComboBox->currentIndex() == 3;
+		ui->hazeLayerHeightDoubleSpinBox->setEnabled(custom);
+		ui->hazeLayerHeightLabel->setEnabled(custom);
+	};
+	connect(ui->hazeLayerComboBox, qOverload<int>(&QComboBox::currentIndexChanged), this, updateHazeLayer);
+	updateHazeLayer();
 	connect(drawer, &StelSkyDrawer::extinctionCoefficientChanged,     this, &PhotographicModeDialog::updateCameraWidgets);
 	connectBoolProperty(ui->vignettingCheckBox,       "StelSkyDrawer.flagPhotoVignetting");
 	connectBoolProperty(ui->halphaModifiedCheckBox,   "StelSkyDrawer.flagPhotoHalphaModified");
