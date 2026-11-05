@@ -172,7 +172,7 @@ constexpr double IonLifetime = 4.;      // days (the tail fades with this age)
 constexpr double IonMaxAge = 12.;       // days
 constexpr int IonAgeCount = 140;
 constexpr double IonWidth = 5e4/KmPerAU;  // width of the tail at the head (AU) ...
-constexpr double IonOpening = 0.06;       // ... growing with the distance from the head
+constexpr double IonOpening = 0.015;      // ... growing with the distance from the head
 // Streamers: the main tail and rays at angles to it that fold onto the axis
 struct IonStream {double angle, azimuth, strength, width, period;};
 constexpr std::array<IonStream, 7> IonStreams = {{
@@ -185,6 +185,12 @@ constexpr std::array<IonStream, 7> IonStreams = {{
 	{-22., -0.3, 0.12, 0.25, 8.},
 }};
 constexpr double IonFolding = 0.12;     // days for a ray to fold onto the axis (e-folding)
+// Disconnection events: as the comet crosses a boundary between the sectors of the magnetic field of the solar wind
+// (every few days), the field lines reconnect in front of it and the tail is cut off from the head; the cut moves
+// down the tail with the ions (Hyakutake 1996: Brandt et al. 1999, Snow et al. 2004)
+constexpr double DisconnectionPeriod = 3.;  // days between the chances of a disconnection ...
+constexpr double DisconnectionChance = 0.7; // ... and the share of them that happen
+constexpr double DisconnectionGap = 0.1;    // days: the ions missing at the cut are released over some hours
 
 // The sodium tail: neutral atoms pushed away from the Sun by the pressure of the light they scatter in the D lines,
 // up to some 0.5 m/s^2 at 1 AU (beta about 85; Cremonese et al. 1997 found 82 for Hale-Bopp), much less when they
@@ -211,6 +217,24 @@ double noise(double x, int seed)
 	const double i = std::floor(x), f = x - i;
 	const double u = f*f*(3. - 2.*f);
 	return hash(i)*(1. - u) + hash(i + 1.)*u;
+}
+
+// The share of the ions released at a time (days) that stay in the tail: gaps at the disconnection events
+double disconnections(double release, int seed)
+{
+	double f = 1.;
+	const double n0 = std::floor(release/DisconnectionPeriod);
+	for (double n = n0 - 1.; n <= n0 + 1.; n += 1.)
+	{
+		// noise() at whole numbers: a random number for each period
+		if (noise(n, seed + 29) > DisconnectionChance)
+			continue;
+		const double time = (n + 0.15 + 0.7*noise(n, seed + 23))*DisconnectionPeriod;
+		const double depth = 0.7 + 0.3*noise(n, seed + 31);
+		const double x = (release - time)/DisconnectionGap;
+		f *= 1. - depth*std::exp(-x*x);
+	}
+	return f;
 }
 
 // Grains evaporate close to the Sun: refractory dust survives from about 4 solar radii, most of it from 10
@@ -942,6 +966,8 @@ void CometTailMgr::drawLight(StelCore* core, const Comet* comet)
 				const double age = IonMaxAge*u*u;
 				const double dAge = 2.*IonMaxAge*u/IonAgeCount;
 				const double release = (t - age)*24.; // hours
+				// the ions released at a disconnection event are missing (the gap is in the whole tail)
+				const double cut = disconnections(t - age, seed);
 				// the wind as the ions met it: direction off by a few degrees, its speed 300-600 km/s
 				const double speed = SolarWindSpeed*(0.75 + 0.75*noise(release/11., seed + 7));
 				Vec3d dir = radial*speed - vel;
@@ -961,6 +987,7 @@ void CometTailMgr::drawLight(StelCore* core, const Comet* comet)
 				ionLight[i] = st.strength*lit*dAge*std::exp(-age/IonLifetime);
 				ionWidth[i] = st.width*(IonWidth + IonOpening*s);
 				sum += ionLight[i];
+				ionLight[i] *= cut;
 			}
 		}
 		if (sum > 0.)

@@ -54,6 +54,8 @@ class Comet;
 //! The ion tail is drawn from streams of CO+ ions released at earlier times along the solar wind as the comet saw
 //! it then: they accelerate to some 200 km/s and fade over a few days; the wind changes its direction and speed
 //! a little with time, so knots and kinks move down the tail, and rays leave the head at angles and fold onto it.
+//! Now and then (as the comet crosses a boundary between the sectors of the field of the solar wind) the tail is
+//! cut off from the head, and the cut moves down the tail (disconnection events).
 //! The sodium tail is drawn from atoms pushed away from the Sun by the light they scatter in the D lines, weaker
 //! when the comet moves slowly to or from the Sun (Swings effect); the dust is released in bursts now and then,
 //! which give striae along the synchrones. The large grains (beta below 0.01) linger along the orbit for years,
