@@ -18,6 +18,7 @@
  */
 
 #include "NoctilucentCloudMgr.hpp"
+#include "NoctilucentCloudLight.hpp"
 #include "StelApp.hpp"
 #include "StelCore.hpp"
 #include "StelLocation.hpp"
@@ -39,17 +40,16 @@
 #include <QVector3D>
 #include <algorithm>
 #include <cmath>
+#include <vector>
+
+#ifndef GL_RGB32F
+#define GL_RGB32F 0x8815
+#endif
 
 namespace
 {
 constexpr double EarthRadius = 6371.;     // km
 constexpr double CloudHeight = 82.;       // km
-// Sunlight that passes lower than this does not reach the clouds. The effective height of the Earth's shadow: the
-// real light fades out over some tens of km, from the air and the ozone along the way (a later stage).
-constexpr double ShadowHeight = 15.;      // km
-constexpr double ShadowEdge = 3.;         // km: half the width of the edge of the shadow
-// A provisional luminance of the veil (cd/m^2), of the order of the twilight sky at the Sun's altitude of -10 degrees
-constexpr double ProvisionalLuminance = 0.1;
 // With the Sun above this the sunlit clouds are lost in the bright sky (radians)
 constexpr double HighestSunAltitude = -3.*M_PI/180.;
 constexpr int VertexAttribIndex = 0;
@@ -68,6 +68,7 @@ void NoctilucentCloudMgr::init()
 {
 	QSettings* conf = StelApp::getInstance().getSettings();
 	setFlagShow(conf->value("noctilucent_clouds/flag_show", false).toBool());
+	setOpticalDepth(conf->value("noctilucent_clouds/optical_depth", 1e-5).toDouble());
 	addAction("actionShow_Noctilucent_Clouds", N_("Display Options"), N_("Noctilucent clouds"), "flagShow");
 
 	// A full screen quad
@@ -110,6 +111,17 @@ void NoctilucentCloudMgr::setFlagShow(bool b)
 	}
 }
 
+void NoctilucentCloudMgr::setOpticalDepth(double value)
+{
+	value = std::clamp(value, 1e-7, 1e-3);
+	if (!qFuzzyCompare(value, opticalDepth))
+	{
+		opticalDepth = value;
+		StelApp::immediateSave("noctilucent_clouds/optical_depth", value);
+		emit opticalDepthChanged(value);
+	}
+}
+
 double NoctilucentCloudMgr::tangentHeight(const Vec3d& p, const Vec3d& sun)
 {
 	// On the sunlit side of the Earth the ray comes down to the point itself; behind it, the ray passes closest to the
@@ -124,7 +136,7 @@ double NoctilucentCloudMgr::lowestSunAltitude(double observerHeight)
 	// Earth it lies this far from the observer (radians), and the Sun's rays reach it this far past their tangent point
 	const double r = EarthRadius + CloudHeight;
 	const double toHorizon = std::acos(EarthRadius/r) + std::acos(EarthRadius/(EarthRadius + std::max(0., observerHeight)));
-	const double pastTangent = std::acos((EarthRadius + ShadowHeight - ShadowEdge)/r);
+	const double pastTangent = std::acos((EarthRadius + NoctilucentCloudLight::LowestHeight)/r);
 	return -(toHorizon + pastTangent);
 }
 
@@ -161,8 +173,10 @@ uniform highp mat4 projectionMatrixInverse;
 uniform bool extinctionEnabled;
 uniform highp vec3 cloudSun;        // unit vector towards the Sun
 uniform highp vec3 cloudRadii;      // of the observer, the Earth and the layer (km)
-uniform highp vec2 cloudShadow;     // the effective height of the Earth's shadow (km) and half the width of its edge
-uniform highp vec3 cloudLuminance;  // scene buffer
+uniform sampler2D cloudLight;       // the light against the tangent height of the sunlight and the scattering angle
+uniform highp vec2 cloudLightSize;  // of the table
+uniform highp vec2 cloudLightScale; // from a tangent height (km) to the columns of the table; from its values to the
+                                    // scene buffer
 
 void main(void)
 {
@@ -187,9 +201,12 @@ void main(void)
 	highp vec3 p = vec3(0., 0., r0) + t*altAz;
 	// the ray of sunlight to that point: the lowest it passes over the Earth (see tangentHeight() in the C++ code)
 	highp float tangent = (dot(p, cloudSun) > 0. ? length(p) : length(cross(p, cloudSun))) - cloudRadii.y;
-	highp float sunlit = smoothstep(cloudShadow.x - cloudShadow.y, cloudShadow.x + cloudShadow.y, tangent);
+	highp float angle = acos(clamp(dot(altAz, cloudSun), -1., 1.))/3.14159265;
+	highp vec2 lightCoord = (vec2(0.5) + vec2(tangent*cloudLightScale.x, angle*(cloudLightSize.y - 1.)))/cloudLightSize;
+	// a slanted line of sight crosses more of the layer
+	highp float slant = length(p)/dot(p, altAz);
 
-	highp vec3 color = sunlit*cloudLuminance;
+	highp vec3 color = texture2D(cloudLight, lightCoord).rgb*cloudLightScale.y*slant;
 	if (extinctionEnabled)
 		color *= pow(10., -0.4*extinctionMagnitude(altAz)) * photoExtinctionTint(altAz.z);
 	FRAG_COLOR = vec4(color, 1.);
@@ -204,6 +221,26 @@ void main(void)
 	if (!StelPainter::linkProg(newProgram.get(), "NoctilucentCloudMgr program"))
 		return;
 	program = std::move(newProgram);
+}
+
+void NoctilucentCloudMgr::bindLightTexture(int unit)
+{
+	auto& gl = *QOpenGLContext::currentContext()->functions();
+	gl.glActiveTexture(GL_TEXTURE0 + static_cast<GLenum>(unit));
+	if (!lightTexture)
+	{
+		const std::vector<float> table = NoctilucentCloudLight::computeTable();
+		gl.glGenTextures(1, &lightTexture);
+		gl.glBindTexture(GL_TEXTURE_2D, lightTexture);
+		gl.glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB32F, NoctilucentCloudLight::HeightCount, NoctilucentCloudLight::AngleCount,
+		                0, GL_RGB, GL_FLOAT, table.data());
+		gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	}
+	gl.glBindTexture(GL_TEXTURE_2D, lightTexture);
+	gl.glActiveTexture(GL_TEXTURE0);
 }
 
 void NoctilucentCloudMgr::draw(StelCore* core)
@@ -235,7 +272,7 @@ void NoctilucentCloudMgr::draw(StelCore* core)
 		return;
 
 	const Extinction& extinction = drawer->getExtinction();
-	const float luminance = static_cast<float>(ProvisionalLuminance)*drawer->getPhotoSceneScale();
+	bindLightTexture(2);
 
 	QOpenGLShaderProgram& p = *program;
 	p.bind();
@@ -247,8 +284,11 @@ void NoctilucentCloudMgr::draw(StelCore* core)
 	p.setUniformValue("cloudSun", QVector3D(static_cast<float>(sun[0]), static_cast<float>(sun[1]), static_cast<float>(sun[2])));
 	p.setUniformValue("cloudRadii", QVector3D(static_cast<float>(EarthRadius + observerHeight), static_cast<float>(EarthRadius),
 	                                          static_cast<float>(EarthRadius + CloudHeight)));
-	p.setUniformValue("cloudShadow", QVector2D(static_cast<float>(ShadowHeight), static_cast<float>(ShadowEdge)));
-	p.setUniformValue("cloudLuminance", QVector3D(luminance, luminance, luminance));
+	p.setUniformValue("cloudLight", 2);
+	p.setUniformValue("cloudLightSize", QVector2D(static_cast<float>(NoctilucentCloudLight::HeightCount),
+	                                              static_cast<float>(NoctilucentCloudLight::AngleCount)));
+	p.setUniformValue("cloudLightScale", QVector2D(static_cast<float>((NoctilucentCloudLight::HeightCount - 1)/NoctilucentCloudLight::MaxHeight),
+	                                               static_cast<float>(opticalDepth)*drawer->getPhotoSceneScale()));
 
 	auto& gl = *QOpenGLContext::currentContext()->functions();
 	gl.glEnable(GL_BLEND);

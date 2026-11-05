@@ -18,6 +18,7 @@
  */
 
 #include "LunarEclipseLight.hpp"
+#include "SpectralData.hpp"
 
 #include <QtGlobal>
 #include <algorithm>
@@ -61,12 +62,6 @@ double interpolate(double x, const std::vector<double>& xs, const std::vector<do
 	const double t = (x - xs[i-1])/(xs[i] - xs[i-1]);
 	return ys[i-1] + t*(ys[i] - ys[i-1]);
 }
-
-// Piecewise Gaussian fit of the CIE 1931 color matching functions (Wyman, Sloan and Shirley 2013)
-double lobe(double l, double mu, double s1, double s2) { const double s = l < mu ? s1 : s2; return std::exp(-0.5*(l-mu)*(l-mu)/(s*s)); }
-double cieX(double l) { return 1.056*lobe(l, 599.8, 37.9, 31.0) + 0.362*lobe(l, 442.0, 16.0, 26.7) - 0.065*lobe(l, 501.1, 20.4, 26.2); }
-double cieY(double l) { return 0.821*lobe(l, 568.8, 46.9, 40.5) + 0.286*lobe(l, 530.9, 16.3, 31.1); }
-double cieZ(double l) { return 1.217*lobe(l, 437.0, 11.8, 36.0) + 0.681*lobe(l, 459.0, 26.0, 13.8); }
 
 }
 
@@ -140,11 +135,10 @@ LunarEclipseLight::LunarEclipseLight()
 		wavelengths.push_back(l);
 		refractivity.push_back(2.87e-4*(1. + 5.67e-3/(um*um)));
 		limbDarkening.push_back(interpolate(l, ldWavelengths, ldCoefficients));
-		// Sunlight (Planck at 5778 K) weighted with the color matching functions
-		const double planck = 1./(std::pow(l, 5.)*(std::exp(1.4388e7/(l*5778.)) - 1.));
-		weightX.push_back(planck*cieX(l));
-		weightY.push_back(planck*cieY(l));
-		weightZ.push_back(planck*cieZ(l));
+		// Sunlight weighted with the color matching functions
+		weightX.push_back(SpectralData::sunlight(l)*SpectralData::cieX(l));
+		weightY.push_back(SpectralData::sunlight(l)*SpectralData::cieY(l));
+		weightZ.push_back(SpectralData::sunlight(l)*SpectralData::cieZ(l));
 	}
 }
 
@@ -155,15 +149,13 @@ void LunarEclipseLight::computeTransmission(int atmosphere)
 	static const double stratoAerosol[ATMOSPHERE_COUNT] = {0.002, 0.01, 0.05, 0.15};
 	static const double cloudShare[ATMOSPHERE_COUNT] = {0.4, 0.6, 0.6, 0.6};
 	const int a = qBound(0, atmosphere, ATMOSPHERE_COUNT-1);
-	// Ozone: Chappuis band (cm^2 per molecule), 300 Dobson units
-	const std::vector<double> o3Wavelengths = {390., 420., 450., 480., 500., 520., 550., 575., 600., 625., 650., 675., 700., 710.};
-	const std::vector<double> o3Section = {0.0, 0.03, 0.3, 0.8, 1.4, 2.0, 3.3, 4.6, 5.1, 4.2, 2.4, 1.6, 1.0, 0.8};
+	// Ozone: Chappuis band, 300 Dobson units
 	transmission.assign(static_cast<size_t>(ECL_HEIGHTS*ECL_WAVELENGTHS), 0.);
 	for (int k=0; k<ECL_WAVELENGTHS; ++k)
 	{
 		const double um = 0.001*wavelengths[static_cast<size_t>(k)];
 		const double tauRayleigh = 0.0088*std::pow(um, -4.05);
-		const double tauOzone = 300.*2.687e16*interpolate(wavelengths[static_cast<size_t>(k)], o3Wavelengths, o3Section)*1e-21;
+		const double tauOzone = 300.*2.687e16*SpectralData::ozoneCrossSection(wavelengths[static_cast<size_t>(k)])*1e-21;
 		const double tauTropo = 0.10*std::pow(um/0.55, -1.3);
 		const double tauStrato = stratoAerosol[a]*std::pow(um/0.55, -1.0);
 		for (int i=0; i<ECL_HEIGHTS; ++i)

@@ -37,17 +37,20 @@ class QOpenGLVertexArrayObject;
 //!
 //! The clouds show when the observer is in the dark but the layer still stands in the sunlight. A shader follows the
 //! line of sight of each pixel to the shell of the layer and finds there the tangent height of the ray of sunlight
-//! that reaches the point: the lowest height over the Earth on its way. Below an effective height of the shadow no
-//! light gets through. That the clouds stand low over the northern horizon from Sweden in summer follows from this
-//! geometry alone.
+//! that reaches the point: the lowest height over the Earth on its way. That height and the scattering angle give the
+//! luminance from a table (see NoctilucentCloudLight), which grows with the slant of the line of sight through the
+//! layer. That the clouds stand low over the northern horizon from Sweden in summer follows from this geometry alone.
+//! The photographic mode records the light like the sky, dimmed by the extinction.
 //!
-//! This is the first stage: an even veil of a fixed luminance, everywhere and all year round, recorded by the
-//! photographic mode like the sky and dimmed by the extinction.
+//! So far an even veil, everywhere and all year round.
 class NoctilucentCloudMgr : public StelModule
 {
 	Q_OBJECT
 	//! Show the noctilucent clouds (photographic mode)
 	Q_PROPERTY(bool flagShow READ getFlagShow WRITE setFlagShow NOTIFY flagShowChanged)
+	//! The vertical optical depth of the layer at 532 nm: 1e-5 a typical display, 3e-5 a bright one, 1e-4 an extreme one.
+	//! From the lidars: a backscatter of about 1e-9 per m and sr over 1 km, and P(180 degrees) of about 1.3, give 1e-5.
+	Q_PROPERTY(double opticalDepth READ getOpticalDepth WRITE setOpticalDepth NOTIFY opticalDepthChanged)
 
 public:
 	NoctilucentCloudMgr();
@@ -59,6 +62,7 @@ public:
 	double getCallOrder(StelModuleActionName actionName) const override;
 
 	bool getFlagShow() const {return flagShow;}
+	double getOpticalDepth() const {return opticalDepth;}
 
 	//! The tangent height (km) of the ray of sunlight that reaches the point p (km from the center of the Earth): the
 	//! lowest height over the Earth on its way from the Sun, whose direction is the unit vector sun
@@ -69,12 +73,19 @@ public:
 
 public slots:
 	void setFlagShow(bool b);
+	void setOpticalDepth(double value);
 
 signals:
 	void flagShowChanged(bool b);
+	void opticalDepthChanged(double value);
 
 private:
 	bool flagShow = false;
+	double opticalDepth = 1e-5;
+
+	//! The texture of the light of the clouds (NoctilucentCloudLight), computed when it is first needed
+	unsigned int lightTexture = 0;
+	void bindLightTexture(int unit);
 
 	void buildProgram(const StelProjector& projector);
 	void drawQuad();

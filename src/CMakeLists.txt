@@ -241,6 +241,9 @@ SET(stellarium_lib_SRCS
      core/modules/AuroraCorrection.hpp
      core/modules/NoctilucentCloudMgr.cpp
      core/modules/NoctilucentCloudMgr.hpp
+     core/modules/NoctilucentCloudLight.cpp
+     core/modules/NoctilucentCloudLight.hpp
+     core/modules/SpectralData.hpp
      core/modules/CometTailMgr.hpp
      core/modules/Meteor.cpp
      core/modules/Meteor.hpp
