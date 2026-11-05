@@ -28,6 +28,7 @@
 #include "StelModuleMgr.hpp"
 #include "LightDomes.hpp"
 #include "AuroraMgr.hpp"
+#include "NoctilucentCloudMgr.hpp"
 #include "StelLocation.hpp"
 
 #include <QComboBox>
@@ -334,7 +335,13 @@ void PhotographicModeDialog::createDialogContent()
 	connectBoolProperty(ui->auroraCheckBox,           "AuroraMgr.flagShow");
 	connectBoolProperty(ui->auroraOvalCheckBox,       "AuroraMgr.flagShowOval");
 	connectBoolProperty(ui->auroraHalfResolutionCheckBox, "AuroraMgr.flagHalfResolution");
-	connectBoolProperty(ui->noctilucentCloudsCheckBox, "NoctilucentCloudMgr.flagShow");
+	connectIntProperty(ui->noctilucentCloudsComboBox, "NoctilucentCloudMgr.occurrence");
+	connectBoolProperty(ui->noctilucentCloudsHalfResolutionCheckBox, "NoctilucentCloudMgr.flagHalfResolution");
+	{
+		NoctilucentCloudMgr* clouds = GETSTELMODULE(NoctilucentCloudMgr);
+		ui->noctilucentCloudsInfoLabel->setText(clouds->getOccurrenceInfo());
+		connect(clouds, &NoctilucentCloudMgr::occurrenceInfoChanged, ui->noctilucentCloudsInfoLabel, &QLabel::setText);
+	}
 	connectBoolProperty(ui->cometTailsCheckBox,       "CometTailMgr.flagShow");
 	connectBoolProperty(ui->cometTailGuidesCheckBox,  "CometTailMgr.flagShowGuides");
 	// The aurorae: the activity is a preset or a custom Kp; the substorm cycle shows where it stands

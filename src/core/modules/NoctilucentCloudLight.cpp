@@ -24,6 +24,7 @@
 #include <array>
 #include <cmath>
 #include <complex>
+#include <cstdint>
 
 namespace
 {
@@ -48,6 +49,22 @@ constexpr int RadiusCount = 48;
 // the sunlight reaches the clouds.
 constexpr std::array<double, 11> AirProfile = {1., 0.3376, 0.0726, 0.01503, 0.00326, 0.00084, 0.00025, 6.8e-5, 1.5e-5, 2.8e-6, 4.5e-7};
 constexpr std::array<double, 11> OzoneProfile = {0.54, 0.86, 4.9, 2.6, 0.5, 0.057, 0.0065, 0.00074, 8.4e-5, 9.6e-6, 1.1e-6};
+
+// A number in [0, 1) from the integer n and a salt (splitmix64)
+double unitHash(int64_t n, uint64_t salt)
+{
+	uint64_t z = static_cast<uint64_t>(n)*0x9E3779B97F4A7C15ull + salt*0xBF58476D1CE4E5B9ull + 0x94D049BB133111EBull;
+	z = (z ^ (z >> 30))*0xBF58476D1CE4E5B9ull;
+	z = (z ^ (z >> 27))*0x94D049BB133111EBull;
+	z ^= z >> 31;
+	return static_cast<double>(z >> 11)*(1./9007199254740992.);
+}
+
+double smooth(double e0, double e1, double x)
+{
+	const double t = std::clamp((x - e0)/(e1 - e0), 0., 1.);
+	return t*t*(3. - 2.*t);
+}
 
 double profile(const std::array<double, 11>& values, double z)
 {
@@ -171,6 +188,51 @@ std::vector<double> transmission(double wavelength)
 	}
 	return soft;
 }
+}
+
+NoctilucentCloudLight::Occurrence NoctilucentCloudLight::occurrence(double jd, double night, int mode, bool south)
+{
+	Occurrence o;
+	if (mode == OccurrenceFaint)
+	{
+		o.any = true;
+		o.edge = 60.;
+		o.strength = 0.6;
+		o.cover = 0.36;
+		return o;
+	}
+	if (mode == OccurrenceGreat)
+	{
+		o.any = true;
+		o.edge = 48.;
+		o.strength = 2.5;
+		o.cover = 0.2;
+		return o;
+	}
+	if (mode != OccurrenceSeason)
+		return o;
+
+	// The days from the solstice of the summer of the hemisphere: the one of June 2000, in tropical years
+	constexpr double TropicalYear = 365.2422;
+	const double days = std::remainder(jd - (2451716.575 + (south ? 0.5*TropicalYear : 0.)), TropicalYear);
+	const double season = smooth(-38., -12., days)*(1. - smooth(35., 80., days));
+	if (season <= 0.)
+		return o;
+
+	// How far the clouds of this night reach at the height of the season: the shares of the nights given above
+	const double u = unitHash(static_cast<int64_t>(night), south ? 2 : 1);
+	static constexpr std::array<double, 6> shares = {0., 0.1, 0.45, 0.8, 0.95, 1.};
+	static constexpr std::array<double, 6> edges = {75., 70., 65., 60., 55., 52.};
+	std::size_t i = 1;
+	while (i < 5 && u > shares[i])
+		++i;
+	const double reach = edges[i - 1] + (u - shares[i - 1])/(shares[i] - shares[i - 1])*(edges[i] - edges[i - 1]) + (south ? 3. : 0.);
+
+	o.any = true;
+	o.edge = 90. - (90. - reach)*season;
+	o.strength = (0.4 + 1.4*std::pow(u, 1.5))*(0.8 + 0.4*unitHash(static_cast<int64_t>(night), 3));
+	o.cover = 0.28 + 0.22*(1. - u);
+	return o;
 }
 
 double NoctilucentCloudLight::mieScattering(double x, const double* mu, int nAngles, double* intensity)

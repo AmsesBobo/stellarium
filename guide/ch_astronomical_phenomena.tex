@@ -1350,6 +1350,68 @@ all kinds of light, e.g.\  campfires, so this is also available for earlier
 dates.
 
 
+\subsection{Noctilucent Clouds}
+\label{sec:phenomena:NoctilucentClouds}
+
+\indexterm{Noctilucent clouds} are the highest clouds of the Earth: a
+thin layer of ice crystals with radii of a few tens of nanometres,
+about 82\,km above the ground. On summer nights they can stand in
+the sunlight while the observer is in the dark, and shine silvery blue
+over the horizon towards the Sun. They are seen with the Sun about
+$6^\circ$ to $16^\circ$ below the horizon; before that the bright sky
+hides them, and later they lie in the shadow of the Earth. The stars
+shine through them.
+
+Stellarium simulates them in the photographic mode. Their settings are
+on the \emph{Sky} tab of the camera settings window.
+
+\begin{description}
+\item[Occurrence] \emph{Off}; \emph{By season}; \emph{Faint display};
+  or \emph{Great display}. By season they come from the middle of May
+  to early August in the north, and half a year later in the south.
+  Each night has its own number from the date, which decides how far
+  from the pole the clouds reach and how bright they are, so that
+  a night always looks the same and places nearby see the same clouds:
+  at the height of the season they reach $60^\circ$ of latitude on about
+  one night of five, $55^\circ$ on one of twenty. These shares
+  are a model that fits the observers, not a forecast or a record
+  of real nights. The line below the setting tells how far they reach
+  this night. A faint or a great display shows clouds at any time of
+  the year, the great one brighter and further from the poles.
+\item[Half resolution] computes the clouds at half the resolution of
+  the screen, for slower graphics cards.
+\end{description}
+
+The model follows the physics where it is known. The line of sight of
+each pixel is followed to a shell over a spherical Earth, and the
+tangent height of the sunlight that reaches that point is found. The
+sunlight crosses the air, the ozone (the Chappuis band, which gives the
+clouds their blue colour together with the small size of the particles)
+and the aerosols, and refraction bends it; so the shadow of the Earth
+has no fixed height. The light is scattered once by spheres of
+ice, computed by Mie theory after the model of
+\citet{Lange:2022:NLCColour}, and it grows with the slant of the line
+of sight through the layer. A display of ordinary brightness
+has a vertical optical depth of about $10^{-5}$ at 532\,nm.
+
+The forms are not a record of real clouds but noise of the date and
+time on a map of the layer, so that their scales and motions are right
+while the individual clouds are invented. They follow the case studied
+by \citet{Dalin:2004:NLCWaves}: bands about 33 to 44\,km apart, waves of
+about 9.5\,km which form the herringbone patterns, billows of about
+4.6\,km, and whirls. The wind of the night, 40 to 60\,m/s from the
+north-east in the north, carries the whole field; bands and waves run
+through it with periods of 55 to 112, 13 to 18 and 6 to 8 minutes. The
+camera averages what moves during its exposure, unless the mount is set to
+\emph{No motion}.
+
+Scripts can set the properties \texttt{occurrence} (0 to 3),
+\texttt{flagHalfResolution} and \texttt{opticalDepth} of the module
+\texttt{NoctilucentCloudMgr} with \texttt{core.setStelProperty()}.
+The settings are kept in the section \texttt{[noctilucent\_clouds]}
+of \texttt{config.ini}.
+
+
 %%% Local Variables: 
 %%% mode: latex
 %%% TeX-master: "guide"

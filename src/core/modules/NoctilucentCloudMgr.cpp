@@ -36,6 +36,7 @@
 #include <QOpenGLBuffer>
 #include <QOpenGLShaderProgram>
 #include <QOpenGLVertexArrayObject>
+#include <QOpenGLFramebufferObject>
 #include <QVector2D>
 #include <QVector3D>
 #include <QVector4D>
@@ -45,6 +46,9 @@
 
 #ifndef GL_RGB32F
 #define GL_RGB32F 0x8815
+#endif
+#ifndef GL_RGBA16F
+#define GL_RGBA16F 0x881A
 #endif
 
 namespace
@@ -77,7 +81,9 @@ NoctilucentCloudMgr::~NoctilucentCloudMgr()
 void NoctilucentCloudMgr::init()
 {
 	QSettings* conf = StelApp::getInstance().getSettings();
+	occurrenceMode = std::clamp(conf->value("noctilucent_clouds/occurrence", 1).toInt(), 1, 3);
 	setFlagShow(conf->value("noctilucent_clouds/flag_show", false).toBool());
+	setFlagHalfResolution(conf->value("noctilucent_clouds/flag_half_resolution", false).toBool());
 	setOpticalDepth(conf->value("noctilucent_clouds/optical_depth", 1e-5).toDouble());
 	addAction("actionShow_Noctilucent_Clouds", N_("Display Options"), N_("Noctilucent clouds"), "flagShow");
 
@@ -118,6 +124,61 @@ void NoctilucentCloudMgr::setFlagShow(bool b)
 		flagShow = b;
 		StelApp::immediateSave("noctilucent_clouds/flag_show", b);
 		emit flagShowChanged(b);
+		emit occurrenceChanged(getOccurrence());
+	}
+}
+
+void NoctilucentCloudMgr::setOccurrence(int mode)
+{
+	if (mode <= 0)
+	{
+		setFlagShow(false);
+		return;
+	}
+	mode = std::min(mode, 3);
+	if (mode != occurrenceMode)
+	{
+		occurrenceMode = mode;
+		StelApp::immediateSave("noctilucent_clouds/occurrence", mode);
+		if (flagShow)
+			emit occurrenceChanged(mode);
+	}
+	setFlagShow(true);
+}
+
+void NoctilucentCloudMgr::setFlagHalfResolution(bool b)
+{
+	if (b != flagHalfResolution)
+	{
+		flagHalfResolution = b;
+		StelApp::immediateSave("noctilucent_clouds/flag_half_resolution", b);
+		emit flagHalfResolutionChanged(b);
+	}
+}
+
+double NoctilucentCloudMgr::nightNumber(const StelCore* core)
+{
+	return std::floor(core->getJD() + static_cast<double>(core->getCurrentLocation().getLongitude())/360.);
+}
+
+void NoctilucentCloudMgr::update(double)
+{
+	// How far the clouds reach in this hemisphere tonight, for the user interface
+	QString info;
+	const StelCore* core = StelApp::getInstance().getCore();
+	if (flagShow && core->getCurrentPlanet()->getEnglishName() == QStringLiteral("Earth"))
+	{
+		const bool south = core->getCurrentLocation().getLatitude() < 0.f;
+		const NoctilucentCloudLight::Occurrence o = NoctilucentCloudLight::occurrence(core->getJD(), nightNumber(core), occurrenceMode, south);
+		if (o.any && o.edge < 88.)
+			info = q_("This night: clouds down to about %1 degrees of latitude").arg(qRound(o.edge));
+		else
+			info = q_("This night: no clouds in this hemisphere");
+	}
+	if (info != occurrenceInfo)
+	{
+		occurrenceInfo = info;
+		emit occurrenceInfoChanged(info);
 	}
 }
 
@@ -188,6 +249,9 @@ uniform highp vec3 cloudUp;
 uniform highp vec4 cloudFoot;       // the map position of the observer (km), the size of a pixel (radians), the
                                     // thickness of the layer (km)
 uniform highp vec2 cloudNight;      // from the date: a number for the forms and the direction of the bands (radians)
+uniform highp vec4 cloudReach;      // the latitude that the clouds reach (radians, north and south), the threshold of
+                                    // their cover (north and south)
+uniform highp vec2 cloudStrength;   // their optical depth against a typical display (north and south)
 uniform highp vec4 cloudDrift;      // the turn of the field around the pole since the start (cosine, sine); how far it has
                                     // moved towards the equator (km); the time since then (s)
 uniform highp vec2 cloudWind;       // the wind here on the map (km/s)
@@ -257,7 +321,7 @@ highp float cloudWaves(highp vec2 p, highp float a, highp float lam, highp float
 // In time (s) the bands and waves run through the field with speeds of 6 to 11 m/s, which give the periods that Dalin
 // et al. measured (bands 55 to 112 minutes, waves 13 to 18, billows 6 to 8); the whirls and the patches of waves
 // wander more slowly, so that forms change and come and go.
-highp float cloudDensity(highp vec2 q, highp float time, highp vec2 foot, highp vec2 view, highp vec2 smear)
+highp float cloudDensity(highp vec2 q, highp float threshold, highp float time, highp vec2 foot, highp vec2 view, highp vec2 smear)
 {
 	highp vec2 p = q + 260.*vec2(cloudField(q, 700., 3.) - 0.5, cloudField(q + 97., 700., 11.) - 0.5);
 	p += cloudCurl(q + vec2(0.004, -0.003)*time, 170., 20., 26.);
@@ -284,7 +348,7 @@ highp float cloudDensity(highp vec2 q, highp float time, highp vec2 foot, highp 
 	waves *= clamp((cloudField(q + vec2(-0.010, 0.007)*time, 110., 60.) + 0.4*cloudField(q + vec2(0.008, 0.009)*time, 37., 62.) - 0.46)*3., 0., 1.);
 	highp float billows = cloudWaves(p, angle + 1.5, 4.6, 14., 33., 0.011, time, foot, view, smear)
 	                      *clamp((cloudField(q + vec2(0.009, -0.011)*time, 50., 70.) - 0.5)*4., 0., 1.);
-	highp float cover = clamp((cloudField(q, 520., 80.) + 0.5*cloudField(q + 53., 210., 82.) - 0.28)*3.2, 0., 1.);
+	highp float cover = clamp((cloudField(q, 520., 80.) + 0.5*cloudField(q + 53., 210., 82.) - threshold)*3.2, 0., 1.);
 	return max(0., cover*(0.12 + 1.2*area)*(1. + bands + 0.9*grain + 1.35*waves + 0.7*billows));
 }
 
@@ -325,7 +389,18 @@ void main(void)
 	// hemisphere; the fine forms are blurred by the pixel and by the slanted thickness of the layer
 	highp vec3 earth = p.x*cloudSouth + p.y*cloudEast + p.z*cloudUp;
 	highp vec3 unit = earth/length(earth);
+	bool southern = unit.z < 0.;
+	// the clouds of this night reach this far, along a wavy edge, up to 5 degrees either way
+	highp float latitude = asin(abs(unit.z));
+	highp float reach = southern ? cloudReach.y : cloudReach.x;
+	if (latitude < reach - 0.14)
+	{
+		FRAG_COLOR = vec4(0);
+		return;
+	}
 	highp vec2 map = 2.*cloudRadii.z*unit.xy/(1. + abs(unit.z));
+	reach += 0.175*(cloudField(map, 1100., 90.) - 0.5);
+	highp float edge = smoothstep(reach - 0.026, reach + 0.07, latitude);
 	highp vec2 view = map - cloudFoot.xy;
 	view /= max(length(view), 1e-3);
 	highp vec2 foot = (t*cloudFoot.z*vec2(slant, 1.) + vec2(cloudFoot.w*slant, 0.));
@@ -340,9 +415,9 @@ void main(void)
 		highp float radius = max(length(place), 1e-3);
 		place *= abs(radius - cloudDrift.z)/radius;
 		place = vec2(cloudDrift.x*place.x - cloudDrift.y*place.y, cloudDrift.y*place.x + cloudDrift.x*place.y);
-		density += cloudDensity(unit.z < 0. ? place + 5000. : place, cloudDrift.w + moment, foot, view, smear);
+		density += cloudDensity(southern ? place + 5000. : place, southern ? cloudReach.w : cloudReach.z, cloudDrift.w + moment, foot, view, smear);
 	}
-	density /= float(cloudSamples);
+	density *= edge*(southern ? cloudStrength.y : cloudStrength.x)/float(cloudSamples);
 
 	highp vec3 color = texture2D(cloudLight, lightCoord).rgb*cloudLightScale.y*slant*density;
 	if (extinctionEnabled)
@@ -400,6 +475,14 @@ void NoctilucentCloudMgr::draw(StelCore* core)
 	if (observerHeight >= CloudHeight - 1. || sunAltitude > HighestSunAltitude || sunAltitude < lowestSunAltitude(observerHeight))
 		return;
 
+	// The clouds of this night: are they in sight? The wavy edge comes up to 8 degrees closer, the horizon lies 10 degrees away
+	const double night = nightNumber(core);
+	const NoctilucentCloudLight::Occurrence north = NoctilucentCloudLight::occurrence(core->getJD(), night, occurrenceMode, false);
+	const NoctilucentCloudLight::Occurrence southern = NoctilucentCloudLight::occurrence(core->getJD(), night, occurrenceMode, true);
+	const double observerLatitude = static_cast<double>(core->getCurrentLocation().getLatitude());
+	if (!(north.any && observerLatitude + 18. >= north.edge) && !(southern.any && 18. - observerLatitude >= southern.edge))
+		return;
+
 	const StelProjectorP prj = core->getProjection(StelCore::FrameAltAz, StelCore::RefractionAuto);
 	if (!programProjector || !prj->isSameProjection(*programProjector))
 	{
@@ -442,18 +525,20 @@ void NoctilucentCloudMgr::draw(StelCore* core)
 	p.setUniformValue("cloudUp", vec(up));
 	const double mapScale = 2.*(EarthRadius + CloudHeight)/(1. + std::fabs(up[2]));
 	p.setUniformValue("cloudFoot", QVector4D(static_cast<float>(mapScale*up[0]), static_cast<float>(mapScale*up[1]),
-	                                         static_cast<float>(1./static_cast<double>(prj->getPixelPerRadAtCenter())),
+	                                         static_cast<float>((flagHalfResolution ? 2. : 1.)/static_cast<double>(prj->getPixelPerRadAtCenter())),
 	                                         static_cast<float>(CloudThickness)));
 
 	// The forms of this night: the day changes at noon at the place, and nearby places share their night
-	const double night = std::floor(core->getJD() + static_cast<double>(location.getLongitude())/360.);
-	const double nightNumber = std::fmod(night, 997.);
-	p.setUniformValue("cloudNight", QVector2D(static_cast<float>(nightNumber*0.61803), static_cast<float>(std::fmod(nightNumber*2.39996, 2.*M_PI))));
+	const double formNumber = std::fmod(night, 997.);
+	p.setUniformValue("cloudNight", QVector2D(static_cast<float>(formNumber*0.61803), static_cast<float>(std::fmod(formNumber*2.39996, 2.*M_PI))));
+	const auto reach = [](const NoctilucentCloudLight::Occurrence& o) {return static_cast<float>((o.any ? o.edge : 100.)*M_PI/180.);};
+	p.setUniformValue("cloudReach", QVector4D(reach(north), reach(southern), static_cast<float>(north.cover), static_cast<float>(southern.cover)));
+	p.setUniformValue("cloudStrength", QVector2D(static_cast<float>(north.strength), static_cast<float>(southern.strength)));
 
 	// The wind of this night, from the time since the same moment for everybody
 	const double since = (core->getJD() - night)*86400.;
-	const double westward = WestwardWind[0] + (WestwardWind[1] - WestwardWind[0])*std::fmod(nightNumber*0.7548777, 1.);
-	const double equatorward = EquatorwardWind[0] + (EquatorwardWind[1] - EquatorwardWind[0])*std::fmod(nightNumber*0.5698403, 1.);
+	const double westward = WestwardWind[0] + (WestwardWind[1] - WestwardWind[0])*std::fmod(formNumber*0.7548777, 1.);
+	const double equatorward = EquatorwardWind[0] + (EquatorwardWind[1] - EquatorwardWind[0])*std::fmod(formNumber*0.5698403, 1.);
 	const double turnRate = westward/((EarthRadius + CloudHeight)*std::cos(ReferenceLatitude));
 	p.setUniformValue("cloudDrift", QVector4D(static_cast<float>(std::cos(turnRate*since)), static_cast<float>(std::sin(turnRate*since)),
 	                                          static_cast<float>(equatorward*since), static_cast<float>(since)));
@@ -468,11 +553,90 @@ void NoctilucentCloudMgr::draw(StelCore* core)
 	p.setUniformValue("cloudSamples", std::clamp(static_cast<int>(std::ceil(exposure*wind.norm()/SampleSpacing)), 1, MaxSamples));
 
 	auto& gl = *QOpenGLContext::currentContext()->functions();
+	if (!flagHalfResolution)
+	{
+		lowResBuffer.reset();
+		gl.glEnable(GL_BLEND);
+		gl.glBlendFunc(GL_ONE, GL_ONE);
+		drawQuad();
+		gl.glDisable(GL_BLEND);
+		p.release();
+		return;
+	}
+
+	// At half resolution: into a buffer of its own (the full screen quad covers it all, so the shader maps it on the
+	// same view), then scaled up and added to the scene
+	GLint previousBuffer = 0;
+	gl.glGetIntegerv(GL_FRAMEBUFFER_BINDING, &previousBuffer);
+	GLint viewport[4];
+	gl.glGetIntegerv(GL_VIEWPORT, viewport);
+	const QSize size(std::max(1, (viewport[2] + 1)/2), std::max(1, (viewport[3] + 1)/2));
+	if (!lowResBuffer || lowResBuffer->size() != size)
+	{
+		QOpenGLFramebufferObjectFormat format;
+		format.setInternalTextureFormat(GL_RGBA16F);
+		lowResBuffer.reset(new QOpenGLFramebufferObject(size, format));
+		gl.glBindTexture(GL_TEXTURE_2D, lowResBuffer->texture());
+		gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		gl.glBindTexture(GL_TEXTURE_2D, 0);
+	}
+	gl.glBindFramebuffer(GL_FRAMEBUFFER, lowResBuffer->handle());
+	gl.glViewport(0, 0, size.width(), size.height());
+	gl.glDisable(GL_BLEND);
+	gl.glClearColor(0.f, 0.f, 0.f, 0.f);
+	gl.glClear(GL_COLOR_BUFFER_BIT);
+	drawQuad();
+	p.release();
+	gl.glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(previousBuffer));
+	gl.glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
+
+	if (!compositeProgram)
+	{
+		std::unique_ptr<QOpenGLShaderProgram> composite(new QOpenGLShaderProgram);
+		const QByteArray vert = StelOpenGL::globalShaderPrefix(StelOpenGL::VERTEX_SHADER) + R"(
+ATTRIBUTE highp vec3 vertex;
+VARYING highp vec2 texCoord;
+void main()
+{
+	gl_Position = vec4(vertex, 1.);
+	texCoord = 0.5*vertex.xy + 0.5;
+}
+)";
+		const QByteArray frag = StelOpenGL::globalShaderPrefix(StelOpenGL::FRAGMENT_SHADER) + R"(
+VARYING highp vec2 texCoord;
+uniform sampler2D lightTex;
+void main()
+{
+	FRAG_COLOR = vec4(texture2D(lightTex, texCoord).rgb, 1.);
+}
+)";
+		if (composite->addShaderFromSourceCode(QOpenGLShader::Vertex, vert)
+		    && composite->addShaderFromSourceCode(QOpenGLShader::Fragment, frag))
+		{
+			composite->bindAttributeLocation("vertex", VertexAttribIndex);
+			if (StelPainter::linkProg(composite.get(), "NoctilucentCloudMgr composite program"))
+				compositeProgram = std::move(composite);
+		}
+		if (!compositeProgram)
+		{
+			qWarning() << "NoctilucentCloudMgr: cannot build the program that adds the light at half resolution";
+			flagHalfResolution = false;
+			return;
+		}
+	}
+	compositeProgram->bind();
+	gl.glActiveTexture(GL_TEXTURE0);
+	gl.glBindTexture(GL_TEXTURE_2D, lowResBuffer->texture());
+	compositeProgram->setUniformValue("lightTex", 0);
 	gl.glEnable(GL_BLEND);
 	gl.glBlendFunc(GL_ONE, GL_ONE);
 	drawQuad();
 	gl.glDisable(GL_BLEND);
-	p.release();
+	gl.glBindTexture(GL_TEXTURE_2D, 0);
+	compositeProgram->release();
 }
 
 void NoctilucentCloudMgr::drawQuad()

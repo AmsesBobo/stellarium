@@ -56,6 +56,28 @@ public:
 	//! The scattering by a sphere of ice of size parameter x, at the angles with the cosines mu (nAngles of them):
 	//! its scattering efficiency, and |S1|^2 + |S2|^2 for each angle (Bohren and Huffman 1983)
 	static double mieScattering(double x, const double* mu, int nAngles, double* intensity);
+
+	//! How the clouds occur in one hemisphere at one time
+	struct Occurrence
+	{
+		bool any = false;       //!< whether there are any clouds at all
+		double edge = 90.;      //!< the latitude (degrees, absolute) that they reach towards the equator
+		double strength = 0.;   //!< the optical depth against the one of a typical display
+		double cover = 0.28;    //!< the threshold of the noise of the areas that they cover: higher, more broken up
+	};
+	//! The occurrences of the setting NoctilucentCloudMgr::occurrence:
+	//! 0 none, 1 by the season, the latitude and the night, 2 a faint display and 3 a great one, at all times
+	static constexpr int OccurrenceOff = 0, OccurrenceSeason = 1, OccurrenceFaint = 2, OccurrenceGreat = 3;
+	//! The clouds of a hemisphere at the Julian day jd of the night number night (an integer, see NoctilucentCloudMgr).
+	//! By the season: from a month before the solstice to more than two months after it, as seen by the AIM satellite,
+	//! and from the middle of May to early August by the observers on the ground. Each night has a
+	//! number from its date, which sets how far towards the equator the clouds reach and how bright they are: at the
+	//! height of the season beyond 70 degrees on nine nights of ten, beyond 65 on more than half of them, beyond 60 on one
+	//! night of five and beyond 55 on one of twenty. Away from the height of the season they stay closer to the pole.
+	//! The clouds are reported far less often in the south, in part for lack of observers: here they stay 3 degrees closer
+	//! to the pole. The shares of the nights are a choice that fits the observers, not a measurement: the satellites
+	//! only see the brighter clouds (AIM: over half of the time at 72.5 degrees in the middle of the season).
+	static Occurrence occurrence(double jd, double night, int mode, bool south);
 };
 
 #endif // NOCTILUCENTCLOUDLIGHT_HPP

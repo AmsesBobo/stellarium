@@ -1470,12 +1470,56 @@
            </property>
            <layout class="QGridLayout" name="noctilucentCloudsGridLayout">
             <item row="0" column="0">
-             <widget class="QCheckBox" name="noctilucentCloudsCheckBox">
+             <widget class="QLabel" name="noctilucentCloudsLabel">
+              <property name="text">
+               <string>Occurrence:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="0" column="1">
+             <widget class="QComboBox" name="noctilucentCloudsComboBox">
               <property name="toolTip">
-               <string>The thin layer of ice clouds about 82 km up, which still stands in the sunlight when the observer is in the dark: seen with the Sun 6 to 16 degrees below the horizon, the stars shining through. Their brightness and silvery blue color follow from the sunlight on its way through the air and the ozone, and from the scattering by ice crystals. Bands, waves, billows and whirls come from the date and time, so a moment always looks the same; the wind of the night carries them, the waves run through them, and the exposure averages what moves during it (not with the mount "No motion"). For now at all times of the year.</string>
+               <string>The thin layer of ice clouds about 82 km up, which still stands in the sunlight when the observer is in the dark: seen with the Sun 6 to 16 degrees below the horizon, the stars shining through. Their brightness and silvery blue color follow from the sunlight on its way through the air and the ozone, and from the scattering by ice crystals. Bands, waves, billows and whirls come from the date and time, so a moment always looks the same; the wind of the night carries them, the waves run through them, and the exposure averages what moves during it (not with the mount "No motion"). By season: from the middle of May to early August in the north and half a year later in the south, closer to the pole on most nights, with nights without clouds. Faint and great display: at any time of the year, the great one brighter and further from the poles.</string>
+              </property>
+              <item>
+               <property name="text">
+                <string>Off</string>
+               </property>
+              </item>
+              <item>
+               <property name="text">
+                <string>By season</string>
+               </property>
+              </item>
+              <item>
+               <property name="text">
+                <string>Faint display</string>
+               </property>
+              </item>
+              <item>
+               <property name="text">
+                <string>Great display</string>
+               </property>
+              </item>
+             </widget>
+            </item>
+            <item row="1" column="0" colspan="2">
+             <widget class="QLabel" name="noctilucentCloudsInfoLabel">
+              <property name="toolTip">
+               <string>How far from the pole the clouds reach this night in this hemisphere. Each night has its own number from the date, so a night always looks the same, and places nearby share it.</string>
               </property>
               <property name="text">
-               <string>Show noctilucent clouds</string>
+               <string notr="true"/>
+              </property>
+             </widget>
+            </item>
+            <item row="2" column="0" colspan="2">
+             <widget class="QCheckBox" name="noctilucentCloudsHalfResolutionCheckBox">
+              <property name="toolTip">
+               <string>Compute the clouds at half the resolution of the screen and scale them up: about a quarter of the work for the graphics card, the finest forms a little softer.</string>
+              </property>
+              <property name="text">
+               <string>Half resolution (faster)</string>
               </property>
              </widget>
             </item>
