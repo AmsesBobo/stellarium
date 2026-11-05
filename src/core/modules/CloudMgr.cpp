@@ -18,6 +18,7 @@
  */
 
 #include "CloudMgr.hpp"
+#include "CloudLight.hpp"
 #include "StelApp.hpp"
 #include "StelCore.hpp"
 #include "StelLocation.hpp"
@@ -25,6 +26,10 @@
 #include "StelProjector.hpp"
 #include "StelTranslator.hpp"
 #include "Planet.hpp"
+#include "SolarSystem.hpp"
+#include "LightDomes.hpp"
+#include "AuroraMgr.hpp"
+#include "StelModuleMgr.hpp"
 #include "StelSkyDrawer.hpp"
 #include "StelOpenGL.hpp"
 #include "RefractionExtinction.hpp"
@@ -137,7 +142,7 @@ void main()
 	}
 
 	// Everything is in the AltAz frame of the observer with its origin in the center of the Earth (km): the observer
-	// stands on its z axis. Both passes compute the same clouds.
+	// stands on its z axis.
 	const QByteArray frag = StelOpenGL::globalShaderPrefix(StelOpenGL::FRAGMENT_SHADER)
 	                        + projector.getUnProjectShader()
 	                        + extinction.getForwardTransformShader()
@@ -149,7 +154,13 @@ uniform highp vec3 cloudEast;
 uniform highp vec3 cloudUp;
 uniform highp vec4 cloudRadii;      // of the observer and the layer (km); the height of the layer above the observer
                                     // (km); the size of a pixel (radians)
-uniform int cloudPass;              // 0 before the atmosphere, 1 after it
+uniform highp vec3 cloudSun;        // unit vectors towards the Sun and the Moon
+uniform highp vec3 cloudMoon;
+uniform highp vec3 cloudLight;      // the light of the clouds and the air (see CloudLight), for the scene
+uniform highp vec3 airSky;
+uniform highp vec3 airSun;
+uniform highp vec3 airMoon;
+uniform highp vec3 airExtinction;   // per km
 
 // Value noise on a map of the layer in km: hash (Dave Hoskins, "Hash without Sine")
 highp float cloudHash(highp vec2 p)
@@ -208,14 +219,12 @@ void main(void)
 	highp vec2 map = 2.*cloudRadii.y*unit.xy/(1. + abs(unit.z));
 	highp float T = cloudTransmission(map, t*cloudRadii.w*slant);
 
-	// The part of the light of the atmosphere that lies in front of the clouds. For now: a simple function of the way to them
-	highp float front = 1. - exp(-t/60.);
-	highp float a = front + (1. - front)*T;
+	// The way through the air dims the cloud and adds the light of the air (Rayleigh phase function)
+	highp vec3 way = exp(-airExtinction*t);
+	highp float sunCos = dot(altAz, cloudSun), moonCos = dot(altAz, cloudMoon);
+	highp vec3 air = (1. - way)*(airSky + airSun*0.75*(1. + sunCos*sunCos) + airMoon*0.75*(1. + moonCos*moonCos));
 	// out = source + scene x alpha
-	if (cloudPass == 0)
-		FRAG_COLOR = vec4(0., 0., 0., a > 0. ? T/a : 0.);
-	else
-		FRAG_COLOR = vec4(0., 0., 0., a);
+	FRAG_COLOR = vec4((cloudLight*way + air)*(1. - T), T);
 }
 )";
 	if (!newProgram->addShaderFromSourceCode(QOpenGLShader::Fragment, frag))
@@ -269,17 +278,64 @@ double CloudMgr::getTransmission(const StelCore* core, Vec3d altAz) const
 	return 1. - e*e*(3. - 2.*e);
 }
 
-void CloudMgr::drawBeforeAtmosphere(StelCore* core)
+void CloudMgr::setLightUniforms(const StelCore* core, QOpenGLShaderProgram& p) const
 {
-	drawPass(core, BeforeAtmosphere);
+	const StelSkyDrawer* drawer = core->getSkyDrawer();
+	const SolarSystem* ssystem = GETSTELMODULE(SolarSystem);
+	CloudLight::Sources s;
+
+	// The Sun and the Moon: lux on a surface facing them, from their magnitude with the extinction, and its color
+	const auto body = [core, drawer](const PlanetP& planet, CloudLight::Rgb& light, double& sine) {
+		Vec3d direction = planet->getAltAzPosGeometric(core);
+		direction.normalize();
+		sine = direction[2];
+		const double lux = 2.54e-6*std::pow(10., -0.4*static_cast<double>(planet->getVMagnitudeWithExtinction(core)));
+		const Vec3f tint = drawer->getPhotoExtinctionTint(direction);
+		for (std::size_t i = 0; i < 3; ++i)
+			light[i] = lux*static_cast<double>(tint[static_cast<int>(i)]);
+		return direction;
+	};
+	const Vec3d sun = body(ssystem->getSun(), s.sun, s.sunSine);
+	s.sunAltitude = std::asin(std::clamp(s.sunSine, -1., 1.));
+	const Vec3d moon = body(ssystem->getMoon(), s.moon, s.moonSine);
+
+	s.artificial = drawer->getLightPollutionLuminance();
+	s.extinction = drawer->getEffectiveExtinctionCoefficient();
+	const Vec3f lamp = LightDomes::lampColor(LightDomes::LampMixed);
+	s.lamp = {static_cast<double>(lamp[0]), static_cast<double>(lamp[1]), static_cast<double>(lamp[2])};
+	// the light domes of towns and the aurorae, on the ground below the clouds
+	static const LightDomes* lightDomes = GETSTELMODULE(LightDomes);
+	if (lightDomes)
+	{
+		const Vec3f E = lightDomes->getIlluminance();
+		for (std::size_t i = 0; i < 3; ++i)
+			s.groundExtra[i] += static_cast<double>(E[static_cast<int>(i)]);
+		s.artificial += lightDomes->getZenithLuminance();
+	}
+	static const AuroraMgr* aurorae = GETSTELMODULE(AuroraMgr);
+	if (aurorae)
+	{
+		const Vec3f E = aurorae->getIlluminance();
+		for (std::size_t i = 0; i < 3; ++i)
+			s.groundExtra[i] += static_cast<double>(E[static_cast<int>(i)]);
+	}
+
+	const CloudLight::Light light = CloudLight::compute(s);
+	const double scale = static_cast<double>(drawer->getPhotoSceneScale());
+	const auto scene = [scale](const CloudLight::Rgb& v) {
+		return QVector3D(static_cast<float>(v[0]*scale), static_cast<float>(v[1]*scale), static_cast<float>(v[2]*scale));
+	};
+	const auto direction = [](const Vec3d& v) {return QVector3D(static_cast<float>(v[0]), static_cast<float>(v[1]), static_cast<float>(v[2]));};
+	p.setUniformValue("cloudSun", direction(sun));
+	p.setUniformValue("cloudMoon", direction(moon));
+	p.setUniformValue("cloudLight", scene(light.cloud));
+	p.setUniformValue("airSky", scene(light.airSky));
+	p.setUniformValue("airSun", scene(light.airSun));
+	p.setUniformValue("airMoon", scene(light.airMoon));
+	p.setUniformValue("airExtinction", QVector3D(static_cast<float>(light.extinction[0]), static_cast<float>(light.extinction[1]), static_cast<float>(light.extinction[2])));
 }
 
-void CloudMgr::drawAfterAtmosphere(StelCore* core)
-{
-	drawPass(core, AfterAtmosphere);
-}
-
-void CloudMgr::drawPass(StelCore* core, Pass pass)
+void CloudMgr::drawOverSky(StelCore* core)
 {
 	if (!isShown(core))
 		return;
@@ -301,7 +357,7 @@ void CloudMgr::drawPass(StelCore* core, Pass pass)
 	p.setUniformValue("projectionMatrixInverse", prj->getProjectionMatrix().toQMatrix().inverted());
 	prj->setUnProjectUniforms(p);
 	drawer->getExtinction().setForwardTransformUniforms(p);
-	p.setUniformValue("cloudPass", static_cast<int>(pass));
+	setLightUniforms(core, p);
 
 	// The frame of the observer in the Earth-fixed one, over a spherical Earth
 	const double phi = static_cast<double>(location.getLatitude())*M_PI/180.;

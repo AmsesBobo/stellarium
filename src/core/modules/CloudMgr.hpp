@@ -32,22 +32,14 @@ class QOpenGLVertexArrayObject;
 
 //! @class CloudMgr
 //! The ordinary clouds of the Earth, in the photographic mode: a layer about 1.5 km above a spherical Earth, in front of
-//! the sky. So far it shows simple dark test shapes, to prove the way the clouds take light away.
+//! the sky. So far it has simple test shapes.
 //!
-//! All the other lights of the sky are added to the scene, the atmosphere too. Clouds must take light away instead, and
-//! one pass is not enough for that: a line of sight towards a cloud sees the stars and the air behind the cloud through
-//! the cloud, but the air in front of it directly. With the transmission T of the cloud, the part f of the light of the
-//! air that lies in front of it, the scene S of what lies beyond the atmosphere and the light A of the atmosphere, the
-//! result is
-//!   S T + A (f + (1 - f) T)
-//! Two passes around the atmosphere give this: with a = f + (1 - f) T,
-//!   before the atmosphere: S -> S T/a
-//!   after the atmosphere:  S T/a + A -> (S T/a + A) a
-//! LandscapeMgr::draw() calls them, because the atmosphere and the landscape are drawn there: all that lies beyond the
-//! atmosphere is drawn by then, and the landscape comes after the clouds, so they do not cover it. The bloom and the
-//! metering of the camera work on the finished scene, so they see what the clouds leave.
-//!
-//! (With the setting landscape/draw_sun_after_atmosphere the Sun is only dimmed by a, not by T: it is off by default.)
+//! All the other lights of the sky are added to the scene, the atmosphere too. Clouds must take light away instead: the
+//! stars and the sky behind them go, and their own light and that of the air in front of them come. With the transmission
+//! T of the cloud, the scene S with the atmosphere, and the light of the cloud and the air (see CloudLight),
+//!   S -> S T + (L_cloud T_air + L_air) (1 - T)
+//! LandscapeMgr::draw() calls this between the atmosphere and the landscape, so the clouds do not cover the landscape.
+//! The bloom and the metering of the camera work on the finished scene, so they see what the clouds leave.
 class CloudMgr : public StelModule
 {
 	Q_OBJECT
@@ -67,10 +59,8 @@ public:
 	//! the lens effects of the bright bodies. The same field as the shader's.
 	double getTransmission(const StelCore* core, Vec3d altAz) const;
 
-	//! Take away what the clouds hide of the scene beyond the atmosphere. To be called before the atmosphere is drawn.
-	void drawBeforeAtmosphere(StelCore* core);
-	//! Take away what the clouds hide of the atmosphere. To be called after it and before the landscape.
-	void drawAfterAtmosphere(StelCore* core);
+	//! Draw the clouds over the sky. To be called after the atmosphere and before the landscape.
+	void drawOverSky(StelCore* core);
 
 public slots:
 	void setFlagShow(bool b);
@@ -79,9 +69,8 @@ signals:
 	void flagShowChanged(bool b);
 
 private:
-	enum Pass {BeforeAtmosphere = 0, AfterAtmosphere = 1};
-	void drawPass(StelCore* core, Pass pass);
 	bool isShown(const StelCore* core) const;
+	void setLightUniforms(const StelCore* core, QOpenGLShaderProgram& p) const;
 
 	bool flagShow = false;
 

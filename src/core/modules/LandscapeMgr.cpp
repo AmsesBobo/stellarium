@@ -839,11 +839,6 @@ void LandscapeMgr::draw(StelCore* core)
 	StelSkyDrawer* drawer=core->getSkyDrawer();
 	QFont font=QGuiApplication::font();
 
-	// The clouds take away what they hide: the scene beyond the atmosphere first, the atmosphere after it (see CloudMgr)
-	static CloudMgr* clouds = GETSTELMODULE(CloudMgr);
-	if (clouds)
-		clouds->drawBeforeAtmosphere(core);
-
 	// Draw the atmosphere
 	if (!getFlagAtmosphereNoScatter() && core->getFlagClearSky())
 	    atmosphere->draw(core);
@@ -859,8 +854,10 @@ void LandscapeMgr::draw(StelCore* core)
 		sun->draw(core, 0, font, 1.0);
 	}
 
+	// The clouds hide the sky, but not the landscape (see CloudMgr)
+	static CloudMgr* clouds = GETSTELMODULE(CloudMgr);
 	if (clouds)
-		clouds->drawAfterAtmosphere(core);
+		clouds->drawOverSky(core);
 
 	// Draw the landscape
 	Landscape::setTransparency( getFlagLandscapeUseTransparency() ? landscapeTransparency : 0.0);
