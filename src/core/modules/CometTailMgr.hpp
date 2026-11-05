@@ -56,8 +56,9 @@ class Comet;
 //! a little with time, so knots and kinks move down the tail, and rays leave the head at angles and fold onto it.
 //! The sodium tail is drawn from atoms pushed away from the Sun by the light they scatter in the D lines, weaker
 //! when the comet moves slowly to or from the Sun (Swings effect); the dust is released in bursts now and then,
-//! which give striae along the synchrones. The emissions (CO+, the gas of the coma, sodium) take the colors the
-//! color films record them with.
+//! which give striae along the synchrones. The large grains (beta below 0.01) linger along the orbit for years,
+//! released also far from the Sun: the anti-tail when the Earth passes the plane of the orbit. The emissions
+//! (CO+, the gas of the coma, sodium) take the colors the color films record them with.
 //!
 //! A comet can have its own parameters of the model in ssystem_minor.ini (see Comet::TailParameters): the share of
 //! the dust in the coma or its Afrho, the range of beta and the size distribution of the grains, the strength of

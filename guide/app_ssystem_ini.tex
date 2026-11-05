@@ -533,13 +533,14 @@ change the model for one comet:\newFeature{26.3}
 \item[dust\_fraction] (default: 0.5) share of the dust in the light of the inner coma; the gas gives the rest.
 \item[dust\_afrho] (optional) $Af\rho$ of the dust in cm, reduced to 1\,AU from the Sun \citep{AHearn:1984}.
 	The dust then gets its light from this value, and the gas the rest of the magnitude.
-\item[dust\_beta\_min] (default: 0.001) $\beta$ of the largest grains (about 0.5\,mm). Smaller values give more
-	large grains far along the orbit, as in an anti-tail.
+\item[dust\_beta\_min] (default: 0.0001) $\beta$ of the largest grains (about 5\,mm). The grains with $\beta$
+	below 0.01 linger along the orbit for years and give the anti-tail when the Earth passes the plane of the orbit.
 \item[dust\_beta\_max] (default: 1) $\beta$ of the smallest grains. Up to 3: small absorbing grains
 	that the light of the Sun pushes away (for $\beta>1$).
-\item[dust\_size\_index] (default: 4) index of the size distribution of the grains, $n(s)\propto s^{-4}$.
-	Smaller values give more large grains.
-\item[dust\_production\_index] (default: 4.5) the production of dust grows towards the Sun as $r^{-4.5}$.
+\item[dust\_size\_index] (default: 4) index of the size distribution of the grains, $n(s)\propto s^{-4}$
+	(for $\beta$ above 0.01; the larger grains follow $s^{-3}$). Smaller values give more large grains.
+\item[dust\_production\_index] (default: 4.5) the production of dust grows towards the Sun as $r^{-4.5}$
+	(the large grains at most as $r^{-2}$, released also far from the Sun).
 	Larger values give more dust released around perihelion, and brighter tails after it.
 \item[dust\_striae] (default: 0.3) strength of the striae: dust released in bursts, which shows as bands along the
 	synchrones (0: even release).

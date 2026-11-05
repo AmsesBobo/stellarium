@@ -79,7 +79,13 @@ constexpr double LightMagnitude = 10.;  // comets brighter than this get their l
 constexpr int BetaCount = 40;           // grains: beta from 0.001 to 1 (logarithmic, see TailModel) ...
 constexpr int AgeCount = 120;           // ... and ages up to MaxGrainAge (closer where the comet turns fast, see releaseAges())
 constexpr double MaxGrainAge = 150.;    // days
-constexpr double DefaultBetaMin = 0.001, DefaultBetaMax = 1.;
+constexpr double DefaultBetaMin = 0.0001, DefaultBetaMax = 1.;
+// The large grains (beta below 0.01, sizes above some 50 micrometers): a flatter size distribution (n(s) ~ s^-3, as
+// much cross section in each decade of size), and ages up to some three years
+constexpr double SizeBreakBeta = 0.01;
+constexpr double LargeSizeIndex = 3.;
+constexpr double LargeGrainAge = 1000.; // days
+constexpr double LargeProductionIndex = 2.;
 // The size distribution of the grains, n(s) ~ s^-4: the light of the tails comes from grains of a few micrometers
 // (beta 0.1-0.7 in the tail of NEOWISE, sizes 1.7-12 micrometers: Manzini et al. 2021); s^-3.5 gives the large,
 // slow grains so much of the light of the coma that the tails become far too faint
@@ -95,6 +101,7 @@ constexpr double IlluminanceMag0 = 2.54e-6;    // lux of a star of magnitude 0 (
 // The Sun at 1 AU (V = -26.74, lux)
 const double SunIlluminance = IlluminanceMag0*std::pow(10., 0.4*26.74);
 constexpr double CmPerAU = KmPerAU*1e5;
+constexpr double EarthRadius = 6371e3;   // m, for the dip of the horizon
 constexpr int FloatsPerVertex = 11;     // position 2, center 2, inverse 3, color 3, profile 1
 constexpr double SplatFloor = 2e-5;     // light in the scene (1 is white) below which a splat is not drawn
 
@@ -566,42 +573,56 @@ const CometTailMgr::DustGrid& CometTailMgr::dustGrid(const Comet* comet, double 
 	const double lo = std::log10(model.betaMin), hi = std::log10(model.betaMax);
 	Vec3d nucleus, vel;
 	comet->computePosition(t, nucleus, vel);
-	std::vector<double> ages, dAges;
-	releaseAges(comet, t, MaxGrainAge, AgeCount, ages, dAges);
-	for (int k = 0; k < AgeCount; ++k)
+	// The small grains leave the comet within months; the large ones (beta below SizeBreakBeta) linger along its
+	// orbit for years, released also far from the Sun: the anti-tail when the Earth passes the plane of the orbit
+	int firstSmall = 0;
+	while (firstSmall < BetaCount && std::pow(10., lo + (hi - lo)*(firstSmall + 0.5)/BetaCount) < SizeBreakBeta)
+		++firstSmall;
+	for (int population = 0; population < 2; ++population)
 	{
-		const double age = ages[k];
-		Vec3d pos;
-		comet->computePosition(t - age, pos, vel);
-		const double r = pos.norm();
-		double production = dustProduction(r, model.productionIndex);
-		// the striae: bursts of dust at times (not in the inner coma, which gives the magnitude)
-		if (model.striae > 0.)
+		const int j0 = population == 0 ? 0 : firstSmall, j1 = population == 0 ? firstSmall : BetaCount;
+		if (j0 >= j1)
+			continue;
+		std::vector<double> ages, dAges;
+		releaseAges(comet, t, population == 0 ? LargeGrainAge : MaxGrainAge, AgeCount, ages, dAges);
+		for (int k = 0; k < AgeCount; ++k)
 		{
-			const double x = noise((t - age)/StriaePeriod, model.seed + 17);
-			production *= std::max(0., 1. + model.striae*smoothstep(2., 6., age)*(5.*x*x*x*x - 1.));
-		}
-		for (int j = 0; j < BetaCount; ++j)
-		{
-			const double beta = std::pow(10., lo + (hi - lo)*(j + 0.5)/BetaCount);
-			const int i = j*AgeCount + k;
-			const double mu = SunMu*(1. - beta);
-			const Vec3d grain = propagate(pos, vel, mu, age);
-			grid.offsets[i] = grain - nucleus;
-			// a grain that has passed close to the Sun since its release has evaporated
-			double passage = 1.;
-			if (pos*vel < 0. && mu > 0.)
+			const double age = ages[k];
+			Vec3d pos;
+			comet->computePosition(t - age, pos, vel);
+			const double r = pos.norm();
+			// the large grains also from far out, where CO and CO2 drive the activity (a shallower law)
+			double production = dustProduction(r, population == 0 ? std::min(model.productionIndex, LargeProductionIndex) : model.productionIndex);
+			// the striae: bursts of dust at times (not in the inner coma, which gives the magnitude)
+			if (model.striae > 0.)
 			{
-				const Vec3d h = pos^vel;
-				const Vec3d ecc = (vel^h)/mu - pos/r;
-				const double q = (h*h)/(mu*(1. + ecc.norm()));
-				if (q < SublimationOuter && propagate(pos, vel, mu, age*0.999).norm() < grain.norm())
-					passage = survival(q);
+				const double x = noise((t - age)/StriaePeriod, model.seed + 17);
+				production *= std::max(0., 1. + model.striae*smoothstep(2., 6., age)*(5.*x*x*x*x - 1.));
 			}
-			// grains of the size distribution n(s) ~ s^-alpha (alpha 4 by default): their cross section per
-			// interval of ln(beta) ~ beta^(alpha - 3)
-			grid.weights[i] = static_cast<float>(std::pow(beta, model.sizeIndex - 3.)*production*passage*dAges[k]);
-			grid.spread[i] = static_cast<float>(EjectionSpeed*std::sqrt(beta/std::max(r, 0.02))*age);
+			for (int j = j0; j < j1; ++j)
+			{
+				const double beta = std::pow(10., lo + (hi - lo)*(j + 0.5)/BetaCount);
+				const int i = j*AgeCount + k;
+				const double mu = SunMu*(1. - beta);
+				const Vec3d grain = propagate(pos, vel, mu, age);
+				grid.offsets[i] = grain - nucleus;
+				// a grain that has passed close to the Sun since its release has evaporated
+				double passage = 1.;
+				if (pos*vel < 0. && mu > 0.)
+				{
+					const Vec3d h = pos^vel;
+					const Vec3d ecc = (vel^h)/mu - pos/r;
+					const double q = (h*h)/(mu*(1. + ecc.norm()));
+					if (q < SublimationOuter && propagate(pos, vel, mu, age*0.999).norm() < grain.norm())
+						passage = survival(q);
+				}
+				// grains of the size distribution n(s) ~ s^-alpha (alpha 4 by default, 3 for the large grains):
+				// their cross section per interval of ln(beta) ~ beta^(alpha - 3)
+				const double size = beta >= SizeBreakBeta ? std::pow(beta, model.sizeIndex - 3.)
+				                  : std::pow(SizeBreakBeta, model.sizeIndex - 3.)*std::pow(beta/SizeBreakBeta, LargeSizeIndex - 3.);
+				grid.weights[i] = static_cast<float>(size*production*passage*dAges[k]);
+				grid.spread[i] = static_cast<float>(EjectionSpeed*std::sqrt(beta/std::max(r, 0.02))*age);
+			}
 		}
 	}
 	return grid;
@@ -698,11 +719,17 @@ void CometTailMgr::drawLight(StelCore* core, const Comet* comet)
 	const Extinction& extinction = drawer->getExtinction();
 	const bool withExtinction = drawer->getFlagHasAtmosphere() && extinction.getExtinctionCoefficient() >= 0.01f;
 	const bool withTint = withExtinction && drawer->getFlagPhotoExtinctionColorActive();
+	// The ground blocks the light from below the horizon (lowered for an observer high above it); without it the
+	// wide splats of far, faint grains near the Sun, bright in forward scattering, would shine above the horizon
+	const double horizonDip = std::acos(EarthRadius/(EarthRadius + std::max(0., static_cast<double>(core->getCurrentLocation().altitude))));
+	const double hidden = -std::sin(horizonDip + 1.*M_PI/180.);
 	const auto transmission = [&](const Vec3d& j2000) {
 		if (!withExtinction)
 			return Vec3f(1.f);
 		Vec3d altAz = core->j2000ToAltAz(j2000, StelCore::RefractionOff);
 		altAz.normalize();
+		if (altAz[2] < hidden)
+			return Vec3f(0.f);
 		float mag = 0.f;
 		extinction.forward(altAz, &mag);
 		const float f = std::pow(10.f, -0.4f*mag);
