@@ -906,7 +906,7 @@ float StelSkyDrawer::getPhotoDiskFraction(float diskPixRadius) const
 }
 
 bool StelSkyDrawer::drawPhotoBody(StelPainter* sPainter, const Vec3d& v, float diskPixRadius, float mag, const Vec3f& color,
-                                  float illuminatedFraction, const Vec3d& sunDirection)
+                                  float illuminatedFraction, const Vec3d& sunDirection, float lensLight)
 {
 	if (photoInstances.empty() || !photoStarShaderProgram)
 		return false;
@@ -1017,9 +1017,10 @@ bool StelSkyDrawer::drawPhotoBody(StelPainter* sPainter, const Vec3d& v, float d
 	// The halo and the spikes arise in the lens and lie over everything: they are drawn at the end.
 	PhotoStarInstance wings = body;
 	wings.shape[1] = 0.f; // no core
+	wings.color *= lensLight;
 	++nbPhotoPointSources;
 	flushPhotoPointSources(sPainter, PhotoBatchCoreOnly);
-	if (rHalo > 0.f || rSpike > 0.f)
+	if ((rHalo > 0.f || rSpike > 0.f) && lensLight > 0.f)
 		photoDeferredBodies.push_back({wings, v, photoBodyMotion});
 	return true;
 }

@@ -1238,6 +1238,25 @@
           </widget>
          </item>
          <item>
+          <widget class="QGroupBox" name="cloudsGroupBox">
+           <property name="title">
+            <string>Clouds</string>
+           </property>
+           <layout class="QGridLayout" name="cloudsGridLayout">
+            <item row="0" column="0">
+             <widget class="QCheckBox" name="cloudsCheckBox">
+              <property name="toolTip">
+               <string>A layer of clouds about 1.5 km up, in front of the stars, the Moon and the sky. So far it shows dark test shapes.</string>
+              </property>
+              <property name="text">
+               <string>Show clouds (test shapes)</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+         </item>
+         <item>
           <spacer name="skyLeftColumnSpacer">
            <property name="orientation">
             <enum>Qt::Vertical</enum>

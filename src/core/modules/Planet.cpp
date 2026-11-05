@@ -28,6 +28,7 @@
 #include "StelSkyDrawer.hpp"
 #include "SolarSystem.hpp"
 #include "LandscapeMgr.hpp"
+#include "CloudMgr.hpp"
 #include "Planet.hpp"
 #include "Orbit.hpp"
 #include "planetsephems/precession.h"
@@ -4823,11 +4824,14 @@ void Planet::draw3dModel(StelCore* core, StelProjector::ModelViewTranformP trans
 			StelPainter sPainter(core->getProjection(StelCore::FrameJ2000));
 			const Vec3f color = StelSkyDrawer::photoTintedColor(haloColor, photoExtinctionTint);
 			const Vec3d pos = getJ2000EquatorialPos(core);
+			// The clouds cover the image of the body in the scene, but the lens effects are drawn over everything
+			static const CloudMgr* clouds = GETSTELMODULE(CloudMgr);
+			const float lensLight = clouds ? static_cast<float>(clouds->getTransmission(core, getAltAzPosAuto(core))) : 1.f;
 			// Bright bodies may make reflections inside the lens, even from outside the frame
-			if (photoMag < 3.f)
-				skyDrawer->addPhotoGhostSource(pos, photoMag, color);
+			if (photoMag < 3.f && lensLight > 0.f)
+				skyDrawer->addPhotoGhostSource(pos, photoMag - 2.5f*std::log10(lensLight), color);
 			if (isSun)
-				skyDrawer->drawPhotoBody(&sPainter, pos, photoDiskPixRadius, photoMag, color);
+				skyDrawer->drawPhotoBody(&sPainter, pos, photoDiskPixRadius, photoMag, color, 1.f, Vec3d(0.), lensLight);
 			else
 			{
 				// The light comes from the lit part: direction towards the Sun in the sky, and the illuminated fraction
@@ -4836,7 +4840,7 @@ void Planet::draw3dModel(StelCore* core, StelProjector::ModelViewTranformP trans
 				s.normalize();
 				const Vec3d sunDirection = s - p*(s*p);
 				const float k = static_cast<float>(getPhase(core->getObserverHeliocentricEclipticPos()));
-				skyDrawer->drawPhotoBody(&sPainter, pos, photoDiskPixRadius, photoMag, color, k, sunDirection);
+				skyDrawer->drawPhotoBody(&sPainter, pos, photoDiskPixRadius, photoMag, color, k, sunDirection, lensLight);
 			}
 		}
 		return;

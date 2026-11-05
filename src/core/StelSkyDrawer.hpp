@@ -1170,11 +1170,13 @@ public slots:
 	//! @param illuminatedFraction for a body in phases: its light comes from the lit part, so the image is
 	//!        spread around a smaller disk shifted towards the Sun (no glow around the dark limb)
 	//! @param sunDirection direction towards the Sun in the sky (J2000, perpendicular to v), used with illuminatedFraction
+	//! @param lensLight the share of the light that reaches the lens past the clouds (see CloudMgr): the core is drawn in
+	//!        the scene and the clouds cover it there, but the halo and the spikes are drawn over everything
 	//! Draw the halo and the spikes of the bright bodies of this frame (see drawPhotoBody()). StelApp calls
 	//! this after all modules, so that the lens effects also cover the landscape.
 	void drawDeferredPhotoBodies(StelCore* core);
 	bool drawPhotoBody(StelPainter* sPainter, const Vec3d& v, float diskPixRadius, float mag, const Vec3f& color,
-	                   float illuminatedFraction = 1.f, const Vec3d& sunDirection = Vec3d(0.));
+	                   float illuminatedFraction = 1.f, const Vec3d& sunDirection = Vec3d(0.), float lensLight = 1.f);
 
 	//! Informing the drawer whether atmosphere is displayed.
 	//! This is used to avoid twinkling/simulate extinction/refraction.

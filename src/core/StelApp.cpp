@@ -37,6 +37,7 @@
 #include "LightDomes.hpp"
 #include "AuroraMgr.hpp"
 #include "NoctilucentCloudMgr.hpp"
+#include "CloudMgr.hpp"
 #include "CometTailMgr.hpp"
 #include "CustomObjectMgr.hpp"
 #include "HighlightMgr.hpp"
@@ -667,6 +668,11 @@ void StelApp::init(QSettings* conf)
 	NoctilucentCloudMgr* noctilucentCloudMgr = new NoctilucentCloudMgr();
 	noctilucentCloudMgr->init();
 	getModuleMgr().registerModule(noctilucentCloudMgr);
+
+	// Clouds
+	CloudMgr* cloudMgr = new CloudMgr();
+	cloudMgr->init();
+	getModuleMgr().registerModule(cloudMgr);
 
 	// Comet tails
 	CometTailMgr* cometTailMgr = new CometTailMgr();

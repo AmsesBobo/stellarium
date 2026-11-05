@@ -23,6 +23,7 @@
 #include "LandscapeMgr.hpp"
 #include "LightDomes.hpp"
 #include "AuroraMgr.hpp"
+#include "CloudMgr.hpp"
 #include "Landscape.hpp"
 #include "AtmospherePreetham.hpp"
 #include "AtmosphereLightweight.hpp"
@@ -838,6 +839,11 @@ void LandscapeMgr::draw(StelCore* core)
 	StelSkyDrawer* drawer=core->getSkyDrawer();
 	QFont font=QGuiApplication::font();
 
+	// The clouds take away what they hide: the scene beyond the atmosphere first, the atmosphere after it (see CloudMgr)
+	static CloudMgr* clouds = GETSTELMODULE(CloudMgr);
+	if (clouds)
+		clouds->drawBeforeAtmosphere(core);
+
 	// Draw the atmosphere
 	if (!getFlagAtmosphereNoScatter() && core->getFlagClearSky())
 	    atmosphere->draw(core);
@@ -852,6 +858,9 @@ void LandscapeMgr::draw(StelCore* core)
 		font.setPixelSize(StelApp::getInstance().getScreenFontSize());
 		sun->draw(core, 0, font, 1.0);
 	}
+
+	if (clouds)
+		clouds->drawAfterAtmosphere(core);
 
 	// Draw the landscape
 	Landscape::setTransparency( getFlagLandscapeUseTransparency() ? landscapeTransparency : 0.0);
