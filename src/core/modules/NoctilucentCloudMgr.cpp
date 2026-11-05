@@ -52,6 +52,14 @@ namespace
 constexpr double EarthRadius = 6371.;     // km
 constexpr double CloudHeight = 82.;       // km
 constexpr double CloudThickness = 1.;     // km: the fine forms blur along a slanted line of sight through it
+// The wind that carries the layer, km/s, for each night between these (the case of Dalin et al. 2004: 40 to 60 m/s from
+// the north-east): the summer mesosphere blows to the west and to the equator, in both hemispheres. The field turns
+// around the pole as a whole, at the westward speed at the latitude ReferenceLatitude.
+constexpr double WestwardWind[2] = {0.030, 0.045};
+constexpr double EquatorwardWind[2] = {0.015, 0.035};
+constexpr double ReferenceLatitude = 60.*M_PI/180.;
+constexpr double SampleSpacing = 2.;      // km: what the wind may move the clouds between two samples of an exposure
+constexpr int MaxSamples = 8;
 // With the Sun above this the sunlit clouds are lost in the bright sky (radians)
 constexpr double HighestSunAltitude = -3.*M_PI/180.;
 constexpr int VertexAttribIndex = 0;
@@ -180,6 +188,11 @@ uniform highp vec3 cloudUp;
 uniform highp vec4 cloudFoot;       // the map position of the observer (km), the size of a pixel (radians), the
                                     // thickness of the layer (km)
 uniform highp vec2 cloudNight;      // from the date: a number for the forms and the direction of the bands (radians)
+uniform highp vec4 cloudDrift;      // the turn of the field around the pole since the start (cosine, sine); how far it has
+                                    // moved towards the equator (km); the time since then (s)
+uniform highp vec2 cloudWind;       // the wind here on the map (km/s)
+uniform highp float cloudExposure;  // exposure time of the camera (s, 0: an instant)
+uniform int cloudSamples;           // moments of the exposure to average
 uniform highp vec3 cloudRadii;      // of the observer, the Earth and the layer (km)
 uniform sampler2D cloudLight;       // the light against the tangent height of the sunlight and the scattering angle
 uniform highp vec2 cloudLightSize;  // of the table
@@ -223,27 +236,32 @@ highp vec2 cloudCurl(highp vec2 q, highp float scale, highp float offset, highp 
 	highp float dx = cloudField(q + vec2(e, 0.), scale, offset) - cloudField(q - vec2(e, 0.), scale, offset);
 	return vec2(dy, -dx)*amount*scale/(2.*e);
 }
-// Waves or billows of the wavelength lam (km) with crests of the length leng (km) and at the angle a (radians), their
-// contrast reduced by what the pixel and the slanted layer cover across their crests (foot: along and across the line
-// of sight, km; view: the direction of the line of sight on the map)
-highp float cloudWaves(highp vec2 p, highp float a, highp float lam, highp float leng, highp float offset, highp vec2 foot, highp vec2 view)
+// Waves or billows of the wavelength lam (km) with crests of the length leng (km) and at the angle a (radians), moving
+// across the crests over the time time at their own speed (km/s): their period is lam/speed. Their contrast is reduced
+// by what covers them across their crests: the pixel and the slanted layer (foot: along and across the line of sight,
+// km; view: the direction of the line of sight on the map) and the motion between two moments of the exposure (smear, km)
+highp float cloudWaves(highp vec2 p, highp float a, highp float lam, highp float leng, highp float offset, highp float speed, highp float time, highp vec2 foot, highp vec2 view, highp vec2 smear)
 {
 	highp vec2 along = vec2(cos(a), sin(a)), across = vec2(-along.y, along.x);
 	// (the cells of the noise are 0.31 lam: its power peaks at the wavelength lam, measured)
-	highp float n = cloudNoise(vec2(dot(p, along)/leng, dot(p, across)/(0.31*lam)) + vec2(cloudNight.x + offset, offset));
-	highp float width = length(foot*vec2(dot(across, view), dot(along, view)));
-	return (2.*n - 1.)*exp(-2.47*width*width/(lam*lam));
+	highp float n = cloudNoise(vec2(dot(p, along)/leng, (dot(p, across) - speed*time)/(0.31*lam)) + vec2(cloudNight.x + offset, offset));
+	highp vec2 w = foot*vec2(dot(across, view), dot(along, view));
+	highp float width2 = dot(w, w) + dot(across, smear)*dot(across, smear);
+	return (2.*n - 1.)*exp(-2.47*width2/(lam*lam));
 }
 // The density of the layer on the map, about 1 where a display is seen, after the forms of Dalin et al. (2004, Ann.
 // Geophys. 22, 1875) and the classes veil, bands, waves, billows and whirls of the British observers:
 // the map is bent by a large flow and by whirls of 50 to 170 km; broad soft areas, drawn out along the bands, carry
 // thin bands 33 to 44 km apart in two directions; waves of 9.5 km with short crests at an angle to them form the
 // herringbone where the two directions meet, billows of 4.6 km the finest grain.
-highp float cloudDensity(highp vec2 q, highp vec2 foot, highp vec2 view)
+// In time (s) the bands and waves run through the field with speeds of 6 to 11 m/s, which give the periods that Dalin
+// et al. measured (bands 55 to 112 minutes, waves 13 to 18, billows 6 to 8); the whirls and the patches of waves
+// wander more slowly, so that forms change and come and go.
+highp float cloudDensity(highp vec2 q, highp float time, highp vec2 foot, highp vec2 view, highp vec2 smear)
 {
 	highp vec2 p = q + 260.*vec2(cloudField(q, 700., 3.) - 0.5, cloudField(q + 97., 700., 11.) - 0.5);
-	p += cloudCurl(q, 170., 20., 26.);
-	p += cloudCurl(p, 48., 24., 5.);
+	p += cloudCurl(q + vec2(0.004, -0.003)*time, 170., 20., 26.);
+	p += cloudCurl(p - vec2(0.005, 0.006)*time, 48., 24., 5.);
 	highp float angle = cloudNight.y + cloudField(q, 1000., 40.) - 0.5;
 	highp vec2 along = vec2(cos(angle), sin(angle));
 	highp vec2 uv = vec2(dot(p, along), dot(p, vec2(-along.y, along.x)));
@@ -251,19 +269,21 @@ highp float cloudDensity(highp vec2 q, highp vec2 foot, highp vec2 view)
 	along = vec2(cos(angle2), sin(angle2));
 	highp vec2 uv2 = vec2(dot(p, along), dot(p, vec2(-along.y, along.x)));
 
-	highp float area = 0.45*cloudStreak(uv, 520., 150., 0.) + 0.3*cloudStreak(uv, 240., 70., 3.) + 0.25*cloudStreak(uv2, 170., 42., 6.);
+	highp float area = 0.45*cloudStreak(uv, 520., 150., 0.) + 0.3*cloudStreak(uv + vec2(0., 0.002)*time, 240., 70., 3.) + 0.25*cloudStreak(uv2, 170., 42., 6.);
 	area = clamp((area - 0.3)*3., 0., 1.);
-	highp float bands = 0.75*cloudRidge(cloudStreak(uv, 300., 44., 9.))*(0.2 + 0.8*cloudStreak(uv, 170., 90., 15.))
-	                  + 0.75*cloudRidge(cloudStreak(uv, 180., 33., 12.))*(0.15 + 0.85*cloudStreak(uv, 120., 60., 14.))
-	                  + 0.6*cloudRidge(cloudStreak(uv2, 260., 38., 18.))*clamp((cloudStreak(uv2, 330., 160., 19.) - 0.42)*4., 0., 1.);
+	highp float bands = 0.75*cloudRidge(cloudStreak(uv - vec2(0., 0.008)*time, 300., 44., 9.))*(0.2 + 0.8*cloudStreak(uv, 170., 90., 15.))
+	                  + 0.75*cloudRidge(cloudStreak(uv - vec2(0., 0.010)*time, 180., 33., 12.))*(0.15 + 0.85*cloudStreak(uv, 120., 60., 14.))
+	                  + 0.6*cloudRidge(cloudStreak(uv2 + vec2(0., 0.006)*time, 260., 38., 18.))*clamp((cloudStreak(uv2, 330., 160., 19.) - 0.42)*4., 0., 1.);
 	// a fine grain over the whole layer
 	highp float wide = max(foot.x, foot.y);
 	highp float grain = (cloudField(p, 24., 41.) - 0.5 + 0.5*(cloudField(p, 11., 43.) - 0.5))*exp(-2.47*wide*wide/324.);
 	// the herringbone: one direction of the waves on each side
-	highp float side = clamp((cloudField(q, 65., 50.) - 0.5)*6. + 0.5, 0., 1.);
-	highp float waves = mix(cloudWaves(p, angle + 0.8, 9.5, 34., 21., foot, view), cloudWaves(p, angle - 0.8, 9.5, 34., 27., foot, view), side);
-	waves *= clamp((cloudField(q, 110., 60.) + 0.4*cloudField(q, 37., 62.) - 0.46)*3., 0., 1.);
-	highp float billows = cloudWaves(p, angle + 1.5, 4.6, 14., 33., foot, view)*clamp((cloudField(q, 50., 70.) - 0.5)*4., 0., 1.);
+	highp float side = clamp((cloudField(q + vec2(0.004, 0.002)*time, 65., 50.) - 0.5)*6. + 0.5, 0., 1.);
+	highp float waves = mix(cloudWaves(p, angle + 0.8, 9.5, 34., 21., 0.0105, time, foot, view, smear),
+	                        cloudWaves(p, angle - 0.8, 9.5, 34., 27., -0.0105, time, foot, view, smear), side);
+	waves *= clamp((cloudField(q + vec2(-0.010, 0.007)*time, 110., 60.) + 0.4*cloudField(q + vec2(0.008, 0.009)*time, 37., 62.) - 0.46)*3., 0., 1.);
+	highp float billows = cloudWaves(p, angle + 1.5, 4.6, 14., 33., 0.011, time, foot, view, smear)
+	                      *clamp((cloudField(q + vec2(0.009, -0.011)*time, 50., 70.) - 0.5)*4., 0., 1.);
 	highp float cover = clamp((cloudField(q, 520., 80.) + 0.5*cloudField(q + 53., 210., 82.) - 0.28)*3.2, 0., 1.);
 	return max(0., cover*(0.12 + 1.2*area)*(1. + bands + 0.9*grain + 1.35*waves + 0.7*billows));
 }
@@ -309,7 +329,20 @@ void main(void)
 	highp vec2 view = map - cloudFoot.xy;
 	view /= max(length(view), 1e-3);
 	highp vec2 foot = (t*cloudFoot.z*vec2(slant, 1.) + vec2(cloudFoot.w*slant, 0.));
-	highp float density = cloudDensity(unit.z < 0. ? map + 5000. : map, foot, view);
+	// the clouds are carried by the wind; the camera averages the moments of its exposure, and the motion between two
+	// of them blurs the finest forms
+	highp vec2 smear = cloudWind*cloudExposure/float(cloudSamples);
+	highp float density = 0.;
+	for (int i = 0; i < cloudSamples; ++i)
+	{
+		highp float moment = cloudExposure*((float(i) + 0.5)/float(cloudSamples) - 0.5);
+		highp vec2 place = map - cloudWind*moment;
+		highp float radius = max(length(place), 1e-3);
+		place *= abs(radius - cloudDrift.z)/radius;
+		place = vec2(cloudDrift.x*place.x - cloudDrift.y*place.y, cloudDrift.y*place.x + cloudDrift.x*place.y);
+		density += cloudDensity(unit.z < 0. ? place + 5000. : place, cloudDrift.w + moment, foot, view, smear);
+	}
+	density /= float(cloudSamples);
 
 	highp vec3 color = texture2D(cloudLight, lightCoord).rgb*cloudLightScale.y*slant*density;
 	if (extinctionEnabled)
@@ -416,6 +449,23 @@ void NoctilucentCloudMgr::draw(StelCore* core)
 	const double night = std::floor(core->getJD() + static_cast<double>(location.getLongitude())/360.);
 	const double nightNumber = std::fmod(night, 997.);
 	p.setUniformValue("cloudNight", QVector2D(static_cast<float>(nightNumber*0.61803), static_cast<float>(std::fmod(nightNumber*2.39996, 2.*M_PI))));
+
+	// The wind of this night, from the time since the same moment for everybody
+	const double since = (core->getJD() - night)*86400.;
+	const double westward = WestwardWind[0] + (WestwardWind[1] - WestwardWind[0])*std::fmod(nightNumber*0.7548777, 1.);
+	const double equatorward = EquatorwardWind[0] + (EquatorwardWind[1] - EquatorwardWind[0])*std::fmod(nightNumber*0.5698403, 1.);
+	const double turnRate = westward/((EarthRadius + CloudHeight)*std::cos(ReferenceLatitude));
+	p.setUniformValue("cloudDrift", QVector4D(static_cast<float>(std::cos(turnRate*since)), static_cast<float>(std::sin(turnRate*since)),
+	                                          static_cast<float>(equatorward*since), static_cast<float>(since)));
+	const Vec2d here(mapScale*up[0], mapScale*up[1]);
+	const double hereRadius = std::max(here.norm(), 1e-3);
+	const Vec2d wind(turnRate*here[1] + equatorward*here[0]/hereRadius, -turnRate*here[0] + equatorward*here[1]/hereRadius);
+	p.setUniformValue("cloudWind", QVector2D(static_cast<float>(wind[0]), static_cast<float>(wind[1])));
+
+	// The exposure, as for the aurorae: nothing with a camera that takes the picture of an instant
+	const double exposure = drawer->getFlagPhotoStarTrails() ? std::max(0., drawer->getPhotoEffectiveExposureTime()) : 0.;
+	p.setUniformValue("cloudExposure", static_cast<float>(exposure));
+	p.setUniformValue("cloudSamples", std::clamp(static_cast<int>(std::ceil(exposure*wind.norm()/SampleSpacing)), 1, MaxSamples));
 
 	auto& gl = *QOpenGLContext::currentContext()->functions();
 	gl.glEnable(GL_BLEND);

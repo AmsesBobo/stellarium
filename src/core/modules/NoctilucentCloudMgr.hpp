@@ -42,9 +42,9 @@ class QOpenGLVertexArrayObject;
 //! layer. That the clouds stand low over the northern horizon from Sweden in summer follows from this geometry alone.
 //! The photographic mode records the light like the sky, dimmed by the extinction.
 //!
-//! The clouds have forms: bands, waves, billows and whirls in km on a map of the layer, fixed to the Earth, from noise
-//! that follows from the date: a night always looks the same, from everywhere. They do not move yet, and they are
-//! there everywhere and all year round.
+//! The clouds have forms: bands, waves, billows and whirls in km on a map of the layer, from noise that follows from
+//! the date: a moment always looks the same, from everywhere. The wind of the night carries them, the bands and waves
+//! run through them and the camera averages its exposure. They are there everywhere and all year round so far.
 class NoctilucentCloudMgr : public StelModule
 {
 	Q_OBJECT
