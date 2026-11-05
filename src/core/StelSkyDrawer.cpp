@@ -424,7 +424,17 @@ void StelSkyDrawer::update(double)
 		// Use half the average sky luminance as a conservative estimate (zenith is darker).
 		const auto* lmgr = qobject_cast<LandscapeMgr*>(StelApp::getInstance().getModuleMgr().getModule("LandscapeMgr", true));
 		const float exposure = getPhotoExposureFactor();
-		const float skyLuminance = (lmgr && lmgr->getFlagAtmosphere()) ? 0.5f*lmgr->getAtmosphereAverageLuminance() : 0.f;
+		// But a part of the view can be much darker than the average: the sky above a bright twilight arc (from a
+		// high altitude it is a narrow band, and the sky over it is dark), or the sky away from the Moon or the
+		// Sun. The stars must not vanish there (all at once, when the bright part enters the view), so the level is
+		// at most that of the night sky: what the camera cannot show on a brighter sky only adds light below a step
+		// of the display, and a bright sky never needs more stars than the night.
+		float skyLuminance = 0.f;
+		if (lmgr && lmgr->getFlagAtmosphere())
+		{
+			const float nightSky = qMax(1e-4f, static_cast<float>(getPhotoZenithBackgroundLuminance()));
+			skyLuminance = qMin(0.5f*lmgr->getAtmosphereAverageLuminance(), nightSky);
+		}
 		photoSkyBackground = skyLuminance * getPhotoSceneScale();
 		// Half a step of the display above the sky, through the tone curve and the sRGB encoding. With a film, the
 		// reciprocity failure of each point comes before the curve (see getPhotoReciprocityParams())

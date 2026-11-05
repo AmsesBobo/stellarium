@@ -408,6 +408,7 @@ void main(void)
 	// It is computed first: a long trail does not need the stationary image at all (tau = 1 below).
 	highp float tau = 0.;
 	highp float coreT = 0.;
+	highp vec2 coreTRB = vec2(0.); // the red and the blue core along the trail, then their change (chromatic aberration)
 	highp float haloT = 0.;
 	highp float dmin = 1e30;
 	highp vec2 nearest = vec2(0.);
@@ -442,6 +443,14 @@ void main(void)
 		highp float kd = 1.6 * Rdf / coreFwhm;
 		highp float alphaCore = coreAlpha * sqrt(1. + kd*kd);
 		highp float alphaHalo = sqrt(haloAlpha*haloAlpha + 0.5*Rdf*Rdf);
+		// The red and the blue image trail side by side with the green one: shifted by the lateral chromatic
+		// aberration, and wider by the axial one. So a trail keeps its colored edges, as the stationary image.
+		highp vec2 shiftR = vLens.yz * (chromaShift.r * vLens.x);
+		highp vec2 shiftB = vLens.yz * (chromaShift.b * vLens.x);
+		highp float kR = 1.6 * chromaBlur.r / coreFwhm;
+		highp float kB = 1.6 * chromaBlur.b / coreFwhm;
+		highp float alphaR = coreAlpha * sqrt(1. + kd*kd + kR*kR);
+		highp float alphaB = coreAlpha * sqrt(1. + kd*kd + kB*kB);
 		P0 = A;
 		for (int k = 1; k <= 16; ++k)
 		{
@@ -455,6 +464,13 @@ void main(void)
 			highp float u = dot(q, e);
 			highp float v = dot(q, vec2(-e.y, e.x));
 			coreT += moffatSegment3(u, v, L, alphaCore);
+			if (showChroma)
+			{
+				highp vec2 qR = q - shiftR;
+				highp vec2 qB = q - shiftB;
+				coreTRB += vec2(moffatSegment3(dot(qR, e), dot(qR, vec2(-e.y, e.x)), L, alphaR),
+				                moffatSegment3(dot(qB, e), dot(qB, vec2(-e.y, e.x)), L, alphaB));
+			}
 			if (showHalo)
 				haloT += moffatSegment15(u, v, L, alphaHalo);
 			highp float uc = clamp(u, 0., L);
@@ -470,12 +486,15 @@ void main(void)
 		}
 		coreT *= invK;
 		haloT *= invK;
+		// the change of the core in red and blue
+		coreTRB = showChroma ? coreTRB * invK - vec2(coreT) : vec2(0.);
 		if (Rdf > 0.)
 		{
-			// Out of focus: the blur disk swept along the trail, of even brightness
+			// Out of focus: the blur disk swept along the trail, of even brightness (without colored rims)
 			highp float tD = smoothstep(0.5, 2.0, Rdf / coreFwhm);
 			highp float coverage = 1. - smoothstep(-defocusEdge, defocusEdge, dmin - Rdf);
 			coreT = mix(coreT, coverage / (PI*Rdf*Rdf + 2.*Rdf*trailLength), tD);
+			coreTRB *= 1. - tD;
 		}
 		// A short trail keeps the details of the stationary image (aberrations, the shape of the blur disk)
 		tau = smoothstep(0.5, 2.0, trailLength / max(coreFwhm, 2.*Rdf));
@@ -528,7 +547,7 @@ void main(void)
 	if (trailed)
 	{
 		profile = mix(profile, coreFraction * vNorm.w * coreT, tau);
-		chroma *= 1. - tau; // (a trail smears the colored fringes)
+		chroma = mix(chroma, coreFraction * vNorm.w * vec3(coreTRB.x, 0., coreTRB.y), tau);
 		// (the whole trailed image takes the tint of its nearest point, see trailTint below)
 		haloProfile = haloT;
 		// Extinction along the trail: the light at this point of the trail (mostly from the nearest part), from
