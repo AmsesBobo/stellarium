@@ -42,13 +42,16 @@ class QOpenGLVertexArrayObject;
 //! layer. That the clouds stand low over the northern horizon from Sweden in summer follows from this geometry alone.
 //! The photographic mode records the light like the sky, dimmed by the extinction.
 //!
-//! So far an even veil, everywhere and all year round.
+//! The clouds have forms: bands, waves, billows and whirls in km on a map of the layer, fixed to the Earth, from noise
+//! that follows from the date: a night always looks the same, from everywhere. They do not move yet, and they are
+//! there everywhere and all year round.
 class NoctilucentCloudMgr : public StelModule
 {
 	Q_OBJECT
 	//! Show the noctilucent clouds (photographic mode)
 	Q_PROPERTY(bool flagShow READ getFlagShow WRITE setFlagShow NOTIFY flagShowChanged)
-	//! The vertical optical depth of the layer at 532 nm: 1e-5 a typical display, 3e-5 a bright one, 1e-4 an extreme one.
+	//! The vertical optical depth of the layer at 532 nm where its density is 1: 1e-5 a typical display, 3e-5 a bright
+	//! one, 1e-4 an extreme one.
 	//! From the lidars: a backscatter of about 1e-9 per m and sr over 1 km, and P(180 degrees) of about 1.3, give 1e-5.
 	Q_PROPERTY(double opticalDepth READ getOpticalDepth WRITE setOpticalDepth NOTIFY opticalDepthChanged)
 
