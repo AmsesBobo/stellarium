@@ -1382,6 +1382,25 @@
         </widget>
        </item>
        <item>
+        <widget class="QGroupBox" name="noctilucentCloudsGroupBox">
+         <property name="title">
+          <string>Noctilucent clouds</string>
+         </property>
+         <layout class="QGridLayout" name="noctilucentCloudsGridLayout">
+          <item row="0" column="0">
+           <widget class="QCheckBox" name="noctilucentCloudsCheckBox">
+            <property name="toolTip">
+             <string>The thin layer of ice clouds about 82 km up, which still stands in the sunlight when the observer is in the dark: seen with the Sun 6 to 16 degrees below the horizon, the stars shining through. For now an even veil of a fixed brightness, at all times of the year.</string>
+            </property>
+            <property name="text">
+             <string>Show noctilucent clouds</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
         <widget class="QGroupBox" name="cometTailsGroupBox">
          <property name="title">
           <string>Comet tails</string>

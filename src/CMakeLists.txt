@@ -239,6 +239,8 @@ SET(stellarium_lib_SRCS
      core/modules/LightDomes.hpp
      core/modules/AuroraMgr.hpp
      core/modules/AuroraCorrection.hpp
+     core/modules/NoctilucentCloudMgr.cpp
+     core/modules/NoctilucentCloudMgr.hpp
      core/modules/CometTailMgr.hpp
      core/modules/Meteor.cpp
      core/modules/Meteor.hpp

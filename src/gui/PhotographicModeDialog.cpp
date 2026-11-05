@@ -334,6 +334,7 @@ void PhotographicModeDialog::createDialogContent()
 	connectBoolProperty(ui->auroraCheckBox,           "AuroraMgr.flagShow");
 	connectBoolProperty(ui->auroraOvalCheckBox,       "AuroraMgr.flagShowOval");
 	connectBoolProperty(ui->auroraHalfResolutionCheckBox, "AuroraMgr.flagHalfResolution");
+	connectBoolProperty(ui->noctilucentCloudsCheckBox, "NoctilucentCloudMgr.flagShow");
 	connectBoolProperty(ui->cometTailsCheckBox,       "CometTailMgr.flagShow");
 	connectBoolProperty(ui->cometTailGuidesCheckBox,  "CometTailMgr.flagShowGuides");
 	// The aurorae: the activity is a preset or a custom Kp; the substorm cycle shows where it stands
