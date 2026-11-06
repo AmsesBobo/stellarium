@@ -53,6 +53,29 @@ namespace
 constexpr double EarthRadius = 6371.;     // km
 constexpr int VertexAttribIndex = 0;
 constexpr int MaxExposureSamples = 5;
+
+// The tile of the clouds and the weather fronts in it, for the shaders: see CloudShape::frontCover()
+QByteArray frontShader()
+{
+	const auto n = [](double v) {return QByteArray::number(v, 'g', 8);};
+	return "uniform sampler2D cloudTile;        // the height map (see CloudShape)\n"
+	       "uniform highp vec2 cloudFrontDrift; // where the fronts lie on the tile\n"
+	       "// The cover of the fronts at a place of the map without the shift of a layer. front: on, the shift across the\n"
+	       "// fronts (km), the bias of the cover, its scale\n"
+	       "highp float frontCover(highp vec2 map, highp vec4 front)\n"
+	       "{\n"
+	       "\thighp float bend = " + n(CloudShape::FrontBend) + "*(textureLod(cloudTile, map/" + n(CloudShape::FrontBendScale) + " + vec2(0.1, 0.6), 1.).z - 0.5);\n"
+	       "\thighp vec2 uv = vec2((" + n(CloudShape::FrontAxisCos) + "*map.x - (" + n(CloudShape::FrontAxisSin) + ")*map.y)/" + n(CloudShape::FrontAlong)
+	       + ", ((" + n(CloudShape::FrontAxisSin) + ")*map.x + " + n(CloudShape::FrontAxisCos) + "*map.y + bend + front.y)/" + n(CloudShape::FrontAcross) + ") + cloudFrontDrift;\n"
+	       "\treturn front.w*clamp(" + n(CloudShape::FrontGain) + "*(textureLod(cloudTile, uv, 1.).z - " + n(CloudShape::FrontMid) + ") + front.z, 0., "
+	       + n(CloudShape::FrontMax) + ");\n"
+	       "}\n";
+}
+
+QVector4D frontUniform(const CloudShape::Front& front)
+{
+	return QVector4D(front.on ? 1.f : 0.f, static_cast<float>(front.shift), static_cast<float>(front.bias), static_cast<float>(front.scale));
+}
 }
 
 #ifndef GL_RGBA32F
@@ -363,6 +386,7 @@ CloudShape::Layer CloudMgr::currentLayer(int i) const
 {
 	CloudShape::Layer l = layers[i];
 	l.cover = currentCovers[i];
+	l.front = fronts[i];
 	return l;
 }
 
@@ -464,10 +488,37 @@ void CloudMgr::update(double)
 		return;
 	const StelCore* core = StelApp::getInstance().getCore();
 	const double longitude = static_cast<double>(core->getCurrentLocation().getLongitude());
-	// (with the date, the second layer follows weather of its own)
+	// With the date, weather fronts set the cover. The higher clouds of a front lie a little across it, and the cirrus
+	// further, so that they may come first; the clouds that the Sun makes grow in the afternoon
+	const double afternoon = CloudShape::afternoon(core->getJD(), longitude);
 	for (int i = 0; i < LayerCount; ++i)
-		currentCovers[i] = flagFollowDate ? CloudShape::coverOfDate(core->getJD() + 5.3*i, longitude) : layers[i].cover;
-	currentCirrusCover = flagFollowDate ? CloudShape::coverOfDate(core->getJD() + 11.7, longitude) : cirrusCover;
+	{
+		fronts[i].on = flagFollowDate;
+		fronts[i].shift = layers[i].base > 2.5 ? 180. : 0.;
+		fronts[i].bias = layers[i].base > 2.5 ? -0.1 : 0.;
+		fronts[i].scale = afternoon;
+	}
+	cirrusFront.on = flagFollowDate;
+	cirrusFront.shift = 420.;
+	cirrusFront.bias = 0.1;
+	cirrusFront.scale = 1.;
+	// the cover over the observer
+	if (flagFollowDate && tile.empty())
+		tile = CloudShape::computeTile();
+	const CloudShape::Motion here = motionAt(core, core->getJD());
+	const double latitude = static_cast<double>(core->getCurrentLocation().getLatitude())*M_PI/180.;
+	const double lambdaHere = longitude*M_PI/180.;
+	const auto coverHere = [&](const CloudShape::Front& front, double height) {
+		// the place of the map over the observer, at the height of a layer
+		const double r = EarthRadius + height;
+		const double ex = r*std::cos(latitude)*std::cos(lambdaHere), ey = r*std::cos(latitude)*std::sin(lambdaHere);
+		const double scale = 2.*r/(r + std::fabs(r*std::sin(latitude)));
+		return CloudShape::frontCover(tile, here.cosine*scale*ex - here.sine*scale*ey + here.offsetX, here.sine*scale*ex + here.cosine*scale*ey + here.offsetY,
+		                              front, here);
+	};
+	for (int i = 0; i < LayerCount; ++i)
+		currentCovers[i] = flagFollowDate ? coverHere(fronts[i], layers[i].base) : layers[i].cover;
+	currentCirrusCover = flagFollowDate ? coverHere(cirrusFront, cirrusHeight) : cirrusCover;
 
 	// The wind over the Earth from the wind on the map: turn it back, into the frame of the observer's meridian
 	double mapX = 0., mapY = 0.;
@@ -556,6 +607,7 @@ void main()
 	const QByteArray frag = StelOpenGL::globalShaderPrefix(StelOpenGL::FRAGMENT_SHADER)
 	                        + projector.getUnProjectShader()
 	                        + extinction.getForwardTransformShader()
+	                        + frontShader()
 	                        + R"(
 VARYING highp vec3 ndcPos;
 uniform highp mat4 projectionMatrixInverse;
@@ -583,7 +635,6 @@ uniform highp float airSunlit;      // how much of the light of the sky comes fr
 uniform highp vec3 airMoon;
 uniform highp vec3 airExtinction;   // per km
 const int CloudSubsteps = 6;
-uniform sampler2D cloudTile;        // the height map (see CloudShape)
 uniform highp vec4 cloudTileScale;  // 1/km: of the tile, of its two cover sizes, of the fine lobes
 uniform highp float cloudSize;      // the scale of the clouds against those of the tile
 uniform highp vec4 cloudTurn;       // the wind: the turn of the map, as cosine and sine; its offset (km)
@@ -598,12 +649,14 @@ uniform highp vec4 cloudBank;       // the bank: its azimuth and half width (rad
                                     // edge below 0 without a bank)
 uniform highp vec4 cloudCover;      // cover offset: constant, per noise; the mean size of a texel of the tile (km); the
                                     // extinction in the clouds (per km)
+uniform highp vec4 cloudFront;      // its fronts (see frontCover())
 uniform highp vec2 cloudShift;      // where the clouds of this layer lie on the map (km)
 uniform highp vec3 cloudRadius;     // (the same as cloudRadii.y, cloudSize and cloudTileScale.x)
 // The same for the layer above, which casts its shadows on this one (otherRadius.x = 0: none)
 uniform highp vec4 otherShape;
 uniform highp vec4 otherBank;
 uniform highp vec4 otherCover;
+uniform highp vec4 otherFront;
 uniform highp vec2 otherShift;
 uniform highp vec3 otherRadius;
 
@@ -622,13 +675,22 @@ highp vec2 cloudMap(highp vec3 p)
 	return cloudMapAt(p, cloudRadii.y, cloudShift);
 }
 
-// What the cover and the growth add to the shape around a place of the map, with the cover offset of a layer and its bank.
-// It changes slowly: one value serves a whole step of the way. It never fills the clear parts of the map
-highp float cloudOffsetAt(highp vec3 p, highp vec2 map, highp vec4 cover, highp vec4 bank)
+// What the cover and the growth add to the shape around a place of the map, with the cover offset of a layer, its fronts,
+// its shift and its bank. It changes slowly: one value serves a whole step of the way. It never fills the clear parts of
+// the map
+highp float cloudOffsetAt(highp vec3 p, highp vec2 map, highp vec4 cover, highp vec4 front, highp vec2 shift, highp vec4 bank)
 {
 	highp float noise = 0.6*textureLod(cloudTile, map*cloudTileScale.y, 2.).z + 0.4*textureLod(cloudTile, map*cloudTileScale.z, 2.).z;
 	highp float grow = textureLod(cloudTile, map*cloudGrowScale + cloudGrow, 2.).z;
-	highp float offset = min(cover.x + cover.y*noise + cloudGrowStrength*(grow - 0.5), 0.45);
+	highp float offset = cover.x + cover.y*noise;
+	// (with fronts, the cover of the place: see CloudShape::coverOffset())
+	if (front.x > 0.)
+	{
+		highp float c = frontCover(map - shift, front);
+		highp float fading = max(0.1 - c, 0.);
+		offset = 1.1*(c - 0.45) + 2.*(noise - 0.5) - 150.*fading*fading;
+	}
+	offset = min(offset + cloudGrowStrength*(grow - 0.5), 0.45);
 	// A bank: the clouds only stand in a sector of the sky at a distance from the observer (see CloudShape::bankMask())
 	if (bank.w >= 0.)
 	{
@@ -648,7 +710,7 @@ highp float cloudOffsetAt(highp vec3 p, highp vec2 map, highp vec4 cover, highp 
 
 highp float cloudOffset(highp vec3 p)
 {
-	return cloudOffsetAt(p, cloudMap(p), cloudCover, cloudBank);
+	return cloudOffsetAt(p, cloudMap(p), cloudCover, cloudFront, cloudShift, cloudBank);
 }
 
 // The light that the layer above lets through to a place, towards the light key: one look at the middle of its clouds
@@ -660,7 +722,7 @@ highp float otherShadow(highp vec3 p, highp vec3 key)
 	highp float r = length(p);
 	highp vec3 q = p + key*(otherRadius.x + middle - r)/max(dot(p/r, key), 0.02);
 	highp vec2 map = cloudMapAt(q, otherRadius.x, otherShift);
-	highp float s = textureLod(cloudTile, vec2(map.x*otherShape.x, map.y)*otherRadius.z, 1.5).x + cloudOffsetAt(q, map, otherCover, otherBank);
+	highp float s = textureLod(cloudTile, vec2(map.x*otherShape.x, map.y)*otherRadius.z, 1.5).x + cloudOffsetAt(q, map, otherCover, otherFront, otherShift, otherBank);
 	return 1. - 0.9*otherShape.z*smoothstep(-0.05, 0.1, s);
 }
 
@@ -964,7 +1026,9 @@ double CloudMgr::cirrusTransmission(const StelCore* core, const Vec3d& altAz) co
 	const CloudShape::Motion m = motionAt(core, core->getJD());
 	const double mapX = m.cosine*scale*earth[0] - m.sine*scale*earth[1] + m.offsetX + CloudShape::CirrusShift;
 	const double mapY = m.sine*scale*earth[0] + m.cosine*scale*earth[1] + m.offsetY + CloudShape::CirrusShift;
-	return std::exp(-cirrusOpticalDepth*CloudShape::cirrusDensity(tile, mapX, mapY, currentCirrusCover)*slant);
+	const double cover = cirrusFront.on ? CloudShape::frontCover(tile, mapX - CloudShape::CirrusShift, mapY - CloudShape::CirrusShift, cirrusFront, m)
+	                                    : currentCirrusCover;
+	return std::exp(-cirrusOpticalDepth*CloudShape::cirrusDensity(tile, mapX, mapY, cover)*slant);
 }
 
 bool CloudMgr::isLayerShown(const StelCore* core, int i) const
@@ -1108,6 +1172,7 @@ void CloudMgr::setUniformsOfLayer(QOpenGLShaderProgram& p, int i, const char* pr
 	p.setUniformValue((name + "Bank").constData(), QVector4D(static_cast<float>(layer.bankAzimuth*M_PI/180.), static_cast<float>(0.5*layer.bankWidth*M_PI/180.),
 	                                                         static_cast<float>(layer.bankDistance), static_cast<float>(layer.bank ? layer.bankDistance + layer.bankDepth : -1.)));
 	p.setUniformValue((name + "Shift").constData(), QVector2D(static_cast<float>(layer.shift), static_cast<float>(layer.shift)));
+	p.setUniformValue((name + "Front").constData(), frontUniform(fronts[i]));
 	// the radius of the base (km), the size of the clouds, 1/km of the tile
 	p.setUniformValue((name + "Radius").constData(), QVector3D(static_cast<float>(EarthRadius + layer.base), static_cast<float>(layer.size),
 	                                                           static_cast<float>(1./(layer.size*CloudShape::TileSize))));
@@ -1203,6 +1268,7 @@ void CloudMgr::drawLayer(StelCore* core, const StelProjector& prj, int i, int ot
 	                                         static_cast<float>(motion.offsetX), static_cast<float>(motion.offsetY)));
 	p.setUniformValue("cloudGrow", QVector2D(static_cast<float>(motion.growU), static_cast<float>(motion.growV)));
 	p.setUniformValue("cloudBoil", QVector2D(static_cast<float>(motion.boilX), static_cast<float>(motion.boilY)));
+	p.setUniformValue("cloudFrontDrift", QVector2D(static_cast<float>(motion.frontU), static_cast<float>(motion.frontV)));
 	p.setUniformValue("cloudGrowScale", static_cast<float>(1./CloudShape::GrowScale));
 	p.setUniformValue("cloudGrowStrength", static_cast<float>(CloudShape::GrowStrength));
 	// The exposure, if the sky moves during it in the camera
@@ -1251,6 +1317,7 @@ void main()
 	// in the center of the Earth (km), as for the other clouds.
 	const QByteArray frag = StelOpenGL::globalShaderPrefix(StelOpenGL::FRAGMENT_SHADER)
 	                        + projector.getUnProjectShader()
+	                        + frontShader()
 	                        + R"(
 VARYING highp vec3 ndcPos;
 uniform highp mat4 projectionMatrixInverse;
@@ -1258,7 +1325,7 @@ uniform highp vec3 cloudSouth;
 uniform highp vec3 cloudEast;
 uniform highp vec3 cloudUp;
 uniform highp vec4 cloudTurn;       // the wind: the turn of the map, as cosine and sine; its offset (km)
-uniform sampler2D cloudTile;
+uniform highp vec4 cirrusFront;     // the fronts (see frontCover())
 uniform highp vec4 cirrusRadii;     // the observer's radius; the radius of the layer; (r - observer)(r + observer); the size
                                     // of a pixel (radians)
 uniform highp vec2 cirrusCover;     // the cover; the vertical optical depth of the densest cirrus
@@ -1275,14 +1342,15 @@ highp float cirrusNoise(highp vec2 uv, highp float lod)
 	return textureLod(cloudTile, uv, lod).z;
 }
 
-// The density from 0 to 1 at a place of the map, with the size of a pixel there (km): see CloudShape::cirrusDensity()
-highp float cirrusDensity(highp vec2 map, highp float foot)
+// The density from 0 to 1 at a place of the map, with the size of a pixel there (km) and the cover: see
+// CloudShape::cirrusDensity()
+highp float cirrusDensity(highp vec2 map, highp float foot, highp float cover)
 {
 	highp vec2 m = vec2(0.819*map.x - 0.574*map.y, 0.574*map.x + 0.819*map.y);
 	// the fibres bend
 	m += 9.*vec2(cirrusNoise(map/60. + 0.5, max(log2(foot*1024./60.), 0.)), cirrusNoise(map/60. + 0.25, max(log2(foot*1024./60.), 0.))) - 4.5;
 	highp float patch = cirrusNoise(map/190., max(log2(foot*1024./190.), 0.));
-	highp float area = clamp((patch - 0.85 + 0.9*cirrusCover.x)/0.2, 0., 1.);
+	highp float area = clamp((patch - 0.85 + 0.9*cover)/0.2, 0., 1.);
 	highp float fibres = 0.5*cirrusNoise(vec2(m.x/40., m.y/10.), max(log2(foot*1024./10.), 0.))
 	                   + 0.3*cirrusNoise(vec2(m.x/12. + 0.37, m.y/3. + 0.71), max(log2(foot*1024./3.), 0.))
 	                   + 0.2*cirrusNoise(vec2(m.x/4. + 0.13, m.y/0.9 + 0.29), max(log2(foot*1024./0.9), 0.));
@@ -1325,7 +1393,8 @@ void main(void)
 	highp vec3 earth = p.x*cloudSouth + p.y*cloudEast + p.z*cloudUp;
 	highp vec2 map = 2.*cirrusRadii.y*earth.xy/(length(earth) + abs(earth.z));
 	map = vec2(cloudTurn.x*map.x - cloudTurn.y*map.y, cloudTurn.y*map.x + cloudTurn.x*map.y) + cloudTurn.zw + vec2(4711.);
-	highp float density = cirrusDensity(map, t*cirrusRadii.w*slant);
+	highp float cover = cirrusFront.x > 0. ? frontCover(map - vec2(4711.), cirrusFront) : cirrusCover.x;
+	highp float density = cirrusDensity(map, t*cirrusRadii.w*slant, cover);
 	highp float T = exp(-cirrusCover.y*density*slant);
 	if (T > 0.999)
 	{
@@ -1391,6 +1460,8 @@ void CloudMgr::drawCirrus(StelCore* core, const StelProjector& prj)
 	p.setUniformValue("cirrusRadii", QVector4D(static_cast<float>(r0), static_cast<float>(rc), static_cast<float>((rc - r0)*(rc + r0)),
 	                                           static_cast<float>(1./static_cast<double>(prj.getPixelPerRadAtCenter()))));
 	p.setUniformValue("cirrusCover", QVector2D(static_cast<float>(currentCirrusCover), static_cast<float>(cirrusOpticalDepth)));
+	p.setUniformValue("cirrusFront", frontUniform(cirrusFront));
+	p.setUniformValue("cloudFrontDrift", QVector2D(static_cast<float>(motion.frontU), static_cast<float>(motion.frontV)));
 
 	// The light: the Sun through the air down to the layer, the Moon, the sky, the ground and the towns
 	const double scale = static_cast<double>(drawer->getPhotoSceneScale());

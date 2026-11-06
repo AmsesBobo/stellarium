@@ -98,7 +98,8 @@ class CloudMgr : public StelModule
 	Q_PROPERTY(double windSpeed READ getWindSpeed WRITE setWindSpeed NOTIFY windSpeedChanged)
 	//! The direction that the wind set by hand blows from (degrees from the north through the east)
 	Q_PROPERTY(double windDirection READ getWindDirection WRITE setWindDirection NOTIFY windDirectionChanged)
-	//! Let the date set the cover, in place of the setting cover. This is no weather forecast.
+	//! Let the date set the cover, in place of the setting covers: weather fronts that the wind carries over the observer,
+	//! with clear skies between them. This is no weather forecast.
 	Q_PROPERTY(bool flagFollowDate READ getFlagFollowDate WRITE setFlagFollowDate NOTIFY flagFollowDateChanged)
 	//! Compute the clouds at half the resolution of the screen and scale them up: four times faster, a little softer
 	Q_PROPERTY(bool flagHalfResolution READ getFlagHalfResolution WRITE setFlagHalfResolution NOTIFY flagHalfResolutionChanged)
@@ -236,7 +237,9 @@ private:
 	CloudShape::Layer currentLayer(int i) const;
 	bool flagHalfResolution = true;
 	QString weatherInfo;
-	double currentCovers[LayerCount] = {0.2, 0.2};  //!< the cover at this moment
+	double currentCovers[LayerCount] = {0.2, 0.2};  //!< the cover at this moment, over the observer
+	CloudShape::Front fronts[LayerCount];           //!< the fronts of the layers, if the date sets the cover
+	CloudShape::Front cirrusFront;
 	double windEast = 0., windNorth = 0.;  //!< the wind at the observer at this moment (km/s)
 	//! The wind at the observer (km/s) on the map of the clouds, from where it carries them
 	void computeWind(const StelCore* core, double* mapX, double* mapY) const;

@@ -150,17 +150,25 @@ CloudShape::Motion CloudShape::motion(double jd)
 	// the fine lobes at 1 m/s
 	m.boilX = std::fmod(0.001*86400.*days, 2.*FineScale);
 	m.boilY = -0.7*m.boilX;
+	// the fronts change as if they drifted at 1.5 m/s across and 0.5 m/s along through the air: in a day or two
+	m.frontU = std::fmod(0.0005*86400.*days/FrontAlong, 1.);
+	m.frontV = std::fmod(0.0015*86400.*days/FrontAcross, 1.);
 	return m;
 }
 
-double CloudShape::coverOfDate(double jd, double longitude)
+double CloudShape::afternoon(double jd, double longitude)
 {
-	const double days = jd - 2451545.;
-	const auto wave = [days](double period, double phase) {return std::sin(2.*M_PI*days/period + phase);};
-	const double weather = 0.5 + 0.28*wave(3.37, 1.1) + 0.16*wave(7.9, 2.3) + 0.1*wave(1.71, 3.4);
 	const double hour = jd + 0.5 + longitude/360.;
-	const double afternoon = 0.7 + 0.3*std::cos(2.*M_PI*(hour - std::floor(hour) - 0.625));
-	return std::clamp(1.1*(weather - 0.25)*afternoon, 0., 0.75);
+	return 0.85 + 0.15*std::cos(2.*M_PI*(hour - std::floor(hour) - 0.625));
+}
+
+double CloudShape::frontCover(const std::vector<float>& tile, double mapX, double mapY, const Front& front, const Motion& motion)
+{
+	// as in the shader of CloudMgr
+	const double bend = FrontBend*(readTile(tile, mapX/FrontBendScale + 0.1, mapY/FrontBendScale + 0.6, 2) - 0.5);
+	const double u = (FrontAxisCos*mapX - FrontAxisSin*mapY)/FrontAlong + motion.frontU;
+	const double v = (FrontAxisSin*mapX + FrontAxisCos*mapY + bend + front.shift)/FrontAcross + motion.frontV;
+	return front.scale*std::clamp(FrontGain*(readTile(tile, u, v, 2) - FrontMid) + front.bias, 0., FrontMax);
 }
 
 std::vector<float> CloudShape::computeTile()
@@ -267,7 +275,8 @@ double CloudShape::transmission(const std::vector<float>& tile, const Layer& lay
 		const double noise = 0.6*readTile(tile, mapX/CoverScaleLarge, mapY/CoverScaleLarge, 2) + 0.4*readTile(tile, mapX/CoverScaleSmall, mapY/CoverScaleSmall, 2);
 		const double tileX = mapX*layer.stretch()/(TileSize*size), tileY = mapY/(TileSize*size);
 		const double grow = readTile(tile, mapX/GrowScale + motion.growU, mapY/GrowScale + motion.growV, 2);
-		const double shape = readTile(tile, tileX, tileY, 0) + std::min(coverOffset(layer.cover, noise) + GrowStrength*(grow - 0.5), 0.45)
+		const double cover = layer.front.on ? frontCover(tile, mapX - layer.shift, mapY - layer.shift, layer.front, motion) : layer.cover;
+		const double shape = readTile(tile, tileX, tileY, 0) + std::min(coverOffset(cover, noise) + GrowStrength*(grow - 0.5), 0.45)
 		                     + 2.5*(bankMask(layer, px, py) - 1.);
 		const double height = size*layer.heightScale()*readTile(tile, tileX, tileY, 1);
 		const double round = shape/std::pow(std::fabs(shape) + 0.01, 0.3), plateau = 0.8*std::clamp(4.*shape, -1., 1.);

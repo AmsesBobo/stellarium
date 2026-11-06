@@ -1626,10 +1626,10 @@
             <item row="7" column="0" colspan="3">
              <widget class="QCheckBox" name="cloudsFollowDateCheckBox">
               <property name="toolTip">
-               <string>Let the date set the cover. Some days are clear, and the clouds grow in the afternoon. This is made up and no weather forecast, also for dates in the past.</string>
+               <string>Let the date set the cover: weather fronts, long bands of clouds with clear skies between them, that the wind carries over you. A front far away stands as a strip over the horizon. The clouds grow in the afternoon. This is made up and no weather forecast, also for dates in the past.</string>
               </property>
               <property name="text">
-               <string>Cover from the date (not a forecast)</string>
+               <string>Weather from the date (not a forecast)</string>
               </property>
              </widget>
             </item>

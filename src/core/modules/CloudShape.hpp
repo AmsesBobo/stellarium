@@ -49,6 +49,22 @@ public:
 	static constexpr double FineScale = 5.9;      //!< km: the size of the tile for the fine lobes
 	static constexpr double Extinction = 20.;     //!< per km in the clouds: they are opaque within a few hundred meters
 
+	//! Weather fronts, for the clouds that follow the date: long bands of clouds some hundred km wide with clear skies
+	//! between them, from the soft noise of the tile stretched along an axis of the map and bent. The wind carries them
+	//! over the observer, and they change slowly as they go. A front sets the cover at each place of the map, in place of
+	//! the one cover of a layer. The constants are shared with the shader of CloudMgr.
+	struct Front
+	{
+		bool on = false;
+		double shift = 0.;          //!< km across the fronts: where a layer or the cirrus lie in them
+		double bias = 0.;           //!< added to the cover
+		double scale = 1.;          //!< multiplies the cover (the growth of the clouds in the afternoon)
+	};
+	static constexpr double FrontAxisCos = 0.940, FrontAxisSin = -0.342;
+	static constexpr double FrontAlong = 5000., FrontAcross = 1400.; //!< km per tile along the fronts and across them
+	static constexpr double FrontBendScale = 2300.;                  //!< km per tile of the noise that bends them
+	static constexpr double FrontBend = 250.;                        //!< km
+	static constexpr double FrontGain = 2.3, FrontMid = 0.38, FrontMax = 0.9;
 	//! The settings of the layer of clouds
 	struct Layer
 	{
@@ -64,6 +80,7 @@ public:
 		double bankDistance = 60.;  //!< km to the near edge, over the ground
 		double bankDepth = 30.;     //!< km
 		double shift = 0.;          //!< km: where the clouds of this layer lie on the map, so that two layers differ
+		Front front;                //!< the fronts, if they set the cover in place of cover
 		//! How much the flatness lowers the clouds, and stretches them along the map
 		double heightScale() const {return 1. - 0.75*flatness;}
 		double stretch() const {return 1./(1. + 2.*flatness);}
@@ -81,11 +98,13 @@ public:
 		double cosine = 1., sine = 0., offsetX = 0., offsetY = 0.;
 		double growU = 0., growV = 0.;
 		double boilX = 0., boilY = 0.;
+		double frontU = 0., frontV = 0.;  //!< where the fronts lie on the tile, as they change
 	};
 	static Motion motion(double jd);
-	//! The share of the sky under clouds at a moment and a longitude (degrees), for the setting that follows the date: it
-	//! changes over the days, with some days clear, and the clouds grow in the afternoon
-	static double coverOfDate(double jd, double longitude);
+	//! The cover (0 to FrontMax) of the fronts at a place of the map (km), without the shift of a layer
+	static double frontCover(const std::vector<float>& tile, double mapX, double mapY, const Front& front, const Motion& motion);
+	//! How the clouds that the Sun makes grow over the day (0.7 to 1 of the cover, most in the afternoon), at a longitude (degrees)
+	static double afternoon(double jd, double longitude);
 
 	//! Cirrus: thin fibrous clouds of ice, high up. Their fibres lie along an axis of the map, from the soft noise of the
 	//! tile in three sizes stretched along it, in patches that the cover sets. The constants are shared with the shader.
@@ -96,7 +115,7 @@ public:
 	static constexpr double CirrusBendScale = 60.;            //!< km per tile of the noise that bends them
 	static constexpr double CirrusBend = 9.;                  //!< km
 	static constexpr double CirrusShift = 4711.;              //!< km: where the cirrus lie on the map
-	//! The density of cirrus (0 to 1) at a place of the map (km) with the cover (0 to 1)
+	//! The density of cirrus (0 to 1) at a place of the map (km, with CirrusShift) with the cover (0 to 1)
 	static double cirrusDensity(const std::vector<float>& tile, double mapX, double mapY, double cover);
 
 	//! The tile, four values for each texel by rows
