@@ -344,6 +344,7 @@ void PhotographicModeDialog::createDialogContent()
 		connect(clouds, &NoctilucentCloudMgr::occurrenceInfoChanged, ui->noctilucentCloudsInfoLabel, &QLabel::setText);
 	}
 	connectBoolProperty(ui->cloudsCheckBox,           "CloudMgr.flagShow");
+	connectBoolProperty(ui->cloudsLayerOnCheckBox,    "CloudMgr.flagLayerOn");
 	connectDoubleProperty(ui->cloudsCoverSpinBox,     "CloudMgr.cover");
 	connectDoubleProperty(ui->cloudsSizeSpinBox,      "CloudMgr.size");
 	connectBoolProperty(ui->cloudsFollowDateCheckBox, "CloudMgr.flagFollowDate");
@@ -359,6 +360,10 @@ void PhotographicModeDialog::createDialogContent()
 	connectBoolProperty(ui->cloudsHalfResolutionCheckBox, "CloudMgr.flagHalfResolution");
 	{
 		CloudMgr* clouds = GETSTELMODULE(CloudMgr);
+		// The layer that the settings change (1 or 2)
+		ui->cloudsLayerComboBox->setCurrentIndex(clouds->getLayer() - 1);
+		connect(ui->cloudsLayerComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), clouds, [clouds](int index) {clouds->setLayer(index + 1);});
+		connect(clouds, &CloudMgr::layerChanged, ui->cloudsLayerComboBox, [this](int layer) {ui->cloudsLayerComboBox->setCurrentIndex(layer - 1);});
 		connect(clouds, &CloudMgr::weatherInfoChanged, ui->cloudsInfoLabel, &QLabel::setText);
 		ui->cloudsInfoLabel->setText(clouds->getWeatherInfo());
 		// The date sets the cover

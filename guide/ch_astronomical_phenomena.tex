@@ -1434,6 +1434,13 @@ which you can then change: \emph{Cumulus}, heaps of fair weather;
 3.5\,km up. A change of the base, size, density or flatness makes the
 type \emph{Custom}.
 
+There are two layers of clouds. \emph{Layer} chooses the one that the
+settings change, and \emph{Layer on} shows it: the first layer is on by
+default, with cumulus, and the second one off, with altocumulus. The
+lower layer covers the higher one, and the higher one casts its shadows
+on the lower one in the sunlight or the moonlight. Two layers take about
+twice the work of the graphics card.
+
 To match the clouds of a photograph, a \emph{Cloud bank} lets them stand
 only in a sector of the sky: its \emph{Azimuth} and \emph{Width}, and how
 far away it begins (\emph{Distance}) and how far it reaches
@@ -1472,13 +1479,15 @@ only a little softer. Long exposures of moving clouds cost the most.
 
 The clouds do not show in the eye mode, from above their base, or
 without atmosphere. Scripts can set the properties \texttt{flagShow},
-\texttt{cover}, \texttt{size}, \texttt{baseHeight}, \texttt{density},
+\texttt{layer} (1 or 2: the layer that the following properties change),
+\texttt{flagLayerOn}, \texttt{cover}, \texttt{size}, \texttt{baseHeight}, \texttt{density},
 \texttt{flatness}, \texttt{type} (0 custom, 1 cumulus, 2 stratocumulus,
 3 altocumulus), \texttt{flagBank}, \texttt{bankAzimuth},
 \texttt{bankWidth}, \texttt{bankDistance}, \texttt{bankDepth},
 \texttt{flagFollowDate} and \texttt{flagHalfResolution} of the module
 \texttt{CloudMgr} with \texttt{core.setStelProperty()}. The settings are
-kept in the section \texttt{[clouds]} of \texttt{config.ini}.
+kept in the section \texttt{[clouds]} of \texttt{config.ini}, those of the
+second layer with names that begin with \texttt{layer2\_}.
 
 
 %%% Local Variables: 

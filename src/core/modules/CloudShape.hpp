@@ -63,6 +63,7 @@ public:
 		double bankWidth = 90.;     //!< degrees
 		double bankDistance = 60.;  //!< km to the near edge, over the ground
 		double bankDepth = 30.;     //!< km
+		double shift = 0.;          //!< km: where the clouds of this layer lie on the map, so that two layers differ
 		//! How much the flatness lowers the clouds, and stretches them along the map
 		double heightScale() const {return 1. - 0.75*flatness;}
 		double stretch() const {return 1./(1. + 2.*flatness);}

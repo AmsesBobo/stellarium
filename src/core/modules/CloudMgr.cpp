@@ -72,17 +72,27 @@ void CloudMgr::init()
 {
 	QSettings* conf = StelApp::getInstance().getSettings();
 	setFlagShow(conf->value("clouds/flag_show", false).toBool());
-	setCover(conf->value("clouds/cover", 0.2).toDouble());
-	setSize(conf->value("clouds/size", 1.).toDouble());
 	setFlagFollowDate(conf->value("clouds/flag_follow_date", false).toBool());
-	setBaseHeight(conf->value("clouds/base_height", 1.5).toDouble());
-	setDensity(conf->value("clouds/density", 1.0).toDouble());
-	setFlatness(conf->value("clouds/flatness", 0.0).toDouble());
-	setBankAzimuth(conf->value("clouds/bank_azimuth", 270.0).toDouble());
-	setBankWidth(conf->value("clouds/bank_width", 90.0).toDouble());
-	setBankDistance(conf->value("clouds/bank_distance", 60.0).toDouble());
-	setBankDepth(conf->value("clouds/bank_depth", 30.0).toDouble());
-	setFlagBank(conf->value("clouds/flag_bank", false).toBool());
+	// The first layer: cumulus by default; the second one: altocumulus, off
+	layers[1].shift = 2357.;
+	struct Defaults {double cover, size, base, density, flatness; bool on;};
+	const Defaults defaults[LayerCount] = {{0.2, 1., 1.5, 1., 0., true}, {0.4, 0.4, 3.5, 0.6, 0.6, false}};
+	for (edited = LayerCount - 1; edited >= 0; --edited)
+	{
+		const Defaults& d = defaults[edited];
+		setFlagLayerOn(conf->value(settingKey("flag_on"), d.on).toBool());
+		setCover(conf->value(settingKey("cover"), d.cover).toDouble());
+		setSize(conf->value(settingKey("size"), d.size).toDouble());
+		setBaseHeight(conf->value(settingKey("base_height"), d.base).toDouble());
+		setDensity(conf->value(settingKey("density"), d.density).toDouble());
+		setFlatness(conf->value(settingKey("flatness"), d.flatness).toDouble());
+		setBankAzimuth(conf->value(settingKey("bank_azimuth"), 270.0).toDouble());
+		setBankWidth(conf->value(settingKey("bank_width"), 90.0).toDouble());
+		setBankDistance(conf->value(settingKey("bank_distance"), 60.0).toDouble());
+		setBankDepth(conf->value(settingKey("bank_depth"), 30.0).toDouble());
+		setFlagBank(conf->value(settingKey("flag_bank"), false).toBool());
+	}
+	edited = 0;
 	setFlagHalfResolution(conf->value("clouds/flag_half_resolution", true).toBool());
 	addAction("actionShow_Clouds", N_("Display Options"), N_("Clouds"), "flagShow");
 
@@ -120,10 +130,10 @@ void CloudMgr::setFlagShow(bool b)
 void CloudMgr::setCover(double value)
 {
 	value = std::clamp(value, 0., 1.);
-	if (!qFuzzyCompare(value, cover))
+	if (!qFuzzyCompare(value, layers[edited].cover))
 	{
-		cover = value;
-		StelApp::immediateSave("clouds/cover", value);
+		layers[edited].cover = value;
+		StelApp::immediateSave(settingKey("cover"), value);
 		emit coverChanged(value);
 		emit typeChanged(getType());
 	}
@@ -142,10 +152,10 @@ void CloudMgr::setFlagHalfResolution(bool b)
 void CloudMgr::setBaseHeight(double value)
 {
 	value = std::clamp(value, 0.3, 9.0);
-	if (!qFuzzyCompare(value, layer.base))
+	if (!qFuzzyCompare(value, layers[edited].base))
 	{
-		layer.base = value;
-		StelApp::immediateSave("clouds/base_height", value);
+		layers[edited].base = value;
+		StelApp::immediateSave(settingKey("base_height"), value);
 		emit baseHeightChanged(value);
 		emit typeChanged(getType());
 	}
@@ -154,10 +164,10 @@ void CloudMgr::setBaseHeight(double value)
 void CloudMgr::setDensity(double value)
 {
 	value = std::clamp(value, 0.05, 1.0);
-	if (!qFuzzyCompare(value, layer.density))
+	if (!qFuzzyCompare(value, layers[edited].density))
 	{
-		layer.density = value;
-		StelApp::immediateSave("clouds/density", value);
+		layers[edited].density = value;
+		StelApp::immediateSave(settingKey("density"), value);
 		emit densityChanged(value);
 		emit typeChanged(getType());
 	}
@@ -166,10 +176,10 @@ void CloudMgr::setDensity(double value)
 void CloudMgr::setFlatness(double value)
 {
 	value = std::clamp(value, 0.0, 1.0);
-	if (!qFuzzyCompare(value, layer.flatness))
+	if (!qFuzzyCompare(value, layers[edited].flatness))
 	{
-		layer.flatness = value;
-		StelApp::immediateSave("clouds/flatness", value);
+		layers[edited].flatness = value;
+		StelApp::immediateSave(settingKey("flatness"), value);
 		emit flatnessChanged(value);
 		emit typeChanged(getType());
 	}
@@ -178,10 +188,10 @@ void CloudMgr::setFlatness(double value)
 void CloudMgr::setBankAzimuth(double value)
 {
 	value = std::clamp(value, 0.0, 360.0);
-	if (!qFuzzyCompare(value, layer.bankAzimuth))
+	if (!qFuzzyCompare(value, layers[edited].bankAzimuth))
 	{
-		layer.bankAzimuth = value;
-		StelApp::immediateSave("clouds/bank_azimuth", value);
+		layers[edited].bankAzimuth = value;
+		StelApp::immediateSave(settingKey("bank_azimuth"), value);
 		emit bankAzimuthChanged(value);
 	}
 }
@@ -189,10 +199,10 @@ void CloudMgr::setBankAzimuth(double value)
 void CloudMgr::setBankWidth(double value)
 {
 	value = std::clamp(value, 5.0, 360.0);
-	if (!qFuzzyCompare(value, layer.bankWidth))
+	if (!qFuzzyCompare(value, layers[edited].bankWidth))
 	{
-		layer.bankWidth = value;
-		StelApp::immediateSave("clouds/bank_width", value);
+		layers[edited].bankWidth = value;
+		StelApp::immediateSave(settingKey("bank_width"), value);
 		emit bankWidthChanged(value);
 	}
 }
@@ -200,10 +210,10 @@ void CloudMgr::setBankWidth(double value)
 void CloudMgr::setBankDistance(double value)
 {
 	value = std::clamp(value, 0.0, 300.0);
-	if (!qFuzzyCompare(value, layer.bankDistance))
+	if (!qFuzzyCompare(value, layers[edited].bankDistance))
 	{
-		layer.bankDistance = value;
-		StelApp::immediateSave("clouds/bank_distance", value);
+		layers[edited].bankDistance = value;
+		StelApp::immediateSave(settingKey("bank_distance"), value);
 		emit bankDistanceChanged(value);
 	}
 }
@@ -211,20 +221,20 @@ void CloudMgr::setBankDistance(double value)
 void CloudMgr::setBankDepth(double value)
 {
 	value = std::clamp(value, 2.0, 300.0);
-	if (!qFuzzyCompare(value, layer.bankDepth))
+	if (!qFuzzyCompare(value, layers[edited].bankDepth))
 	{
-		layer.bankDepth = value;
-		StelApp::immediateSave("clouds/bank_depth", value);
+		layers[edited].bankDepth = value;
+		StelApp::immediateSave(settingKey("bank_depth"), value);
 		emit bankDepthChanged(value);
 	}
 }
 
 void CloudMgr::setFlagBank(bool b)
 {
-	if (b != layer.bank)
+	if (b != layers[edited].bank)
 	{
-		layer.bank = b;
-		StelApp::immediateSave("clouds/flag_bank", b);
+		layers[edited].bank = b;
+		StelApp::immediateSave(settingKey("flag_bank"), b);
 		emit flagBankChanged(b);
 	}
 }
@@ -249,7 +259,7 @@ int CloudMgr::getType() const
 	for (int i = 0; i < 3; ++i)
 	{
 		const CloudType& t = CloudTypes[i];
-		if (near(layer.base, t.base) && near(size, t.size) && near(layer.density, t.density) && near(layer.flatness, t.flatness))
+		if (near(layers[edited].base, t.base) && near(layers[edited].size, t.size) && near(layers[edited].density, t.density) && near(layers[edited].flatness, t.flatness))
 			return i + 1;
 	}
 	return TypeCustom;
@@ -267,12 +277,54 @@ void CloudMgr::setType(int type)
 	setCover(t.cover);
 }
 
-CloudShape::Layer CloudMgr::currentLayer() const
+CloudShape::Layer CloudMgr::currentLayer(int i) const
 {
-	CloudShape::Layer l = layer;
-	l.cover = currentCover;
-	l.size = size;
+	CloudShape::Layer l = layers[i];
+	l.cover = currentCovers[i];
 	return l;
+}
+
+QString CloudMgr::settingKey(const char* name) const
+{
+	return (edited == 0 ? QStringLiteral("clouds/") : QStringLiteral("clouds/layer2_")) + QLatin1String(name);
+}
+
+void CloudMgr::setLayer(int layer)
+{
+	const int i = std::clamp(layer, 1, LayerCount) - 1;
+	if (i != edited)
+	{
+		edited = i;
+		emit layerChanged(i + 1);
+		emitLayerSettings();
+	}
+}
+
+void CloudMgr::emitLayerSettings()
+{
+	const CloudShape::Layer& l = layers[edited];
+	emit flagLayerOnChanged(layerOn[edited]);
+	emit coverChanged(l.cover);
+	emit sizeChanged(l.size);
+	emit baseHeightChanged(l.base);
+	emit densityChanged(l.density);
+	emit flatnessChanged(l.flatness);
+	emit bankAzimuthChanged(l.bankAzimuth);
+	emit bankWidthChanged(l.bankWidth);
+	emit bankDistanceChanged(l.bankDistance);
+	emit bankDepthChanged(l.bankDepth);
+	emit flagBankChanged(l.bank);
+	emit typeChanged(getType());
+}
+
+void CloudMgr::setFlagLayerOn(bool b)
+{
+	if (b != layerOn[edited])
+	{
+		layerOn[edited] = b;
+		StelApp::immediateSave(settingKey("flag_on"), b);
+		emit flagLayerOnChanged(b);
+	}
 }
 
 void CloudMgr::setFlagFollowDate(bool b)
@@ -290,7 +342,7 @@ void CloudMgr::computeWind(const StelCore* core, double* mapX, double* mapY) con
 	const StelLocation& location = core->getCurrentLocation();
 	const double phi = static_cast<double>(location.getLatitude())*M_PI/180.;
 	const double lambda = static_cast<double>(location.getLongitude())*M_PI/180.;
-	const double radius = 2.*(EarthRadius + layer.base)*std::cos(phi)/(1. + std::fabs(std::sin(phi)));
+	const double radius = 2.*(EarthRadius + layers[0].base)*std::cos(phi)/(1. + std::fabs(std::sin(phi)));
 	const double x = radius*std::cos(lambda), y = radius*std::sin(lambda);
 	const double jd = core->getJD(), step = 60.;
 	const CloudShape::Motion a = CloudShape::motion(jd), b = CloudShape::motion(jd + step/86400.);
@@ -304,7 +356,9 @@ void CloudMgr::update(double)
 		return;
 	const StelCore* core = StelApp::getInstance().getCore();
 	const double longitude = static_cast<double>(core->getCurrentLocation().getLongitude());
-	currentCover = flagFollowDate ? CloudShape::coverOfDate(core->getJD(), longitude) : cover;
+	// (with the date, the second layer follows weather of its own)
+	for (int i = 0; i < LayerCount; ++i)
+		currentCovers[i] = flagFollowDate ? CloudShape::coverOfDate(core->getJD() + 5.3*i, longitude) : layers[i].cover;
 
 	// The wind over the Earth from the wind on the map: turn it back, into the frame of the observer's meridian
 	double mapX = 0., mapY = 0.;
@@ -322,8 +376,11 @@ void CloudMgr::update(double)
 	static const QStringList points = {q_("N"), q_("NE"), q_("E"), q_("SE"), q_("S"), q_("SW"), q_("W"), q_("NW")};
 	const double from = std::atan2(-windEast, -windNorth)*180./M_PI;
 	const int point = static_cast<int>(std::lround((from < 0. ? from + 360. : from)/45.)) % 8;
+	QString covers = QString::number(currentCovers[0], 'f', 2);
+	if (layerOn[1])
+		covers = layerOn[0] ? q_("%1 and %2").arg(covers, QString::number(currentCovers[1], 'f', 2)) : QString::number(currentCovers[1], 'f', 2);
 	const QString info = q_("Cover %1, wind %2 m/s from %3. Made up, not a forecast.")
-	                     .arg(currentCover, 0, 'f', 2).arg(std::hypot(windEast, windNorth)*1000., 0, 'f', 0).arg(points[point]);
+	                     .arg(covers).arg(std::hypot(windEast, windNorth)*1000., 0, 'f', 0).arg(points[point]);
 	if (info != weatherInfo)
 	{
 		weatherInfo = info;
@@ -334,10 +391,10 @@ void CloudMgr::update(double)
 void CloudMgr::setSize(double value)
 {
 	value = std::clamp(value, 0.4, 2.5);
-	if (!qFuzzyCompare(value, size))
+	if (!qFuzzyCompare(value, layers[edited].size))
 	{
-		size = value;
-		StelApp::immediateSave("clouds/size", value);
+		layers[edited].size = value;
+		StelApp::immediateSave(settingKey("size"), value);
 		emit sizeChanged(value);
 		emit typeChanged(getType());
 	}
@@ -432,40 +489,70 @@ uniform highp vec4 cloudBank;       // the bank: its azimuth and half width (rad
                                     // edge below 0 without a bank)
 uniform highp vec4 cloudCover;      // cover offset: constant, per noise; the mean size of a texel of the tile (km); the
                                     // extinction in the clouds (per km)
+uniform highp vec2 cloudShift;      // where the clouds of this layer lie on the map (km)
+uniform highp vec3 cloudRadius;     // (the same as cloudRadii.y, cloudSize and cloudTileScale.x)
+// The same for the layer above, which casts its shadows on this one (otherRadius.x = 0: none)
+uniform highp vec4 otherShape;
+uniform highp vec4 otherBank;
+uniform highp vec4 otherCover;
+uniform highp vec2 otherShift;
+uniform highp vec3 otherRadius;
 
 // The place on the map: a polar stereographic projection, in km, of each hemisphere
 highp vec2 cloudMoment = vec2(0., 0.);    // where the clouds are at this moment of the exposure, against its middle
 
-highp vec2 cloudMap(highp vec3 p)
+highp vec2 cloudMapAt(highp vec3 p, highp float radius, highp vec2 shift)
 {
 	highp vec3 earth = p.x*cloudSouth + p.y*cloudEast + p.z*cloudUp;
-	highp vec2 map = 2.*cloudRadii.y*earth.xy/(length(earth) + abs(earth.z));
-	return vec2(cloudTurn.x*map.x - cloudTurn.y*map.y, cloudTurn.y*map.x + cloudTurn.x*map.y) + cloudTurn.zw + cloudMoment;
+	highp vec2 map = 2.*radius*earth.xy/(length(earth) + abs(earth.z));
+	return vec2(cloudTurn.x*map.x - cloudTurn.y*map.y, cloudTurn.y*map.x + cloudTurn.x*map.y) + cloudTurn.zw + shift + cloudMoment;
 }
 
-// What the cover and the growth add to the shape around a place. It changes slowly: one value serves a whole step of the
-// way. It never fills the clear parts of the map
-highp float cloudOffset(highp vec3 p)
+highp vec2 cloudMap(highp vec3 p)
 {
-	highp vec2 map = cloudMap(p);
+	return cloudMapAt(p, cloudRadii.y, cloudShift);
+}
+
+// What the cover and the growth add to the shape around a place of the map, with the cover offset of a layer and its bank.
+// It changes slowly: one value serves a whole step of the way. It never fills the clear parts of the map
+highp float cloudOffsetAt(highp vec3 p, highp vec2 map, highp vec4 cover, highp vec4 bank)
+{
 	highp float noise = 0.6*textureLod(cloudTile, map*cloudTileScale.y, 2.).z + 0.4*textureLod(cloudTile, map*cloudTileScale.z, 2.).z;
 	highp float grow = textureLod(cloudTile, map*cloudGrowScale + cloudGrow, 2.).z;
-	highp float offset = min(cloudCover.x + cloudCover.y*noise + cloudGrowStrength*(grow - 0.5), 0.45);
+	highp float offset = min(cover.x + cover.y*noise + cloudGrowStrength*(grow - 0.5), 0.45);
 	// A bank: the clouds only stand in a sector of the sky at a distance from the observer (see CloudShape::bankMask())
-	if (cloudBank.w >= 0.)
+	if (bank.w >= 0.)
 	{
 		highp float distance = length(p.xy);
-		highp float soft = 1. + 0.15*(cloudBank.w - cloudBank.z);
-		highp float m = smoothstep(cloudBank.z - soft, cloudBank.z + soft, distance)*(1. - smoothstep(cloudBank.w - soft, cloudBank.w + soft, distance));
-		if (cloudBank.y < 3.14159)
+		highp float soft = 1. + 0.15*(bank.w - bank.z);
+		highp float m = smoothstep(bank.z - soft, bank.z + soft, distance)*(1. - smoothstep(bank.w - soft, bank.w + soft, distance));
+		if (bank.y < 3.14159)
 		{
-			highp float away = abs(mod(atan(p.y, -p.x) - cloudBank.x + 3.14159265, 6.2831853) - 3.14159265);
-			highp float softAngle = 0.035 + 0.1*cloudBank.y;
-			m *= 1. - smoothstep(cloudBank.y - softAngle, cloudBank.y + softAngle, away);
+			highp float away = abs(mod(atan(p.y, -p.x) - bank.x + 3.14159265, 6.2831853) - 3.14159265);
+			highp float softAngle = 0.035 + 0.1*bank.y;
+			m *= 1. - smoothstep(bank.y - softAngle, bank.y + softAngle, away);
 		}
 		offset += 2.5*(m - 1.);
 	}
 	return offset;
+}
+
+highp float cloudOffset(highp vec3 p)
+{
+	return cloudOffsetAt(p, cloudMap(p), cloudCover, cloudBank);
+}
+
+// The light that the layer above lets through to a place, towards the light key: one look at the middle of its clouds
+highp float otherShadow(highp vec3 p, highp vec3 key)
+{
+	if (otherRadius.x <= 0. || key.z < 0.02)
+		return 1.;
+	highp float middle = 0.12*otherRadius.y*otherShape.w;
+	highp float r = length(p);
+	highp vec3 q = p + key*(otherRadius.x + middle - r)/max(dot(p/r, key), 0.02);
+	highp vec2 map = cloudMapAt(q, otherRadius.x, otherShift);
+	highp float s = textureLod(cloudTile, vec2(map.x*otherShape.x, map.y)*otherRadius.z, 1.5).x + cloudOffsetAt(q, map, otherCover, otherBank);
+	return 1. - 0.9*otherShape.z*smoothstep(-0.05, 0.1, s);
 }
 
 // Where a place of the map lies on the tile of the shapes, which flat clouds stretch
@@ -670,6 +757,9 @@ void main(void)
 		}
 		shadow = exp(-4.*cloudShape.z*seen/cloudSize);
 	}
+	// and the shadow of the layer above
+	highp float upper = otherShadow(p, cloudKey);
+	shadow *= upper;
 
 	highp float sunCos = dot(altAz, cloudSun), moonCos = dot(altAz, cloudMoon);
 	highp float high = clamp(hitZ/max(hitTop, 0.05), 0., 1.);
@@ -700,7 +790,7 @@ void main(void)
 
 	// The thin edges scatter the light of the Sun and the Moon forwards (Henyey-Greenstein with g = 0.85)
 	highp vec3 silver = silverSun*(0.2775/pow(1.7225 - 1.7*sunCos, 1.5)) + silverMoon*(0.2775/pow(1.7225 - 1.7*moonCos, 1.5));
-	light += silver*thin;
+	light += silver*thin*upper;
 
 	// The way through the air dims the cloud and adds the light of the air (Rayleigh phase function)
 	highp vec3 way = exp(-airExtinction*hitT);
@@ -733,8 +823,12 @@ bool CloudMgr::isShown(const StelCore* core) const
 	// (the blending needs the scene in floating point, which only the photographic mode has; the observer, over a
 	// spherical Earth, is below the layer)
 	return drawer->getFlagPhotographicModeActive() && drawer->getFlagHasAtmosphere()
-	       && core->getCurrentPlanet()->getEnglishName() == QStringLiteral("Earth")
-	       && core->getCurrentLocation().altitude*0.001 < layer.base;
+	       && core->getCurrentPlanet()->getEnglishName() == QStringLiteral("Earth");
+}
+
+bool CloudMgr::isLayerShown(const StelCore* core, int i) const
+{
+	return isShown(core) && layerOn[i] && core->getCurrentLocation().altitude*0.001 < layers[i].base;
 }
 
 double CloudMgr::getTransmission(const StelCore* core, Vec3d altAz) const
@@ -758,19 +852,26 @@ double CloudMgr::getTransmission(const StelCore* core, Vec3d altAz) const
 	computeWind(core, &windX, &windY);
 	const CloudShape::Motion motion = CloudShape::motion(core->getJD());
 	const int samples = exposure*std::hypot(windX, windY) > 0.01 ? 4 : 1;
-	double sum = 0.;
-	for (int i = 0; i < samples; ++i)
+	double result = 1.;
+	for (int l = 0; l < LayerCount; ++l)
 	{
-		CloudShape::Motion moment = motion;
-		const double when = (i + 0.5)/samples - 0.5;
-		moment.offsetX += windX*exposure*when;
-		moment.offsetY += windY*exposure*when;
-		sum += CloudShape::transmission(tile, currentLayer(), moment, observerRadius, {altAz[0], altAz[1], altAz[2]}, south, east, up);
+		if (!isLayerShown(core, l))
+			continue;
+		double sum = 0.;
+		for (int i = 0; i < samples; ++i)
+		{
+			CloudShape::Motion moment = motion;
+			const double when = (i + 0.5)/samples - 0.5;
+			moment.offsetX += windX*exposure*when;
+			moment.offsetY += windY*exposure*when;
+			sum += CloudShape::transmission(tile, currentLayer(l), moment, observerRadius, {altAz[0], altAz[1], altAz[2]}, south, east, up);
+		}
+		result *= sum/samples;
 	}
-	return sum/samples;
+	return result;
 }
 
-void CloudMgr::setLightUniforms(const StelCore* core, QOpenGLShaderProgram& p) const
+void CloudMgr::setLightUniforms(const StelCore* core, QOpenGLShaderProgram& p, int i) const
 {
 	const StelSkyDrawer* drawer = core->getSkyDrawer();
 	const SolarSystem* ssystem = GETSTELMODULE(SolarSystem);
@@ -791,8 +892,9 @@ void CloudMgr::setLightUniforms(const StelCore* core, QOpenGLShaderProgram& p) c
 	sun.normalize();
 	s.sunSine = sun[2];
 	s.sunAltitude = std::asin(std::clamp(s.sunSine, -1., 1.));
+	const CloudShape::Layer& layer = layers[i];
 	s.base = layer.base;
-	s.top = layer.base + 0.6*size*layer.heightScale();
+	s.top = layer.base + 0.6*layer.size*layer.heightScale();
 	const Vec3d moon = body(ssystem->getMoon(), s.moon, s.moonSine);
 
 	s.artificial = drawer->getLightPollutionLuminance();
@@ -848,13 +950,34 @@ void CloudMgr::setLightUniforms(const StelCore* core, QOpenGLShaderProgram& p) c
 	p.setUniformValue("airExtinction", QVector3D(static_cast<float>(light.extinction[0]), static_cast<float>(light.extinction[1]), static_cast<float>(light.extinction[2])));
 }
 
+void CloudMgr::setUniformsOfLayer(QOpenGLShaderProgram& p, int i, const char* prefix) const
+{
+	// The shape of the layer i, for the uniforms named prefix + Cover, Shape, Bank, Shift and Radius
+	const CloudShape::Layer& layer = layers[i];
+	const QByteArray name(prefix);
+	const float coverStart = static_cast<float>(CloudShape::coverOffset(currentCovers[i], 0.));
+	p.setUniformValue((name + "Cover").constData(), QVector4D(coverStart, static_cast<float>(CloudShape::coverOffset(currentCovers[i], 1.)) - coverStart,
+	                                                          static_cast<float>(layer.size*CloudShape::TileSize/CloudShape::TileTexels),
+	                                                          static_cast<float>(CloudShape::Extinction*layer.density)));
+	p.setUniformValue((name + "Shape").constData(), QVector4D(static_cast<float>(layer.stretch()), static_cast<float>(layer.flatness),
+	                                                          static_cast<float>(layer.density), static_cast<float>(layer.heightScale())));
+	// (a bank of a negative far edge: none)
+	p.setUniformValue((name + "Bank").constData(), QVector4D(static_cast<float>(layer.bankAzimuth*M_PI/180.), static_cast<float>(0.5*layer.bankWidth*M_PI/180.),
+	                                                         static_cast<float>(layer.bankDistance), static_cast<float>(layer.bank ? layer.bankDistance + layer.bankDepth : -1.)));
+	p.setUniformValue((name + "Shift").constData(), QVector2D(static_cast<float>(layer.shift), static_cast<float>(layer.shift)));
+	// the radius of the base (km), the size of the clouds, 1/km of the tile
+	p.setUniformValue((name + "Radius").constData(), QVector3D(static_cast<float>(EarthRadius + layer.base), static_cast<float>(layer.size),
+	                                                           static_cast<float>(1./(layer.size*CloudShape::TileSize))));
+}
+
 void CloudMgr::drawOverSky(StelCore* core)
 {
-	if (!isShown(core))
+	if (!isShown(core) || !(isLayerShown(core, 0) || isLayerShown(core, 1)))
 		return;
-	const StelSkyDrawer* drawer = core->getSkyDrawer();
-	const StelLocation& location = core->getCurrentLocation();
-	const double observerHeight = std::max(0., location.altitude*0.001);
+	// The higher layer first, the lower one over it
+	int order[LayerCount] = {0, 1};
+	if (layers[1].base > layers[0].base)
+		std::swap(order[0], order[1]);
 
 	const StelProjectorP prj = core->getProjection(StelCore::FrameAltAz, StelCore::RefractionAuto);
 	if (!programProjector || !prj->isSameProjection(*programProjector))
@@ -865,12 +988,42 @@ void CloudMgr::drawOverSky(StelCore* core)
 	if (!program)
 		return;
 
+	// out = source + scene x alpha; the alpha of the scene stays as it is. The state of the blending goes back to what it
+	// was: StelPainter remembers it and would not set it again
+	auto& gl = *QOpenGLContext::currentContext()->functions();
+	const GLboolean blendWasOn = gl.glIsEnabled(GL_BLEND);
+	GLint blend[4];
+	gl.glGetIntegerv(GL_BLEND_SRC_RGB, &blend[0]);
+	gl.glGetIntegerv(GL_BLEND_DST_RGB, &blend[1]);
+	gl.glGetIntegerv(GL_BLEND_SRC_ALPHA, &blend[2]);
+	gl.glGetIntegerv(GL_BLEND_DST_ALPHA, &blend[3]);
+	for (int k = 0; k < LayerCount; ++k)
+	{
+		const int i = order[k];
+		if (!isLayerShown(core, i))
+			continue;
+		// the layer above, if it shows, casts its shadows on this one
+		const int above = order[0];
+		drawLayer(core, *prj, i, above != i && isLayerShown(core, above) ? above : -1);
+	}
+	gl.glBlendFuncSeparate(static_cast<GLenum>(blend[0]), static_cast<GLenum>(blend[1]), static_cast<GLenum>(blend[2]), static_cast<GLenum>(blend[3]));
+	if (!blendWasOn)
+		gl.glDisable(GL_BLEND);
+}
+
+void CloudMgr::drawLayer(StelCore* core, const StelProjector& prj, int i, int other)
+{
+	const StelSkyDrawer* drawer = core->getSkyDrawer();
+	const StelLocation& location = core->getCurrentLocation();
+	const double observerHeight = std::max(0., location.altitude*0.001);
+	const CloudShape::Layer& layer = layers[i];
+
 	QOpenGLShaderProgram& p = *program;
 	p.bind();
-	p.setUniformValue("projectionMatrixInverse", prj->getProjectionMatrix().toQMatrix().inverted());
-	prj->setUnProjectUniforms(p);
+	p.setUniformValue("projectionMatrixInverse", prj.getProjectionMatrix().toQMatrix().inverted());
+	prj.setUnProjectUniforms(p);
 	drawer->getExtinction().setForwardTransformUniforms(p);
-	setLightUniforms(core, p);
+	setLightUniforms(core, p, i);
 
 	// The frame of the observer in the Earth-fixed one, over a spherical Earth
 	const double phi = static_cast<double>(location.getLatitude())*M_PI/180.;
@@ -883,24 +1036,21 @@ void CloudMgr::drawOverSky(StelCore* core)
 	p.setUniformValue("cloudEast", vec(east));
 	p.setUniformValue("cloudUp", vec(up));
 	const double r0 = EarthRadius + observerHeight;
-	const double base = EarthRadius + layer.base, top = base + CloudShape::LayerThickness*size*layer.heightScale();
+	const double base = EarthRadius + layer.base, top = base + CloudShape::LayerThickness*layer.size*layer.heightScale();
 	p.setUniformValue("cloudRadii", QVector4D(static_cast<float>(r0), static_cast<float>(base), static_cast<float>((base - r0)*(base + r0)),
 	                                          static_cast<float>((top - r0)*(top + r0))));
-	p.setUniformValue("cloudPixel", static_cast<float>((flagHalfResolution ? 2. : 1.)/static_cast<double>(prj->getPixelPerRadAtCenter())));
+	p.setUniformValue("cloudPixel", static_cast<float>((flagHalfResolution ? 2. : 1.)/static_cast<double>(prj.getPixelPerRadAtCenter())));
 	bindTileTexture(2);
 	p.setUniformValue("cloudTile", 2);
-	p.setUniformValue("cloudTileScale", QVector4D(static_cast<float>(1./(size*CloudShape::TileSize)), static_cast<float>(1./CloudShape::CoverScaleLarge),
-	                                              static_cast<float>(1./CloudShape::CoverScaleSmall), static_cast<float>(1./(size*CloudShape::FineScale))));
-	p.setUniformValue("cloudSize", static_cast<float>(size));
-	// the offset of the cover is linear in the noise: two points give it
-	const float coverStart = static_cast<float>(CloudShape::coverOffset(currentCover, 0.));
-	p.setUniformValue("cloudCover", QVector4D(coverStart, static_cast<float>(CloudShape::coverOffset(currentCover, 1.)) - coverStart,
-	                                          static_cast<float>(size*CloudShape::TileSize/CloudShape::TileTexels), static_cast<float>(CloudShape::Extinction*layer.density)));
-	p.setUniformValue("cloudShape", QVector4D(static_cast<float>(layer.stretch()), static_cast<float>(layer.flatness),
-	                                          static_cast<float>(layer.density), static_cast<float>(layer.heightScale())));
-	// (a bank of a negative far edge: none)
-	p.setUniformValue("cloudBank", QVector4D(static_cast<float>(layer.bankAzimuth*M_PI/180.), static_cast<float>(0.5*layer.bankWidth*M_PI/180.),
-	                                         static_cast<float>(layer.bankDistance), static_cast<float>(layer.bank ? layer.bankDistance + layer.bankDepth : -1.)));
+	p.setUniformValue("cloudTileScale", QVector4D(static_cast<float>(1./(layer.size*CloudShape::TileSize)), static_cast<float>(1./CloudShape::CoverScaleLarge),
+	                                              static_cast<float>(1./CloudShape::CoverScaleSmall), static_cast<float>(1./(layer.size*CloudShape::FineScale))));
+	p.setUniformValue("cloudSize", static_cast<float>(layer.size));
+	setUniformsOfLayer(p, i, "cloud");
+	// The layer above casts its shadows (a radius of 0: none)
+	if (other >= 0)
+		setUniformsOfLayer(p, other, "other");
+	else
+		p.setUniformValue("otherRadius", QVector3D(0.f, 1.f, 1.f));
 
 	const CloudShape::Motion motion = CloudShape::motion(core->getJD());
 	p.setUniformValue("cloudTurn", QVector4D(static_cast<float>(motion.cosine), static_cast<float>(motion.sine),
@@ -916,16 +1066,9 @@ void CloudMgr::drawOverSky(StelCore* core)
 	p.setUniformValue("cloudSmear", QVector2D(static_cast<float>(windX*exposure), static_cast<float>(windY*exposure)));
 	p.setUniformValue("cloudSamples", MaxExposureSamples);
 
-	// out = source + scene x alpha; the alpha of the scene stays as it is. The state of the blending goes back to what it
-	// was: StelPainter remembers it and would not set it again
 	auto& gl = *QOpenGLContext::currentContext()->functions();
-	const GLboolean blendWasOn = gl.glIsEnabled(GL_BLEND);
-	GLint blend[4];
-	gl.glGetIntegerv(GL_BLEND_SRC_RGB, &blend[0]);
-	gl.glGetIntegerv(GL_BLEND_DST_RGB, &blend[1]);
-	gl.glGetIntegerv(GL_BLEND_SRC_ALPHA, &blend[2]);
-	gl.glGetIntegerv(GL_BLEND_DST_ALPHA, &blend[3]);
-	if (flagHalfResolution && drawToLowResBuffer())
+	const bool lowRes = flagHalfResolution && drawToLowResBuffer();
+	if (lowRes)
 	{
 		p.release();
 		compositeProgram->bind();
@@ -936,15 +1079,12 @@ void CloudMgr::drawOverSky(StelCore* core)
 	gl.glEnable(GL_BLEND);
 	gl.glBlendFuncSeparate(GL_ONE, GL_SRC_ALPHA, GL_ZERO, GL_ONE);
 	drawQuad();
-	if (compositeProgram && flagHalfResolution)
+	if (lowRes)
 	{
 		gl.glBindTexture(GL_TEXTURE_2D, 0);
 		compositeProgram->release();
 	}
-	gl.glBlendFuncSeparate(static_cast<GLenum>(blend[0]), static_cast<GLenum>(blend[1]), static_cast<GLenum>(blend[2]), static_cast<GLenum>(blend[3]));
-	if (!blendWasOn)
-		gl.glDisable(GL_BLEND);
-	if (!flagHalfResolution)
+	else
 		p.release();
 }
 

@@ -45,6 +45,10 @@ class QOpenGLFramebufferObject;
 //! LandscapeMgr::draw() calls this between the atmosphere and the landscape, so the clouds do not cover the landscape.
 //! The bloom and the metering of the camera work on the finished scene, so they see what the clouds leave.
 //!
+//! There are two layers. The settings of the clouds belong to the layer that the property layer chooses: a script sets
+//! layer to 2 to change the second one. The higher layer is drawn first, the lower one over it, and the higher one casts
+//! its shadows on the lower one.
+//!
 //! The wind carries the clouds, they grow and dissolve, and the camera averages its exposure over it. All of that, and the
 //! cover if the setting follows the date, comes from the date alone: a moment always looks the same. It is made up, and
 //! has nothing to do with the real weather of that day.
@@ -53,6 +57,10 @@ class CloudMgr : public StelModule
 	Q_OBJECT
 	//! Show the clouds (photographic mode)
 	Q_PROPERTY(bool flagShow READ getFlagShow WRITE setFlagShow NOTIFY flagShowChanged)
+	//! The layer that the settings below change: 1 or 2
+	Q_PROPERTY(int layer READ getLayer WRITE setLayer NOTIFY layerChanged)
+	//! Whether that layer shows (the first one does by default, the second one not)
+	Q_PROPERTY(bool flagLayerOn READ getFlagLayerOn WRITE setFlagLayerOn NOTIFY flagLayerOnChanged)
 	//! How much of the sky the clouds cover, from 0 to 1 (a few broken clouds, not an overcast sky)
 	Q_PROPERTY(double cover READ getCover WRITE setCover NOTIFY coverChanged)
 	//! The size of the clouds against the usual ones (bodies of 0.6 to 2 km), from 0.4 to 2.5
@@ -91,17 +99,19 @@ public:
 	void update(double deltaTime) override;
 
 	bool getFlagShow() const {return flagShow;}
-	double getCover() const {return cover;}
-	double getSize() const {return size;}
+	int getLayer() const {return edited + 1;}
+	bool getFlagLayerOn() const {return layerOn[edited];}
+	double getCover() const {return layers[edited].cover;}
+	double getSize() const {return layers[edited].size;}
 	bool getFlagFollowDate() const {return flagFollowDate;}
-	double getBaseHeight() const {return layer.base;}
-	double getDensity() const {return layer.density;}
-	double getFlatness() const {return layer.flatness;}
-	double getBankAzimuth() const {return layer.bankAzimuth;}
-	double getBankWidth() const {return layer.bankWidth;}
-	double getBankDistance() const {return layer.bankDistance;}
-	double getBankDepth() const {return layer.bankDepth;}
-	bool getFlagBank() const {return layer.bank;}
+	double getBaseHeight() const {return layers[edited].base;}
+	double getDensity() const {return layers[edited].density;}
+	double getFlatness() const {return layers[edited].flatness;}
+	double getBankAzimuth() const {return layers[edited].bankAzimuth;}
+	double getBankWidth() const {return layers[edited].bankWidth;}
+	double getBankDistance() const {return layers[edited].bankDistance;}
+	double getBankDepth() const {return layers[edited].bankDepth;}
+	bool getFlagBank() const {return layers[edited].bank;}
 	int getType() const;
 	static constexpr int TypeCustom = 0, TypeCumulus = 1, TypeStratocumulus = 2, TypeAltocumulus = 3;
 	bool getFlagHalfResolution() const {return flagHalfResolution;}
@@ -117,6 +127,8 @@ public:
 
 public slots:
 	void setFlagShow(bool b);
+	void setLayer(int layer);
+	void setFlagLayerOn(bool b);
 	void setCover(double value);
 	void setSize(double value);
 	void setFlagFollowDate(bool b);
@@ -133,6 +145,8 @@ public slots:
 
 signals:
 	void flagShowChanged(bool b);
+	void layerChanged(int layer);
+	void flagLayerOnChanged(bool b);
 	void coverChanged(double value);
 	void sizeChanged(double value);
 	void flagFollowDateChanged(bool b);
@@ -150,22 +164,31 @@ signals:
 
 private:
 	bool isShown(const StelCore* core) const;
-	void setLightUniforms(const StelCore* core, QOpenGLShaderProgram& p) const;
+	//! Whether the layer i shows: it is on, and the observer stands below it
+	bool isLayerShown(const StelCore* core, int i) const;
+	void setLightUniforms(const StelCore* core, QOpenGLShaderProgram& p, int i) const;
+	//! Draw the layer i, under the layer other (-1 for none), which casts its shadows on it
+	void drawLayer(StelCore* core, const StelProjector& prj, int i, int other);
+	//! The key of config.ini of a setting of the layer that the settings change
+	QString settingKey(const char* name) const;
+	//! Tell the user interface that all the settings of the layer have changed
+	void emitLayerSettings();
 
 	bool flagShow = false;
-	double cover = 0.2;
-	double size = 1.;
 	bool flagFollowDate = false;
-	//! The settings of the layer that are not above (its cover and size are filled in when it is used)
-	CloudShape::Layer layer;
-	//! The layer as it is drawn at this moment
-	CloudShape::Layer currentLayer() const;
+	static constexpr int LayerCount = 2;
+	CloudShape::Layer layers[LayerCount];
+	bool layerOn[LayerCount] = {true, false};
+	int edited = 0;  //!< the layer that the settings change
+	//! The layer i as it is drawn at this moment
+	CloudShape::Layer currentLayer(int i) const;
 	bool flagHalfResolution = true;
 	QString weatherInfo;
-	double currentCover = 0.2;  //!< the cover at this moment
+	double currentCovers[LayerCount] = {0.2, 0.2};  //!< the cover at this moment
 	double windEast = 0., windNorth = 0.;  //!< the wind at the observer at this moment (km/s)
 	//! The wind at the observer (km/s) on the map of the clouds, from where it carries them
 	void computeWind(const StelCore* core, double* mapX, double* mapY) const;
+	void setUniformsOfLayer(QOpenGLShaderProgram& p, int i, const char* prefix) const;
 
 	//! The height map (see CloudShape), computed when it is first needed
 	mutable std::vector<float> tile;

@@ -246,8 +246,8 @@ double CloudShape::transmission(const std::vector<float>& tile, const Layer& lay
 		const double r = std::sqrt(px*px + py*py + pz*pz);
 		const double ex = px*south[0] + py*east[0] + pz*up[0], ey = px*south[1] + py*east[1] + pz*up[1], ez = px*south[2] + py*east[2] + pz*up[2];
 		const double scale = 2.*base/(r + std::fabs(ez));
-		const double mapX = motion.cosine*scale*ex - motion.sine*scale*ey + motion.offsetX;
-		const double mapY = motion.sine*scale*ex + motion.cosine*scale*ey + motion.offsetY;
+		const double mapX = motion.cosine*scale*ex - motion.sine*scale*ey + motion.offsetX + layer.shift;
+		const double mapY = motion.sine*scale*ex + motion.cosine*scale*ey + motion.offsetY + layer.shift;
 		const double noise = 0.6*readTile(tile, mapX/CoverScaleLarge, mapY/CoverScaleLarge, 2) + 0.4*readTile(tile, mapX/CoverScaleSmall, mapY/CoverScaleSmall, 2);
 		const double tileX = mapX*layer.stretch()/(TileSize*size), tileY = mapY/(TileSize*size);
 		const double grow = readTile(tile, mapX/GrowScale + motion.growU, mapY/GrowScale + motion.growV, 2);
