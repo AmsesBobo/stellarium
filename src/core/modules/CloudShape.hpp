@@ -49,6 +49,27 @@ public:
 	static constexpr double FineScale = 5.9;      //!< km: the size of the tile for the fine lobes
 	static constexpr double Extinction = 20.;     //!< per km in the clouds: they are opaque within a few hundred meters
 
+	//! The settings of the layer of clouds
+	struct Layer
+	{
+		double cover = 0.2;
+		double size = 1.;
+		double base = BaseHeight;   //!< km: the height of the base over the ground
+		double density = 1.;        //!< against the usual extinction in the clouds
+		double flatness = 0.;       //!< 0: heaped cumulus, 1: flat, drawn out layers
+		//! A bank of clouds: the clouds only stand within it, in a sector of the sky around the observer
+		bool bank = false;
+		double bankAzimuth = 0.;    //!< degrees, from the north through the east
+		double bankWidth = 90.;     //!< degrees
+		double bankDistance = 60.;  //!< km to the near edge, over the ground
+		double bankDepth = 30.;     //!< km
+		//! How much the flatness lowers the clouds, and stretches them along the map
+		double heightScale() const {return 1. - 0.75*flatness;}
+		double stretch() const {return 1./(1. + 2.*flatness);}
+	};
+	//! What the bank of clouds lets stand at a place (km from the observer: x to the south, y to the east), from 0 to 1
+	static double bankMask(const Layer& layer, double x, double y);
+
 	//! Where the wind has carried the clouds at a moment: the map of the clouds, at the place (x, y) of the Earth, is at
 	//! (cosine x - sine y + offsetX, sine x + cosine y + offsetY). It follows from the date alone, so that a moment always looks
 	//! the same: westerly winds as a slow turn around the pole, with changes over the days from sums of waves, whose
@@ -78,9 +99,9 @@ public:
 	//! @param observerRadius km from the center of the Earth
 	//! @param altAz unit vector, x to the south, y to the east, z up
 	//! @param south, east, up the axes of that frame in the Earth-fixed one
-	//! @param size the scale of the clouds against those of the tile
+	//! @param layer the settings of the layer
 	//! @param motion where the wind has carried the clouds
-	static double transmission(const std::vector<float>& tile, double cover, double size, const Motion& motion, double observerRadius, const std::array<double, 3>& altAz,
+	static double transmission(const std::vector<float>& tile, const Layer& layer, const Motion& motion, double observerRadius, const std::array<double, 3>& altAz,
 	                           const std::array<double, 3>& south, const std::array<double, 3>& east, const std::array<double, 3>& up);
 };
 

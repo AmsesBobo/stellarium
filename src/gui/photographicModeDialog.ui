@@ -1283,7 +1283,214 @@
               </property>
              </widget>
             </item>
-            <item row="1" column="0" colspan="5">
+            <item row="1" column="1">
+             <widget class="QLabel" name="cloudsBaseLabel">
+              <property name="text">
+               <string>Base:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="2">
+             <widget class="QDoubleSpinBox" name="cloudsBaseSpinBox">
+              <property name="toolTip">
+               <string>The height of the base of the clouds over the ground. Cumulus about 0.5 to 2 km, altocumulus 2 to 6 km. Higher clouds stay in the sunlight longer after sunset.</string>
+              </property>
+              <property name="suffix">
+               <string> km</string>
+              </property>
+              <property name="decimals">
+               <number>1</number>
+              </property>
+              <property name="minimum">
+               <double>0.3</double>
+              </property>
+              <property name="maximum">
+               <double>9</double>
+              </property>
+              <property name="singleStep">
+               <double>0.1</double>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="3">
+             <widget class="QLabel" name="cloudsDensityLabel">
+              <property name="text">
+               <string>Density:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="4">
+             <widget class="QDoubleSpinBox" name="cloudsDensitySpinBox">
+              <property name="toolTip">
+               <string>How dense the clouds are: 1 for opaque cumulus, less for thin clouds that the sky and the stars show through.</string>
+              </property>
+              <property name="decimals">
+               <number>2</number>
+              </property>
+              <property name="minimum">
+               <double>0.05</double>
+              </property>
+              <property name="maximum">
+               <double>1</double>
+              </property>
+              <property name="singleStep">
+               <double>0.05</double>
+              </property>
+             </widget>
+            </item>
+            <item row="2" column="1">
+             <widget class="QLabel" name="cloudsFlatnessLabel">
+              <property name="text">
+               <string>Flatness:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="2" column="2">
+             <widget class="QDoubleSpinBox" name="cloudsFlatnessSpinBox">
+              <property name="toolTip">
+               <string>From 0, heaped cumulus, to 1, flat and drawn out layers such as stratocumulus or altocumulus.</string>
+              </property>
+              <property name="decimals">
+               <number>2</number>
+              </property>
+              <property name="minimum">
+               <double>0</double>
+              </property>
+              <property name="maximum">
+               <double>1</double>
+              </property>
+              <property name="singleStep">
+               <double>0.1</double>
+              </property>
+             </widget>
+            </item>
+            <item row="3" column="0">
+             <widget class="QCheckBox" name="cloudsBankCheckBox">
+              <property name="toolTip">
+               <string>Let the clouds stand only in a bank: a sector of the sky at a distance, as for the clouds of a photograph. A far bank is a strip over the horizon. The bank stays with the observer.</string>
+              </property>
+              <property name="text">
+               <string>Cloud bank</string>
+              </property>
+             </widget>
+            </item>
+            <item row="3" column="1">
+             <widget class="QLabel" name="cloudsBankAzimuthLabel">
+              <property name="text">
+               <string>Azimuth:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="3" column="2">
+             <widget class="QDoubleSpinBox" name="cloudsBankAzimuthSpinBox">
+              <property name="toolTip">
+               <string>The direction of the middle of the bank, from the north through the east.</string>
+              </property>
+              <property name="suffix">
+               <string> °</string>
+              </property>
+              <property name="decimals">
+               <number>0</number>
+              </property>
+              <property name="minimum">
+               <double>0</double>
+              </property>
+              <property name="maximum">
+               <double>360</double>
+              </property>
+              <property name="singleStep">
+               <double>5</double>
+              </property>
+             </widget>
+            </item>
+            <item row="3" column="3">
+             <widget class="QLabel" name="cloudsBankWidthLabel">
+              <property name="text">
+               <string>Width:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="3" column="4">
+             <widget class="QDoubleSpinBox" name="cloudsBankWidthSpinBox">
+              <property name="toolTip">
+               <string>How wide the bank is, in degrees of azimuth.</string>
+              </property>
+              <property name="suffix">
+               <string> °</string>
+              </property>
+              <property name="decimals">
+               <number>0</number>
+              </property>
+              <property name="minimum">
+               <double>5</double>
+              </property>
+              <property name="maximum">
+               <double>360</double>
+              </property>
+              <property name="singleStep">
+               <double>5</double>
+              </property>
+             </widget>
+            </item>
+            <item row="4" column="1">
+             <widget class="QLabel" name="cloudsBankDistanceLabel">
+              <property name="text">
+               <string>Distance:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="4" column="2">
+             <widget class="QDoubleSpinBox" name="cloudsBankDistanceSpinBox">
+              <property name="toolTip">
+               <string>The distance of the near edge of the bank, over the ground. The horizon at a base of 1.5 km is about 150 km away.</string>
+              </property>
+              <property name="suffix">
+               <string> km</string>
+              </property>
+              <property name="decimals">
+               <number>0</number>
+              </property>
+              <property name="minimum">
+               <double>0</double>
+              </property>
+              <property name="maximum">
+               <double>300</double>
+              </property>
+              <property name="singleStep">
+               <double>5</double>
+              </property>
+             </widget>
+            </item>
+            <item row="4" column="3">
+             <widget class="QLabel" name="cloudsBankDepthLabel">
+              <property name="text">
+               <string>Depth:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="4" column="4">
+             <widget class="QDoubleSpinBox" name="cloudsBankDepthSpinBox">
+              <property name="toolTip">
+               <string>How deep the bank reaches away from the observer.</string>
+              </property>
+              <property name="suffix">
+               <string> km</string>
+              </property>
+              <property name="decimals">
+               <number>0</number>
+              </property>
+              <property name="minimum">
+               <double>2</double>
+              </property>
+              <property name="maximum">
+               <double>300</double>
+              </property>
+              <property name="singleStep">
+               <double>5</double>
+              </property>
+             </widget>
+            </item>
+            <item row="5" column="0" colspan="5">
              <widget class="QCheckBox" name="cloudsFollowDateCheckBox">
               <property name="toolTip">
                <string>Let the date set the cover. Some days are clear, and the clouds grow in the afternoon. This is made up and no weather forecast, also for dates in the past.</string>
@@ -1293,7 +1500,7 @@
               </property>
              </widget>
             </item>
-            <item row="2" column="0" colspan="5">
+            <item row="6" column="0" colspan="5">
              <widget class="QCheckBox" name="cloudsHalfResolutionCheckBox">
               <property name="toolTip">
                <string>Compute the clouds at half the resolution of the screen and scale them up: much faster, and a little softer.</string>
@@ -1303,7 +1510,7 @@
               </property>
              </widget>
             </item>
-            <item row="3" column="0" colspan="5">
+            <item row="7" column="0" colspan="5">
              <widget class="QLabel" name="cloudsInfoLabel">
               <property name="wordWrap">
                <bool>true</bool>

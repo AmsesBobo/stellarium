@@ -1416,15 +1416,26 @@ of \texttt{config.ini}.
 
 In the photographic mode, the \emph{Sky} tab of the camera settings can
 also show ordinary \indexterm{clouds}: fair weather cumulus with a base
-about 1.5\,km above the ground. They are made up, not a record of real
+about 1.5\,km above the ground by default. They are made up, not a record of real
 clouds, and a date tells nothing about the weather of that day. The
 option \emph{Cover from the date} is no weather forecast either: it only
 lets the amount of clouds change over the days and hours by itself, with
 some days clear and more clouds in the afternoon.
 
 \emph{Cover} sets how much of the sky the clouds cover and \emph{Size}
-how large they are, against bodies of 0.6 to 2\,km. There is no overcast
-sky, and no rain.
+how large they are, against bodies of 0.6 to 2\,km. \emph{Base} sets the
+height of their base, \emph{Density} how much light they let through, and
+\emph{Flatness} turns the heaped cumulus into flat, drawn out layers more
+like stratocumulus or altocumulus. There is no overcast sky, and no rain.
+
+To match the clouds of a photograph, a \emph{Cloud bank} lets them stand
+only in a sector of the sky: its \emph{Azimuth} and \emph{Width}, and how
+far away it begins (\emph{Distance}) and how far it reaches
+(\emph{Depth}), over the ground. Perspective packs a far bank into a thin
+strip over the horizon: with a base of 3\,km, a bank 30 to 60\,km away
+stands about 2 to 5$^\circ$ high, and the horizon lies about 200\,km
+away. The bank stays with the observer while the wind carries the clouds
+through it.
 
 A cumulus cloud is thick enough to stop nearly all light, so these
 clouds take away the stars and the sky behind them, and add their own
@@ -1453,10 +1464,12 @@ The clouds are demanding for the graphics card. By default they are
 computed at half the resolution of the screen, which is much faster and
 only a little softer. Long exposures of moving clouds cost the most.
 
-The clouds do not show in the eye mode, from above about 1.5\,km, or
+The clouds do not show in the eye mode, from above their base, or
 without atmosphere. Scripts can set the properties \texttt{flagShow},
-\texttt{cover}, \texttt{size}, \texttt{flagFollowDate} and
-\texttt{flagHalfResolution} of the module
+\texttt{cover}, \texttt{size}, \texttt{baseHeight}, \texttt{density},
+\texttt{flatness}, \texttt{flagBank}, \texttt{bankAzimuth},
+\texttt{bankWidth}, \texttt{bankDistance}, \texttt{bankDepth},
+\texttt{flagFollowDate} and \texttt{flagHalfResolution} of the module
 \texttt{CloudMgr} with \texttt{core.setStelProperty()}. The settings are
 kept in the section \texttt{[clouds]} of \texttt{config.ini}.
 

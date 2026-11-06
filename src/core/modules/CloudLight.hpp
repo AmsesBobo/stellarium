@@ -66,7 +66,8 @@ public:
 	{
 		double sunAltitude = 0.;      //!< radians
 		double sunSine = 0.;          //!< the sine of the altitude of the Sun
-		double top = 2.3;             //!< km: the height of the tops of the clouds over the ground
+		double base = 1.5;            //!< km: the height of the base of the clouds over the ground
+		double top = 2.3;             //!< km: the height of their tops
 		Rgb moon = {0., 0., 0.};      //!< lux on a surface facing the Moon, with the extinction
 		double moonSine = 0.;
 		Rgb groundExtra = {0., 0., 0.}; //!< lux on the ground from other sources (the light domes, the aurorae)

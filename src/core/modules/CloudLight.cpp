@@ -25,7 +25,6 @@
 namespace
 {
 constexpr double SolarIlluminance = 133000.;  // lux, above the atmosphere
-constexpr double BaseHeightForLight = 1.5;    // km
 constexpr double GroundAlbedo = 0.2;
 constexpr double SideReflectance = 0.85;
 constexpr double DegreesToRadians = M_PI/180.;
@@ -124,7 +123,7 @@ CloudLight::Light CloudLight::compute(const Sources& s)
 	for (std::size_t k = 0; k < light.sideSun.size(); ++k)
 	{
 		const double offset = SunOffsetStart + SunOffsetStep*static_cast<double>(k);
-		const Rgb t = sunlightTransmission(s.sunAltitude + offset*DegreesToRadians, BaseHeightForLight, s.extinction);
+		const Rgb t = sunlightTransmission(s.sunAltitude + offset*DegreesToRadians, s.base, s.extinction);
 		for (std::size_t i = 0; i < 3; ++i)
 			light.sideSun[k][i] = SideReflectance*SolarIlluminance*t[i]/M_PI;
 	}

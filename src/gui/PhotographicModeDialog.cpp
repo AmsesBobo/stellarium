@@ -347,6 +347,14 @@ void PhotographicModeDialog::createDialogContent()
 	connectDoubleProperty(ui->cloudsCoverSpinBox,     "CloudMgr.cover");
 	connectDoubleProperty(ui->cloudsSizeSpinBox,      "CloudMgr.size");
 	connectBoolProperty(ui->cloudsFollowDateCheckBox, "CloudMgr.flagFollowDate");
+	connectDoubleProperty(ui->cloudsBaseSpinBox,      "CloudMgr.baseHeight");
+	connectDoubleProperty(ui->cloudsDensitySpinBox,   "CloudMgr.density");
+	connectDoubleProperty(ui->cloudsFlatnessSpinBox,  "CloudMgr.flatness");
+	connectBoolProperty(ui->cloudsBankCheckBox,       "CloudMgr.flagBank");
+	connectDoubleProperty(ui->cloudsBankAzimuthSpinBox,  "CloudMgr.bankAzimuth");
+	connectDoubleProperty(ui->cloudsBankWidthSpinBox,    "CloudMgr.bankWidth");
+	connectDoubleProperty(ui->cloudsBankDistanceSpinBox, "CloudMgr.bankDistance");
+	connectDoubleProperty(ui->cloudsBankDepthSpinBox,    "CloudMgr.bankDepth");
 	connectBoolProperty(ui->cloudsHalfResolutionCheckBox, "CloudMgr.flagHalfResolution");
 	{
 		CloudMgr* clouds = GETSTELMODULE(CloudMgr);
@@ -355,6 +363,14 @@ void PhotographicModeDialog::createDialogContent()
 		// The date sets the cover
 		ui->cloudsCoverSpinBox->setDisabled(clouds->getFlagFollowDate());
 		connect(clouds, &CloudMgr::flagFollowDateChanged, ui->cloudsCoverSpinBox, &QWidget::setDisabled);
+		// The bank has its settings only when it is on
+		const auto bank = [this](bool on) {
+			for (QWidget* w : {static_cast<QWidget*>(ui->cloudsBankAzimuthSpinBox), static_cast<QWidget*>(ui->cloudsBankWidthSpinBox),
+			                   static_cast<QWidget*>(ui->cloudsBankDistanceSpinBox), static_cast<QWidget*>(ui->cloudsBankDepthSpinBox)})
+				w->setEnabled(on);
+		};
+		bank(clouds->getFlagBank());
+		connect(clouds, &CloudMgr::flagBankChanged, this, bank);
 	}
 	connectBoolProperty(ui->cometTailsCheckBox,       "CometTailMgr.flagShow");
 	connectBoolProperty(ui->cometTailGuidesCheckBox,  "CometTailMgr.flagShowGuides");

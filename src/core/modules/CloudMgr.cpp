@@ -75,6 +75,14 @@ void CloudMgr::init()
 	setCover(conf->value("clouds/cover", 0.2).toDouble());
 	setSize(conf->value("clouds/size", 1.).toDouble());
 	setFlagFollowDate(conf->value("clouds/flag_follow_date", false).toBool());
+	setBaseHeight(conf->value("clouds/base_height", 1.5).toDouble());
+	setDensity(conf->value("clouds/density", 1.0).toDouble());
+	setFlatness(conf->value("clouds/flatness", 0.0).toDouble());
+	setBankAzimuth(conf->value("clouds/bank_azimuth", 270.0).toDouble());
+	setBankWidth(conf->value("clouds/bank_width", 90.0).toDouble());
+	setBankDistance(conf->value("clouds/bank_distance", 60.0).toDouble());
+	setBankDepth(conf->value("clouds/bank_depth", 30.0).toDouble());
+	setFlagBank(conf->value("clouds/flag_bank", false).toBool());
 	setFlagHalfResolution(conf->value("clouds/flag_half_resolution", true).toBool());
 	addAction("actionShow_Clouds", N_("Display Options"), N_("Clouds"), "flagShow");
 
@@ -130,6 +138,101 @@ void CloudMgr::setFlagHalfResolution(bool b)
 	}
 }
 
+void CloudMgr::setBaseHeight(double value)
+{
+	value = std::clamp(value, 0.3, 9.0);
+	if (!qFuzzyCompare(value, layer.base))
+	{
+		layer.base = value;
+		StelApp::immediateSave("clouds/base_height", value);
+		emit baseHeightChanged(value);
+	}
+}
+
+void CloudMgr::setDensity(double value)
+{
+	value = std::clamp(value, 0.05, 1.0);
+	if (!qFuzzyCompare(value, layer.density))
+	{
+		layer.density = value;
+		StelApp::immediateSave("clouds/density", value);
+		emit densityChanged(value);
+	}
+}
+
+void CloudMgr::setFlatness(double value)
+{
+	value = std::clamp(value, 0.0, 1.0);
+	if (!qFuzzyCompare(value, layer.flatness))
+	{
+		layer.flatness = value;
+		StelApp::immediateSave("clouds/flatness", value);
+		emit flatnessChanged(value);
+	}
+}
+
+void CloudMgr::setBankAzimuth(double value)
+{
+	value = std::clamp(value, 0.0, 360.0);
+	if (!qFuzzyCompare(value, layer.bankAzimuth))
+	{
+		layer.bankAzimuth = value;
+		StelApp::immediateSave("clouds/bank_azimuth", value);
+		emit bankAzimuthChanged(value);
+	}
+}
+
+void CloudMgr::setBankWidth(double value)
+{
+	value = std::clamp(value, 5.0, 360.0);
+	if (!qFuzzyCompare(value, layer.bankWidth))
+	{
+		layer.bankWidth = value;
+		StelApp::immediateSave("clouds/bank_width", value);
+		emit bankWidthChanged(value);
+	}
+}
+
+void CloudMgr::setBankDistance(double value)
+{
+	value = std::clamp(value, 0.0, 300.0);
+	if (!qFuzzyCompare(value, layer.bankDistance))
+	{
+		layer.bankDistance = value;
+		StelApp::immediateSave("clouds/bank_distance", value);
+		emit bankDistanceChanged(value);
+	}
+}
+
+void CloudMgr::setBankDepth(double value)
+{
+	value = std::clamp(value, 2.0, 300.0);
+	if (!qFuzzyCompare(value, layer.bankDepth))
+	{
+		layer.bankDepth = value;
+		StelApp::immediateSave("clouds/bank_depth", value);
+		emit bankDepthChanged(value);
+	}
+}
+
+void CloudMgr::setFlagBank(bool b)
+{
+	if (b != layer.bank)
+	{
+		layer.bank = b;
+		StelApp::immediateSave("clouds/flag_bank", b);
+		emit flagBankChanged(b);
+	}
+}
+
+CloudShape::Layer CloudMgr::currentLayer() const
+{
+	CloudShape::Layer l = layer;
+	l.cover = currentCover;
+	l.size = size;
+	return l;
+}
+
 void CloudMgr::setFlagFollowDate(bool b)
 {
 	if (b != flagFollowDate)
@@ -145,7 +248,7 @@ void CloudMgr::computeWind(const StelCore* core, double* mapX, double* mapY) con
 	const StelLocation& location = core->getCurrentLocation();
 	const double phi = static_cast<double>(location.getLatitude())*M_PI/180.;
 	const double lambda = static_cast<double>(location.getLongitude())*M_PI/180.;
-	const double radius = 2.*(EarthRadius + CloudShape::BaseHeight)*std::cos(phi)/(1. + std::fabs(std::sin(phi)));
+	const double radius = 2.*(EarthRadius + layer.base)*std::cos(phi)/(1. + std::fabs(std::sin(phi)));
 	const double x = radius*std::cos(lambda), y = radius*std::sin(lambda);
 	const double jd = core->getJD(), step = 60.;
 	const CloudShape::Motion a = CloudShape::motion(jd), b = CloudShape::motion(jd + step/86400.);
@@ -281,6 +384,9 @@ uniform highp float cloudGrowScale; // 1/km
 uniform highp float cloudGrowStrength;
 uniform highp vec2 cloudSmear;      // what the wind moves the map during the exposure (km)
 uniform int cloudSamples;           // moments of the exposure to average
+uniform highp vec4 cloudShape;      // the stretch of the map, the flatness, the density, the scale of the heights
+uniform highp vec4 cloudBank;       // the bank: its azimuth and half width (radians), its near and far edge (km; the far
+                                    // edge below 0 without a bank)
 uniform highp vec4 cloudCover;      // cover offset: constant, per noise; the mean size of a texel of the tile (km); the
                                     // extinction in the clouds (per km)
 
@@ -296,30 +402,55 @@ highp vec2 cloudMap(highp vec3 p)
 
 // What the cover and the growth add to the shape around a place. It changes slowly: one value serves a whole step of the
 // way. It never fills the clear parts of the map
-highp float cloudOffset(highp vec2 map)
+highp float cloudOffset(highp vec3 p)
 {
+	highp vec2 map = cloudMap(p);
 	highp float noise = 0.6*textureLod(cloudTile, map*cloudTileScale.y, 2.).z + 0.4*textureLod(cloudTile, map*cloudTileScale.z, 2.).z;
 	highp float grow = textureLod(cloudTile, map*cloudGrowScale + cloudGrow, 2.).z;
-	return min(cloudCover.x + cloudCover.y*noise + cloudGrowStrength*(grow - 0.5), 0.34);
+	highp float offset = min(cloudCover.x + cloudCover.y*noise + cloudGrowStrength*(grow - 0.5), 0.34);
+	// A bank: the clouds only stand in a sector of the sky at a distance from the observer (see CloudShape::bankMask())
+	if (cloudBank.w >= 0.)
+	{
+		highp float distance = length(p.xy);
+		highp float soft = 1. + 0.15*(cloudBank.w - cloudBank.z);
+		highp float m = smoothstep(cloudBank.z - soft, cloudBank.z + soft, distance)*(1. - smoothstep(cloudBank.w - soft, cloudBank.w + soft, distance));
+		if (cloudBank.y < 3.14159)
+		{
+			highp float away = abs(mod(atan(p.y, -p.x) - cloudBank.x + 3.14159265, 6.2831853) - 3.14159265);
+			highp float softAngle = 0.035 + 0.1*cloudBank.y;
+			m *= 1. - smoothstep(cloudBank.y - softAngle, cloudBank.y + softAngle, away);
+		}
+		offset += 2.5*(m - 1.);
+	}
+	return offset;
+}
+
+// Where a place of the map lies on the tile of the shapes, which flat clouds stretch
+highp vec2 cloudTileAt(highp vec2 map)
+{
+	return vec2(map.x*cloudShape.x, map.y)*cloudTileScale.x;
 }
 
 // The heights over the base of the top and the underside of the cloud at a place (km, the top below 0 outside the clouds),
 // from the shape at the level of detail lod with the offset of the place. near: how much the fine lobes count at the height z
 highp vec2 cloudHeights(highp vec2 map, highp float offset, highp float lod, highp float near, highp float z)
 {
-	highp vec4 f = textureLod(cloudTile, map*cloudTileScale.x, lod);
+	highp vec4 f = textureLod(cloudTile, cloudTileAt(map), lod);
 	highp float s = f.x + offset;
 	// Fine lobes, stronger at the edge of a cloud, which they tear up. They change with the height, or the sides of the
 	// clouds would show grooves that run straight up
 	if (near > 0.)
 	{
 		highp vec2 fine = (map + cloudBoil + z*vec2(1.2, -0.9))*cloudTileScale.w;
-		s += near*(0.12 + 0.2*(1. - clamp(s/0.3, 0., 1.)))*(textureLod(cloudTile, fine, 0.).w - 0.62)
-		   + near*0.1*(textureLod(cloudTile, fine*2.7, 0.).w - 0.62);
+		// (they shape the clouds, but make none in the clear sky)
+		highp float lobes = near*smoothstep(-0.15, 0.02, s);
+		s += lobes*(0.12 + 0.2*(1. - clamp(s/0.3, 0., 1.)))*(textureLod(cloudTile, fine, 0.).w - 0.62)
+		   + lobes*0.1*(textureLod(cloudTile, fine*2.7, 0.).w - 0.62);
 	}
-	// a rounded top, and an underside that is flat but for its rim
-	highp float height = cloudSize*f.y;
-	highp float top = height*s/pow(abs(s) + 0.01, 0.3);
+	// a rounded top, or a flat one, and an underside that is flat but for its rim
+	highp float height = cloudSize*cloudShape.w*f.y;
+	highp float round = s/pow(abs(s) + 0.01, 0.3);
+	highp float top = height*mix(round, 0.8*clamp(4.*s, -1., 1.), cloudShape.y);
 	return vec2(top, 0.3*height*pow(1. - clamp(s/0.35, 0., 1.), 2.));
 }
 
@@ -386,13 +517,13 @@ void main(void)
 			highp vec3 middle = vec3(altAz.xy*(t + 0.5*ds), r0 + altAz.z*(t + 0.5*ds));
 			highp vec2 middleMap = cloudMap(middle);
 			// A blurred look at the map tells whether a cloud may lie in this step, and how high it may reach
-			highp vec4 blurred = textureLod(cloudTile, middleMap*cloudTileScale.x, look);
+			highp vec4 blurred = textureLod(cloudTile, cloudTileAt(middleMap), look);
 			// (the offset of the end of this step, against the one at its start: the clouds must not jump between steps)
-			highp float offsetEnd = cloudOffset(cloudMap(vec3(altAz.xy*(t + ds), r0 + altAz.z*(t + ds))));
-			highp float offsetStart = k == 0 ? cloudOffset(cloudMap(vec3(altAz.xy*t, r0 + altAz.z*t))) : lastOffset;
+			highp float offsetEnd = cloudOffset(vec3(altAz.xy*(t + ds), r0 + altAz.z*(t + ds)));
+			highp float offsetStart = k == 0 ? cloudOffset(vec3(altAz.xy*t, r0 + altAz.z*t)) : lastOffset;
 			lastOffset = offsetEnd;
 			highp float shape = blurred.x + 0.5*(offsetStart + offsetEnd);
-			if (t > 30. || shape > -0.3 && length(middle) - cloudRadii.y - 0.5*ds*altAz.z < cloudSize*blurred.y*pow(max(shape + 0.5, 0.), 0.7) + 0.05 + smear)
+			if (t > 30. || shape > -0.3 && length(middle) - cloudRadii.y - 0.5*ds*altAz.z < cloudSize*cloudShape.w*blurred.y*pow(max(shape + 0.5, 0.), 0.7) + 0.05 + smear)
 			{
 				// (far away a step passes over whole clouds: they blur together rather than glitter)
 				highp float foot = max(max(t*cloudPixel, ds*mix(0.1, 0.6, smoothstep(20., 60., t))), smear);
@@ -491,7 +622,7 @@ void main(void)
 			seen += 0.5*reach*smoothstep(0., 0.1*reach + 0.03, min(h.x - height, height - h.y));
 			reach *= 1.9;
 		}
-		shadow = exp(-4.*seen/cloudSize);
+		shadow = exp(-4.*cloudShape.z*seen/cloudSize);
 	}
 
 	highp float sunCos = dot(altAz, cloudSun), moonCos = dot(altAz, cloudMoon);
@@ -508,7 +639,7 @@ void main(void)
 
 	// From below the line of sight meets the underside. It reflects the ground and lets through what falls on its top, less
 	// where the cloud is thick; towards the Sun that light goes on forwards
-	highp float through = 1./(1. + 6.75*max(hitTop - hitZ, 0.)/cloudSize);
+	highp float through = 1./(1. + 6.75*cloudShape.z*max(hitTop - hitZ, 0.)/cloudSize);
 	highp float forwards = 1. + 3.*exp(-(1. - sunCos)/0.06);
 	highp vec3 base = mix(cloudBelow, cloudAbove, through) + through*cloudAboveSun*forwards*shadow + cloudCity;
 	// A low Sun lights the bumps of the underside from the side, and the light spreads in the cloud
@@ -557,7 +688,7 @@ bool CloudMgr::isShown(const StelCore* core) const
 	// spherical Earth, is below the layer)
 	return drawer->getFlagPhotographicModeActive() && drawer->getFlagHasAtmosphere()
 	       && core->getCurrentPlanet()->getEnglishName() == QStringLiteral("Earth")
-	       && core->getCurrentLocation().altitude*0.001 < CloudShape::BaseHeight;
+	       && core->getCurrentLocation().altitude*0.001 < layer.base;
 }
 
 double CloudMgr::getTransmission(const StelCore* core, Vec3d altAz) const
@@ -588,7 +719,7 @@ double CloudMgr::getTransmission(const StelCore* core, Vec3d altAz) const
 		const double when = (i + 0.5)/samples - 0.5;
 		moment.offsetX += windX*exposure*when;
 		moment.offsetY += windY*exposure*when;
-		sum += CloudShape::transmission(tile, currentCover, size, moment, observerRadius, {altAz[0], altAz[1], altAz[2]}, south, east, up);
+		sum += CloudShape::transmission(tile, currentLayer(), moment, observerRadius, {altAz[0], altAz[1], altAz[2]}, south, east, up);
 	}
 	return sum/samples;
 }
@@ -614,7 +745,8 @@ void CloudMgr::setLightUniforms(const StelCore* core, QOpenGLShaderProgram& p) c
 	sun.normalize();
 	s.sunSine = sun[2];
 	s.sunAltitude = std::asin(std::clamp(s.sunSine, -1., 1.));
-	s.top = CloudShape::BaseHeight + 0.6*size;
+	s.base = layer.base;
+	s.top = layer.base + 0.6*size*layer.heightScale();
 	const Vec3d moon = body(ssystem->getMoon(), s.moon, s.moonSine);
 
 	s.artificial = drawer->getLightPollutionLuminance();
@@ -705,7 +837,7 @@ void CloudMgr::drawOverSky(StelCore* core)
 	p.setUniformValue("cloudEast", vec(east));
 	p.setUniformValue("cloudUp", vec(up));
 	const double r0 = EarthRadius + observerHeight;
-	const double base = EarthRadius + CloudShape::BaseHeight, top = base + CloudShape::LayerThickness*size;
+	const double base = EarthRadius + layer.base, top = base + CloudShape::LayerThickness*size*layer.heightScale();
 	p.setUniformValue("cloudRadii", QVector4D(static_cast<float>(r0), static_cast<float>(base), static_cast<float>((base - r0)*(base + r0)),
 	                                          static_cast<float>((top - r0)*(top + r0))));
 	p.setUniformValue("cloudPixel", static_cast<float>((flagHalfResolution ? 2. : 1.)/static_cast<double>(prj->getPixelPerRadAtCenter())));
@@ -717,7 +849,12 @@ void CloudMgr::drawOverSky(StelCore* core)
 	// the offset of the cover is linear in the noise: two points give it
 	const float coverStart = static_cast<float>(CloudShape::coverOffset(currentCover, 0.));
 	p.setUniformValue("cloudCover", QVector4D(coverStart, static_cast<float>(CloudShape::coverOffset(currentCover, 1.)) - coverStart,
-	                                          static_cast<float>(size*CloudShape::TileSize/CloudShape::TileTexels), static_cast<float>(CloudShape::Extinction)));
+	                                          static_cast<float>(size*CloudShape::TileSize/CloudShape::TileTexels), static_cast<float>(CloudShape::Extinction*layer.density)));
+	p.setUniformValue("cloudShape", QVector4D(static_cast<float>(layer.stretch()), static_cast<float>(layer.flatness),
+	                                          static_cast<float>(layer.density), static_cast<float>(layer.heightScale())));
+	// (a bank of a negative far edge: none)
+	p.setUniformValue("cloudBank", QVector4D(static_cast<float>(layer.bankAzimuth*M_PI/180.), static_cast<float>(0.5*layer.bankWidth*M_PI/180.),
+	                                         static_cast<float>(layer.bankDistance), static_cast<float>(layer.bank ? layer.bankDistance + layer.bankDepth : -1.)));
 
 	const CloudShape::Motion motion = CloudShape::motion(core->getJD());
 	p.setUniformValue("cloudTurn", QVector4D(static_cast<float>(motion.cosine), static_cast<float>(motion.sine),

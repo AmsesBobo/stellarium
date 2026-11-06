@@ -22,6 +22,7 @@
 
 #include "StelModule.hpp"
 #include "StelProjectorType.hpp"
+#include "CloudShape.hpp"
 
 #include <memory>
 #include <vector>
@@ -56,6 +57,22 @@ class CloudMgr : public StelModule
 	Q_PROPERTY(double cover READ getCover WRITE setCover NOTIFY coverChanged)
 	//! The size of the clouds against the usual ones (bodies of 0.6 to 2 km), from 0.4 to 2.5
 	Q_PROPERTY(double size READ getSize WRITE setSize NOTIFY sizeChanged)
+	//! The height of the base of the clouds over the ground (km), from 0.3 to 9
+	Q_PROPERTY(double baseHeight READ getBaseHeight WRITE setBaseHeight NOTIFY baseHeightChanged)
+	//! How dense the clouds are, from 0.05 (thin, the sky shows through) to 1 (opaque cumulus)
+	Q_PROPERTY(double density READ getDensity WRITE setDensity NOTIFY densityChanged)
+	//! From 0, heaped cumulus, to 1, flat and drawn out layers such as stratocumulus
+	Q_PROPERTY(double flatness READ getFlatness WRITE setFlatness NOTIFY flatnessChanged)
+	//! The direction of the middle of the bank (degrees from the north through the east)
+	Q_PROPERTY(double bankAzimuth READ getBankAzimuth WRITE setBankAzimuth NOTIFY bankAzimuthChanged)
+	//! The width of the bank (degrees of azimuth)
+	Q_PROPERTY(double bankWidth READ getBankWidth WRITE setBankWidth NOTIFY bankWidthChanged)
+	//! The distance of the near edge of the bank over the ground (km)
+	Q_PROPERTY(double bankDistance READ getBankDistance WRITE setBankDistance NOTIFY bankDistanceChanged)
+	//! The depth of the bank away from the observer (km)
+	Q_PROPERTY(double bankDepth READ getBankDepth WRITE setBankDepth NOTIFY bankDepthChanged)
+	//! Let the clouds only stand in a bank: a sector of the sky at a distance, for the clouds of a photograph
+	Q_PROPERTY(bool flagBank READ getFlagBank WRITE setFlagBank NOTIFY flagBankChanged)
 	//! Let the date set the cover, in place of the setting cover. This is no weather forecast.
 	Q_PROPERTY(bool flagFollowDate READ getFlagFollowDate WRITE setFlagFollowDate NOTIFY flagFollowDateChanged)
 	//! Compute the clouds at half the resolution of the screen and scale them up: four times faster, a little softer
@@ -74,6 +91,14 @@ public:
 	double getCover() const {return cover;}
 	double getSize() const {return size;}
 	bool getFlagFollowDate() const {return flagFollowDate;}
+	double getBaseHeight() const {return layer.base;}
+	double getDensity() const {return layer.density;}
+	double getFlatness() const {return layer.flatness;}
+	double getBankAzimuth() const {return layer.bankAzimuth;}
+	double getBankWidth() const {return layer.bankWidth;}
+	double getBankDistance() const {return layer.bankDistance;}
+	double getBankDepth() const {return layer.bankDepth;}
+	bool getFlagBank() const {return layer.bank;}
 	bool getFlagHalfResolution() const {return flagHalfResolution;}
 	QString getWeatherInfo() const {return weatherInfo;}
 
@@ -89,6 +114,14 @@ public slots:
 	void setCover(double value);
 	void setSize(double value);
 	void setFlagFollowDate(bool b);
+	void setBaseHeight(double value);
+	void setDensity(double value);
+	void setFlatness(double value);
+	void setBankAzimuth(double value);
+	void setBankWidth(double value);
+	void setBankDistance(double value);
+	void setBankDepth(double value);
+	void setFlagBank(bool b);
 	void setFlagHalfResolution(bool b);
 
 signals:
@@ -96,6 +129,14 @@ signals:
 	void coverChanged(double value);
 	void sizeChanged(double value);
 	void flagFollowDateChanged(bool b);
+	void baseHeightChanged(double value);
+	void densityChanged(double value);
+	void flatnessChanged(double value);
+	void bankAzimuthChanged(double value);
+	void bankWidthChanged(double value);
+	void bankDistanceChanged(double value);
+	void bankDepthChanged(double value);
+	void flagBankChanged(bool b);
 	void flagHalfResolutionChanged(bool b);
 	void weatherInfoChanged(const QString& info);
 
@@ -107,6 +148,10 @@ private:
 	double cover = 0.2;
 	double size = 1.;
 	bool flagFollowDate = false;
+	//! The settings of the layer that are not above (its cover and size are filled in when it is used)
+	CloudShape::Layer layer;
+	//! The layer as it is drawn at this moment
+	CloudShape::Layer currentLayer() const;
 	bool flagHalfResolution = true;
 	QString weatherInfo;
 	double currentCover = 0.2;  //!< the cover at this moment
