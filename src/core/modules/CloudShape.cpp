@@ -126,6 +126,43 @@ double readTile(const std::vector<float>& tile, double u, double v, std::size_t 
 }
 }
 
+CloudShape::Motion CloudShape::motion(double jd)
+{
+	// One day in seconds and waves with periods in days that have no common multiple. A wave of a speed v (km/s) and an
+	// angular frequency w (per s) moves things by v/w. The turn gives some 8 m/s at 60 degrees latitude, here about 3700 km
+	// from the pole on the map, and the waves some 6 m/s more each way, so that the wind changes in strength and direction.
+	const double days = jd - 2451545.;
+	const auto wave = [days](double period, double phase) {return std::sin(2.*M_PI*days/period + phase);};
+	const auto reach = [](double speed, double period) {return speed*period*86400./(2.*M_PI);};  // km
+	const double turnRate = 0.008/3700.;  // per s
+	// (the map turns against the wind, which then blows from the west)
+	const double angle = -std::fmod(turnRate*86400.*days, 2.*M_PI)
+	                     + (reach(0.0045, 3.1)*wave(3.1, 0.7) + reach(0.003, 7.7)*wave(7.7, 2.1))/3700.;
+	Motion m;
+	m.cosine = std::cos(angle);
+	m.sine = std::sin(angle);
+	m.offsetX = reach(0.004, 4.3)*wave(4.3, 1.3) + reach(0.0025, 2.3)*wave(2.3, 4.1);
+	m.offsetY = reach(0.004, 3.7)*wave(3.7, 5.2) + reach(0.0025, 9.1)*wave(9.1, 0.4);
+	// the noise of growth drifts at 2.5 m/s through the clouds: they grow and dissolve in about 10 to 20 minutes
+	const double drift = std::fmod(0.0025*86400.*days/GrowScale, 1.);
+	m.growU = drift;
+	m.growV = 0.6*drift;
+	// the fine lobes at 1 m/s
+	m.boilX = std::fmod(0.001*86400.*days, 2.*FineScale);
+	m.boilY = -0.7*m.boilX;
+	return m;
+}
+
+double CloudShape::coverOfDate(double jd, double longitude)
+{
+	const double days = jd - 2451545.;
+	const auto wave = [days](double period, double phase) {return std::sin(2.*M_PI*days/period + phase);};
+	const double weather = 0.5 + 0.28*wave(3.37, 1.1) + 0.16*wave(7.9, 2.3) + 0.1*wave(1.71, 3.4);
+	const double hour = jd + 0.5 + longitude/360.;
+	const double afternoon = 0.7 + 0.3*std::cos(2.*M_PI*(hour - std::floor(hour) - 0.625));
+	return std::clamp(1.1*(weather - 0.25)*afternoon, 0., 0.75);
+}
+
 std::vector<float> CloudShape::computeTile()
 {
 	const int n = TileTexels;
@@ -154,10 +191,11 @@ std::vector<float> CloudShape::computeTile()
 
 double CloudShape::coverOffset(double cover, double noise)
 {
-	return 1.1*(cover - 0.45) + 2.*(noise - 0.5);
+	const double fading = std::max(0.1 - cover, 0.);
+	return 1.1*(cover - 0.45) + 2.*(noise - 0.5) - 150.*fading*fading;
 }
 
-double CloudShape::transmission(const std::vector<float>& tile, double cover, double size, double observerRadius, const std::array<double, 3>& altAz,
+double CloudShape::transmission(const std::vector<float>& tile, double cover, double size, const Motion& motion, double observerRadius, const std::array<double, 3>& altAz,
                                 const std::array<double, 3>& south, const std::array<double, 3>& east, const std::array<double, 3>& up)
 {
 	if (altAz[2] < -0.015)
@@ -181,10 +219,12 @@ double CloudShape::transmission(const std::vector<float>& tile, double cover, do
 		const double r = std::sqrt(px*px + py*py + pz*pz);
 		const double ex = px*south[0] + py*east[0] + pz*up[0], ey = px*south[1] + py*east[1] + pz*up[1], ez = px*south[2] + py*east[2] + pz*up[2];
 		const double scale = 2.*base/(r + std::fabs(ez));
-		const double mapX = scale*ex, mapY = scale*ey;
+		const double mapX = motion.cosine*scale*ex - motion.sine*scale*ey + motion.offsetX;
+		const double mapY = motion.sine*scale*ex + motion.cosine*scale*ey + motion.offsetY;
 		const double noise = 0.6*readTile(tile, mapX/CoverScaleLarge, mapY/CoverScaleLarge, 2) + 0.4*readTile(tile, mapX/CoverScaleSmall, mapY/CoverScaleSmall, 2);
 		const double tileX = mapX/(TileSize*size), tileY = mapY/(TileSize*size);
-		const double shape = readTile(tile, tileX, tileY, 0) + std::min(coverOffset(cover, noise), 0.34);
+		const double grow = readTile(tile, mapX/GrowScale + motion.growU, mapY/GrowScale + motion.growV, 2);
+		const double shape = readTile(tile, tileX, tileY, 0) + std::min(coverOffset(cover, noise) + GrowStrength*(grow - 0.5), 0.34);
 		const double height = size*readTile(tile, tileX, tileY, 1);
 		const double topHeight = height*shape/std::pow(std::fabs(shape) + 0.01, 0.3);
 		const double rim = 1. - std::clamp(shape/0.35, 0., 1.);

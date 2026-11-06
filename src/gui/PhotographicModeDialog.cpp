@@ -29,6 +29,7 @@
 #include "LightDomes.hpp"
 #include "AuroraMgr.hpp"
 #include "NoctilucentCloudMgr.hpp"
+#include "CloudMgr.hpp"
 #include "StelLocation.hpp"
 
 #include <QComboBox>
@@ -345,6 +346,16 @@ void PhotographicModeDialog::createDialogContent()
 	connectBoolProperty(ui->cloudsCheckBox,           "CloudMgr.flagShow");
 	connectDoubleProperty(ui->cloudsCoverSpinBox,     "CloudMgr.cover");
 	connectDoubleProperty(ui->cloudsSizeSpinBox,      "CloudMgr.size");
+	connectBoolProperty(ui->cloudsFollowDateCheckBox, "CloudMgr.flagFollowDate");
+	connectBoolProperty(ui->cloudsHalfResolutionCheckBox, "CloudMgr.flagHalfResolution");
+	{
+		CloudMgr* clouds = GETSTELMODULE(CloudMgr);
+		connect(clouds, &CloudMgr::weatherInfoChanged, ui->cloudsInfoLabel, &QLabel::setText);
+		ui->cloudsInfoLabel->setText(clouds->getWeatherInfo());
+		// The date sets the cover
+		ui->cloudsCoverSpinBox->setDisabled(clouds->getFlagFollowDate());
+		connect(clouds, &CloudMgr::flagFollowDateChanged, ui->cloudsCoverSpinBox, &QWidget::setDisabled);
+	}
 	connectBoolProperty(ui->cometTailsCheckBox,       "CometTailMgr.flagShow");
 	connectBoolProperty(ui->cometTailGuidesCheckBox,  "CometTailMgr.flagShowGuides");
 	// The aurorae: the activity is a preset or a custom Kp; the substorm cycle shows where it stands

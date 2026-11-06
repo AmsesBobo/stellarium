@@ -1411,6 +1411,55 @@ Scripts can set the properties \texttt{occurrence} (0 to 3),
 The settings are kept in the section \texttt{[noctilucent\_clouds]}
 of \texttt{config.ini}.
 
+\subsection{Clouds}
+\label{sec:phenomena:Clouds}
+
+In the photographic mode, the \emph{Sky} tab of the camera settings can
+also show ordinary \indexterm{clouds}: fair weather cumulus with a base
+about 1.5\,km above the ground. They are made up, not a record of real
+clouds, and a date tells nothing about the weather of that day. The
+option \emph{Cover from the date} is no weather forecast either: it only
+lets the amount of clouds change over the days and hours by itself, with
+some days clear and more clouds in the afternoon.
+
+\emph{Cover} sets how much of the sky the clouds cover and \emph{Size}
+how large they are, against bodies of 0.6 to 2\,km. There is no overcast
+sky, and no rain.
+
+A cumulus cloud is thick enough to stop nearly all light, so these
+clouds take away the stars and the sky behind them, and add their own
+light and that of the air in front of them. The base of a cloud reflects
+the light of the ground and lets through part of the light on its top,
+more where the cloud is thin. At night the light of towns may make it
+brighter than the sky: \citet{Kyba:2011:CloudLight} measured that clouds
+over Berlin multiply the light of the clear sky by about 5 outside the
+city and 10 in its center. The light of the sky comes from a table of
+the twilight illuminance, which agrees with the zenith sky measured by
+\citet{Patat:2006:Twilight}.
+
+Sunlight reaches the clouds along a ray bent around the Earth by
+refraction, so it turns red with a low Sun. It stays on the clouds for
+some minutes after sunset, first on their undersides, and longest on the
+clouds towards the Sun. The clouds shadow themselves and each other, and
+their thin edges near the Sun or the Moon light up by scattering forwards
+as a silver lining.
+
+The wind follows from the date: westerly on average, mostly 2 to
+16\,m/s, and it carries the clouds, while they grow and dissolve in some 10 to 20
+minutes. The camera averages what moves during its exposure, unless the
+mount is set to \emph{No motion}.
+
+The clouds are demanding for the graphics card. By default they are
+computed at half the resolution of the screen, which is much faster and
+only a little softer. Long exposures of moving clouds cost the most.
+
+The clouds do not show in the eye mode, from above about 1.5\,km, or
+without atmosphere. Scripts can set the properties \texttt{flagShow},
+\texttt{cover}, \texttt{size}, \texttt{flagFollowDate} and
+\texttt{flagHalfResolution} of the module
+\texttt{CloudMgr} with \texttt{core.setStelProperty()}. The settings are
+kept in the section \texttt{[clouds]} of \texttt{config.ini}.
+
 
 %%% Local Variables: 
 %%% mode: latex

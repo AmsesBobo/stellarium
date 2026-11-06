@@ -1283,6 +1283,33 @@
               </property>
              </widget>
             </item>
+            <item row="1" column="0" colspan="5">
+             <widget class="QCheckBox" name="cloudsFollowDateCheckBox">
+              <property name="toolTip">
+               <string>Let the date set the cover. Some days are clear, and the clouds grow in the afternoon. This is made up and no weather forecast, also for dates in the past.</string>
+              </property>
+              <property name="text">
+               <string>Cover from the date (not a forecast)</string>
+              </property>
+             </widget>
+            </item>
+            <item row="2" column="0" colspan="5">
+             <widget class="QCheckBox" name="cloudsHalfResolutionCheckBox">
+              <property name="toolTip">
+               <string>Compute the clouds at half the resolution of the screen and scale them up: much faster, and a little softer.</string>
+              </property>
+              <property name="text">
+               <string>Half resolution (faster)</string>
+              </property>
+             </widget>
+            </item>
+            <item row="3" column="0" colspan="5">
+             <widget class="QLabel" name="cloudsInfoLabel">
+              <property name="wordWrap">
+               <bool>true</bool>
+              </property>
+             </widget>
+            </item>
             <item row="0" column="4">
              <widget class="QDoubleSpinBox" name="cloudsSizeSpinBox">
               <property name="toolTip">

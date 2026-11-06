@@ -30,6 +30,7 @@ class StelCore;
 class QOpenGLShaderProgram;
 class QOpenGLBuffer;
 class QOpenGLVertexArrayObject;
+class QOpenGLFramebufferObject;
 
 //! @class CloudMgr
 //! The ordinary clouds of the Earth, in the photographic mode: fair weather cumulus in a layer from 1.5 km above a
@@ -42,6 +43,10 @@ class QOpenGLVertexArrayObject;
 //!   S -> S T + (L_cloud T_air + L_air) (1 - T)
 //! LandscapeMgr::draw() calls this between the atmosphere and the landscape, so the clouds do not cover the landscape.
 //! The bloom and the metering of the camera work on the finished scene, so they see what the clouds leave.
+//!
+//! The wind carries the clouds, they grow and dissolve, and the camera averages its exposure over it. All of that, and the
+//! cover if the setting follows the date, comes from the date alone: a moment always looks the same. It is made up, and
+//! has nothing to do with the real weather of that day.
 class CloudMgr : public StelModule
 {
 	Q_OBJECT
@@ -51,17 +56,26 @@ class CloudMgr : public StelModule
 	Q_PROPERTY(double cover READ getCover WRITE setCover NOTIFY coverChanged)
 	//! The size of the clouds against the usual ones (bodies of 0.6 to 2 km), from 0.4 to 2.5
 	Q_PROPERTY(double size READ getSize WRITE setSize NOTIFY sizeChanged)
+	//! Let the date set the cover, in place of the setting cover. This is no weather forecast.
+	Q_PROPERTY(bool flagFollowDate READ getFlagFollowDate WRITE setFlagFollowDate NOTIFY flagFollowDateChanged)
+	//! Compute the clouds at half the resolution of the screen and scale them up: four times faster, a little softer
+	Q_PROPERTY(bool flagHalfResolution READ getFlagHalfResolution WRITE setFlagHalfResolution NOTIFY flagHalfResolutionChanged)
+	//! The cover and the wind at this moment (for the user interface)
+	Q_PROPERTY(QString weatherInfo READ getWeatherInfo NOTIFY weatherInfoChanged)
 
 public:
 	CloudMgr();
 	~CloudMgr() override;
 
 	void init() override;
-	void update(double) override {}
+	void update(double deltaTime) override;
 
 	bool getFlagShow() const {return flagShow;}
 	double getCover() const {return cover;}
 	double getSize() const {return size;}
+	bool getFlagFollowDate() const {return flagFollowDate;}
+	bool getFlagHalfResolution() const {return flagHalfResolution;}
+	QString getWeatherInfo() const {return weatherInfo;}
 
 	//! The transmission of the clouds towards a direction (AltAz) at this moment, from 0 to 1, for what is drawn over them:
 	//! the lens effects of the bright bodies. The same field as the shader's.
@@ -74,11 +88,16 @@ public slots:
 	void setFlagShow(bool b);
 	void setCover(double value);
 	void setSize(double value);
+	void setFlagFollowDate(bool b);
+	void setFlagHalfResolution(bool b);
 
 signals:
 	void flagShowChanged(bool b);
 	void coverChanged(double value);
 	void sizeChanged(double value);
+	void flagFollowDateChanged(bool b);
+	void flagHalfResolutionChanged(bool b);
+	void weatherInfoChanged(const QString& info);
 
 private:
 	bool isShown(const StelCore* core) const;
@@ -87,6 +106,13 @@ private:
 	bool flagShow = false;
 	double cover = 0.2;
 	double size = 1.;
+	bool flagFollowDate = false;
+	bool flagHalfResolution = true;
+	QString weatherInfo;
+	double currentCover = 0.2;  //!< the cover at this moment
+	double windEast = 0., windNorth = 0.;  //!< the wind at the observer at this moment (km/s)
+	//! The wind at the observer (km/s) on the map of the clouds, from where it carries them
+	void computeWind(const StelCore* core, double* mapX, double* mapY) const;
 
 	//! The height map (see CloudShape), computed when it is first needed
 	mutable std::vector<float> tile;
@@ -95,10 +121,14 @@ private:
 
 	void buildProgram(const StelProjector& projector);
 	void drawQuad();
+	//! Draw the clouds into a buffer of half the size, ready to scale up with compositeProgram. False if that cannot be done.
+	bool drawToLowResBuffer();
 	std::unique_ptr<QOpenGLShaderProgram> program;
 	StelProjectorP programProjector;  //!< the projection the program was built for
 	std::unique_ptr<QOpenGLBuffer> vbo;
 	std::unique_ptr<QOpenGLVertexArrayObject> vao;
+	std::unique_ptr<QOpenGLFramebufferObject> lowResBuffer;
+	std::unique_ptr<QOpenGLShaderProgram> compositeProgram;
 };
 
 #endif // CLOUDMGR_HPP

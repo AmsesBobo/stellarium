@@ -49,19 +49,38 @@ public:
 	static constexpr double FineScale = 5.9;      //!< km: the size of the tile for the fine lobes
 	static constexpr double Extinction = 20.;     //!< per km in the clouds: they are opaque within a few hundred meters
 
+	//! Where the wind has carried the clouds at a moment: the map of the clouds, at the place (x, y) of the Earth, is at
+	//! (cosine x - sine y + offsetX, sine x + cosine y + offsetY). It follows from the date alone, so that a moment always looks
+	//! the same: westerly winds as a slow turn around the pole, with changes over the days from sums of waves, whose
+	//! integrals are known. growU, growV and boilU, boilV are the places of the noise that makes clouds grow and dissolve,
+	//! and of the fine lobes, which drift through the clouds. All this is made up: it is no weather.
+	struct Motion
+	{
+		double cosine = 1., sine = 0., offsetX = 0., offsetY = 0.;
+		double growU = 0., growV = 0.;
+		double boilX = 0., boilY = 0.;
+	};
+	static Motion motion(double jd);
+	//! The share of the sky under clouds at a moment and a longitude (degrees), for the setting that follows the date: it
+	//! changes over the days, with some days clear, and the clouds grow in the afternoon
+	static double coverOfDate(double jd, double longitude);
+
 	//! The tile, four values for each texel by rows
 	static std::vector<float> computeTile();
 
 	//! What the shape adds with the setting cover (0 to 1) and the soft noise (from 0 to 1) at a place, before the limit of
-	//! 0.34 that keeps the clear parts of the map (-0.35) clear
+	//! 0.34 that keeps the clear parts of the map (-0.35) clear; below a cover of 0.1 the last clouds go away
 	static double coverOffset(double cover, double noise);
+	static constexpr double GrowScale = 14.3;     //!< km: the size of the tile for the noise of growth
+	static constexpr double GrowStrength = 0.55;
 
 	//! The transmission of the clouds along a line of sight, from a tile of computeTile().
 	//! @param observerRadius km from the center of the Earth
 	//! @param altAz unit vector, x to the south, y to the east, z up
 	//! @param south, east, up the axes of that frame in the Earth-fixed one
 	//! @param size the scale of the clouds against those of the tile
-	static double transmission(const std::vector<float>& tile, double cover, double size, double observerRadius, const std::array<double, 3>& altAz,
+	//! @param motion where the wind has carried the clouds
+	static double transmission(const std::vector<float>& tile, double cover, double size, const Motion& motion, double observerRadius, const std::array<double, 3>& altAz,
 	                           const std::array<double, 3>& south, const std::array<double, 3>& east, const std::array<double, 3>& up);
 };
 
