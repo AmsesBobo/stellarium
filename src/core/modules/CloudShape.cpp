@@ -198,6 +198,22 @@ double CloudShape::coverOffset(double cover, double noise)
 	return 1.1*(cover - 0.45) + 2.*(noise - 0.5) - 150.*fading*fading;
 }
 
+double CloudShape::cirrusDensity(const std::vector<float>& tile, double mapX, double mapY, double cover)
+{
+	// as in the shader of CloudMgr, at the full detail of the tile
+	const double x = CirrusAxisCos*mapX - CirrusAxisSin*mapY + CirrusBend*(readTile(tile, mapX/CirrusBendScale + 0.5, mapY/CirrusBendScale + 0.5, 2) - 0.5);
+	const double y = CirrusAxisSin*mapX + CirrusAxisCos*mapY + CirrusBend*(readTile(tile, mapX/CirrusBendScale + 0.25, mapY/CirrusBendScale + 0.25, 2) - 0.5);
+	const double patch = readTile(tile, mapX/CirrusPatchScale, mapY/CirrusPatchScale, 2);
+	const double area = std::clamp((patch - 0.85 + 0.9*cover)/0.2, 0., 1.);
+	const double offsets[3][2] = {{0., 0.}, {0.37, 0.71}, {0.13, 0.29}};
+	const double weights[3] = {0.5, 0.3, 0.2};
+	double fibres = 0.;
+	for (int i = 0; i < 3; ++i)
+		fibres += weights[i]*readTile(tile, x/CirrusScaleX[i] + offsets[i][0], y/CirrusScaleY[i] + offsets[i][1], 2);
+	const double t = std::clamp((fibres + 0.3*(area - 0.5) - 0.4)/0.28, 0., 1.);
+	return area*t*t*(3. - 2.*t);
+}
+
 double CloudShape::bankMask(const Layer& layer, double x, double y)
 {
 	if (!layer.bank)

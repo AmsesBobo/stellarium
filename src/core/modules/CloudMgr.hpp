@@ -84,6 +84,14 @@ class CloudMgr : public StelModule
 	Q_PROPERTY(int type READ getType WRITE setType NOTIFY typeChanged)
 	//! Let the clouds only stand in a bank: a sector of the sky at a distance, for the clouds of a photograph
 	Q_PROPERTY(bool flagBank READ getFlagBank WRITE setFlagBank NOTIFY flagBankChanged)
+	//! Show cirrus: thin fibrous clouds of ice high up, above the two layers
+	Q_PROPERTY(bool flagCirrus READ getFlagCirrus WRITE setFlagCirrus NOTIFY flagCirrusChanged)
+	//! How much of the sky the cirrus cover, from 0 to 1
+	Q_PROPERTY(double cirrusCover READ getCirrusCover WRITE setCirrusCover NOTIFY cirrusCoverChanged)
+	//! The height of the cirrus over the ground (km), from 5 to 13
+	Q_PROPERTY(double cirrusHeight READ getCirrusHeight WRITE setCirrusHeight NOTIFY cirrusHeightChanged)
+	//! The vertical optical depth of the densest cirrus, from 0.02 to 3 (typical 0.1 to 1)
+	Q_PROPERTY(double cirrusOpticalDepth READ getCirrusOpticalDepth WRITE setCirrusOpticalDepth NOTIFY cirrusOpticalDepthChanged)
 	//! Let the date set the cover, in place of the setting cover. This is no weather forecast.
 	Q_PROPERTY(bool flagFollowDate READ getFlagFollowDate WRITE setFlagFollowDate NOTIFY flagFollowDateChanged)
 	//! Compute the clouds at half the resolution of the screen and scale them up: four times faster, a little softer
@@ -115,6 +123,10 @@ public:
 	int getType() const;
 	static constexpr int TypeCustom = 0, TypeCumulus = 1, TypeStratocumulus = 2, TypeAltocumulus = 3;
 	bool getFlagHalfResolution() const {return flagHalfResolution;}
+	bool getFlagCirrus() const {return flagCirrus;}
+	double getCirrusCover() const {return cirrusCover;}
+	double getCirrusHeight() const {return cirrusHeight;}
+	double getCirrusOpticalDepth() const {return cirrusOpticalDepth;}
 	QString getWeatherInfo() const {return weatherInfo;}
 
 	//! The transmission of the clouds towards a direction (AltAz, without refraction, as the shader sees it) at this moment,
@@ -142,6 +154,10 @@ public slots:
 	void setFlagBank(bool b);
 	void setType(int type);
 	void setFlagHalfResolution(bool b);
+	void setFlagCirrus(bool b);
+	void setCirrusCover(double value);
+	void setCirrusHeight(double value);
+	void setCirrusOpticalDepth(double value);
 
 signals:
 	void flagShowChanged(bool b);
@@ -160,6 +176,10 @@ signals:
 	void flagBankChanged(bool b);
 	void typeChanged(int type);
 	void flagHalfResolutionChanged(bool b);
+	void flagCirrusChanged(bool b);
+	void cirrusCoverChanged(double value);
+	void cirrusHeightChanged(double value);
+	void cirrusOpticalDepthChanged(double value);
 	void weatherInfoChanged(const QString& info);
 
 private:
@@ -176,6 +196,18 @@ private:
 
 	bool flagShow = false;
 	bool flagFollowDate = false;
+	bool flagCirrus = false;
+	double cirrusCover = 0.4;
+	double cirrusHeight = 8.;
+	double cirrusOpticalDepth = 0.15;
+	double currentCirrusCover = 0.4;  //!< the cover of the cirrus at this moment
+	bool isCirrusShown(const StelCore* core) const;
+	//! The transmission of the cirrus towards a direction (AltAz, unit vector)
+	double cirrusTransmission(const StelCore* core, const Vec3d& altAz) const;
+	void buildCirrusProgram(const StelProjector& projector);
+	void drawCirrus(StelCore* core, const StelProjector& prj);
+	std::unique_ptr<QOpenGLShaderProgram> cirrusProgram;
+	StelProjectorP cirrusProjector;
 	static constexpr int LayerCount = 2;
 	CloudShape::Layer layers[LayerCount];
 	bool layerOn[LayerCount] = {true, false};

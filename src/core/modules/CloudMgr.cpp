@@ -94,6 +94,10 @@ void CloudMgr::init()
 	}
 	edited = 0;
 	setFlagHalfResolution(conf->value("clouds/flag_half_resolution", true).toBool());
+	setFlagCirrus(conf->value("clouds/flag_cirrus", false).toBool());
+	setCirrusCover(conf->value("clouds/cirrus_cover", 0.4).toDouble());
+	setCirrusHeight(conf->value("clouds/cirrus_height", 8.).toDouble());
+	setCirrusOpticalDepth(conf->value("clouds/cirrus_optical_depth", 0.15).toDouble());
 	addAction("actionShow_Clouds", N_("Display Options"), N_("Clouds"), "flagShow");
 
 	// A full screen quad
@@ -136,6 +140,49 @@ void CloudMgr::setCover(double value)
 		StelApp::immediateSave(settingKey("cover"), value);
 		emit coverChanged(value);
 		emit typeChanged(getType());
+	}
+}
+
+void CloudMgr::setFlagCirrus(bool b)
+{
+	if (b != flagCirrus)
+	{
+		flagCirrus = b;
+		StelApp::immediateSave("clouds/flag_cirrus", b);
+		emit flagCirrusChanged(b);
+	}
+}
+
+void CloudMgr::setCirrusCover(double value)
+{
+	value = std::clamp(value, 0.0, 1.0);
+	if (!qFuzzyCompare(value, cirrusCover))
+	{
+		cirrusCover = value;
+		StelApp::immediateSave("clouds/cirrus_cover", value);
+		emit cirrusCoverChanged(value);
+	}
+}
+
+void CloudMgr::setCirrusHeight(double value)
+{
+	value = std::clamp(value, 5.0, 13.0);
+	if (!qFuzzyCompare(value, cirrusHeight))
+	{
+		cirrusHeight = value;
+		StelApp::immediateSave("clouds/cirrus_height", value);
+		emit cirrusHeightChanged(value);
+	}
+}
+
+void CloudMgr::setCirrusOpticalDepth(double value)
+{
+	value = std::clamp(value, 0.02, 3.0);
+	if (!qFuzzyCompare(value, cirrusOpticalDepth))
+	{
+		cirrusOpticalDepth = value;
+		StelApp::immediateSave("clouds/cirrus_optical_depth", value);
+		emit cirrusOpticalDepthChanged(value);
 	}
 }
 
@@ -359,6 +406,7 @@ void CloudMgr::update(double)
 	// (with the date, the second layer follows weather of its own)
 	for (int i = 0; i < LayerCount; ++i)
 		currentCovers[i] = flagFollowDate ? CloudShape::coverOfDate(core->getJD() + 5.3*i, longitude) : layers[i].cover;
+	currentCirrusCover = flagFollowDate ? CloudShape::coverOfDate(core->getJD() + 11.7, longitude) : cirrusCover;
 
 	// The wind over the Earth from the wind on the map: turn it back, into the frame of the observer's meridian
 	double mapX = 0., mapY = 0.;
@@ -826,6 +874,36 @@ bool CloudMgr::isShown(const StelCore* core) const
 	       && core->getCurrentPlanet()->getEnglishName() == QStringLiteral("Earth");
 }
 
+bool CloudMgr::isCirrusShown(const StelCore* core) const
+{
+	return isShown(core) && flagCirrus && core->getCurrentLocation().altitude*0.001 < cirrusHeight;
+}
+
+double CloudMgr::cirrusTransmission(const StelCore* core, const Vec3d& altAz) const
+{
+	if (altAz[2] < -0.015)
+		return 1.;
+	// as in the shader: the place where the line of sight meets the layer, and the slant of the way through it
+	const StelLocation& location = core->getCurrentLocation();
+	const double r0 = EarthRadius + std::max(0., location.altitude*0.001), rc = EarthRadius + cirrusHeight;
+	const double z = std::max(altAz[2], 0.);
+	const double b = r0*z, c = (rc - r0)*(rc + r0);
+	const double t = c/(b + std::sqrt(b*b + c));
+	const Vec3d p(t*altAz[0], t*altAz[1], r0 + t*z);
+	const double slant = 1./std::max((p[0]*altAz[0] + p[1]*altAz[1] + p[2]*z)/p.norm(), 0.05);
+	const double phi = static_cast<double>(location.getLatitude())*M_PI/180.;
+	const double lambda = static_cast<double>(location.getLongitude())*M_PI/180.;
+	const Vec3d up(std::cos(phi)*std::cos(lambda), std::cos(phi)*std::sin(lambda), std::sin(phi));
+	const Vec3d east(-std::sin(lambda), std::cos(lambda), 0.);
+	const Vec3d south(std::sin(phi)*std::cos(lambda), std::sin(phi)*std::sin(lambda), -std::cos(phi));
+	const Vec3d earth = south*p[0] + east*p[1] + up*p[2];
+	const double scale = 2.*rc/(earth.norm() + std::fabs(earth[2]));
+	const CloudShape::Motion m = CloudShape::motion(core->getJD());
+	const double mapX = m.cosine*scale*earth[0] - m.sine*scale*earth[1] + m.offsetX + CloudShape::CirrusShift;
+	const double mapY = m.sine*scale*earth[0] + m.cosine*scale*earth[1] + m.offsetY + CloudShape::CirrusShift;
+	return std::exp(-cirrusOpticalDepth*CloudShape::cirrusDensity(tile, mapX, mapY, currentCirrusCover)*slant);
+}
+
 bool CloudMgr::isLayerShown(const StelCore* core, int i) const
 {
 	return isShown(core) && layerOn[i] && core->getCurrentLocation().altitude*0.001 < layers[i].base;
@@ -868,6 +946,8 @@ double CloudMgr::getTransmission(const StelCore* core, Vec3d altAz) const
 		}
 		result *= sum/samples;
 	}
+	if (isCirrusShown(core))
+		result *= cirrusTransmission(core, altAz);
 	return result;
 }
 
@@ -972,7 +1052,7 @@ void CloudMgr::setUniformsOfLayer(QOpenGLShaderProgram& p, int i, const char* pr
 
 void CloudMgr::drawOverSky(StelCore* core)
 {
-	if (!isShown(core) || !(isLayerShown(core, 0) || isLayerShown(core, 1)))
+	if (!isShown(core) || !(isLayerShown(core, 0) || isLayerShown(core, 1) || isCirrusShown(core)))
 		return;
 	// The higher layer first, the lower one over it
 	int order[LayerCount] = {0, 1};
@@ -997,6 +1077,9 @@ void CloudMgr::drawOverSky(StelCore* core)
 	gl.glGetIntegerv(GL_BLEND_DST_RGB, &blend[1]);
 	gl.glGetIntegerv(GL_BLEND_SRC_ALPHA, &blend[2]);
 	gl.glGetIntegerv(GL_BLEND_DST_ALPHA, &blend[3]);
+	// The cirrus lie above all the other clouds
+	if (isCirrusShown(core))
+		drawCirrus(core, *prj);
 	for (int k = 0; k < LayerCount; ++k)
 	{
 		const int i = order[k];
@@ -1086,6 +1169,212 @@ void CloudMgr::drawLayer(StelCore* core, const StelProjector& prj, int i, int ot
 	}
 	else
 		p.release();
+}
+
+void CloudMgr::buildCirrusProgram(const StelProjector& projector)
+{
+	cirrusProgram.reset();
+	std::unique_ptr<QOpenGLShaderProgram> newProgram(new QOpenGLShaderProgram);
+	const QByteArray vert = StelOpenGL::globalShaderPrefix(StelOpenGL::VERTEX_SHADER) + R"(
+ATTRIBUTE highp vec3 vertex;
+VARYING highp vec3 ndcPos;
+void main()
+{
+	gl_Position = vec4(vertex, 1.);
+	ndcPos = vertex;
+}
+)";
+	// The cirrus: a thin layer that scatters the light once. Everything is in the AltAz frame of the observer with its origin
+	// in the center of the Earth (km), as for the other clouds.
+	const QByteArray frag = StelOpenGL::globalShaderPrefix(StelOpenGL::FRAGMENT_SHADER)
+	                        + projector.getUnProjectShader()
+	                        + R"(
+VARYING highp vec3 ndcPos;
+uniform highp mat4 projectionMatrixInverse;
+uniform highp vec3 cloudSouth;
+uniform highp vec3 cloudEast;
+uniform highp vec3 cloudUp;
+uniform highp vec4 cloudTurn;       // the wind: the turn of the map, as cosine and sine; its offset (km)
+uniform sampler2D cloudTile;
+uniform highp vec4 cirrusRadii;     // the observer's radius; the radius of the layer; (r - observer)(r + observer); the size
+                                    // of a pixel (radians)
+uniform highp vec2 cirrusCover;     // the cover; the vertical optical depth of the densest cirrus
+uniform highp vec3 cirrusSun;       // unit vectors towards the Sun and the Moon
+uniform highp vec3 cirrusMoon;
+uniform highp vec3 cirrusSunLog[33];// the logarithm of the sunlight on the layer over 4 pi, against the altitude of the Sun
+                                    // seen from the place: from -5 degrees in steps of 0.5 degree
+uniform highp vec3 cirrusMoonLight; // the moonlight over 4 pi
+uniform highp vec3 cirrusSky;       // the light of the sky, the ground and the towns over 4 pi
+uniform highp vec3 cirrusTau;       // the optical depth of the air at the zenith
+
+highp float cirrusNoise(highp vec2 uv, highp float lod)
+{
+	return textureLod(cloudTile, uv, lod).z;
+}
+
+// The density from 0 to 1 at a place of the map, with the size of a pixel there (km): see CloudShape::cirrusDensity()
+highp float cirrusDensity(highp vec2 map, highp float foot)
+{
+	highp vec2 m = vec2(0.819*map.x - 0.574*map.y, 0.574*map.x + 0.819*map.y);
+	// the fibres bend
+	m += 9.*vec2(cirrusNoise(map/60. + 0.5, max(log2(foot*1024./60.), 0.)), cirrusNoise(map/60. + 0.25, max(log2(foot*1024./60.), 0.))) - 4.5;
+	highp float patch = cirrusNoise(map/190., max(log2(foot*1024./190.), 0.));
+	highp float area = clamp((patch - 0.85 + 0.9*cirrusCover.x)/0.2, 0., 1.);
+	highp float fibres = 0.5*cirrusNoise(vec2(m.x/40., m.y/10.), max(log2(foot*1024./10.), 0.))
+	                   + 0.3*cirrusNoise(vec2(m.x/12. + 0.37, m.y/3. + 0.71), max(log2(foot*1024./3.), 0.))
+	                   + 0.2*cirrusNoise(vec2(m.x/4. + 0.13, m.y/0.9 + 0.29), max(log2(foot*1024./0.9), 0.));
+	return area*smoothstep(0.4, 0.68, fibres + 0.3*(area - 0.5));
+}
+
+// Ice crystals: a strong forward peak, light to all sides, and the halo of 22 degrees, red inside and sharp there
+highp vec3 cirrusPhase(highp float cosine)
+{
+	highp float g = 0.75;
+	highp float forward = (1. - g*g)/pow(1. + g*g - 2.*g*cosine, 1.5);
+	highp vec3 d = degrees(acos(clamp(cosine, -1., 1.))) - vec3(21.7, 22.0, 22.3);
+	highp vec3 halo = mix(exp(-d*d/0.0625), exp(-max(d, 0.)/1.5), step(0., d));
+	return vec3(0.3 + 0.7*forward) + 3.*halo;
+}
+
+void main(void)
+{
+	highp vec4 winPos = projectionMatrixInverse * vec4(ndcPos, 1);
+	bool ok = false;
+	highp vec3 altAz = unProject(winPos.x, winPos.y, ok).xyz;
+	if (!ok)
+	{
+		FRAG_COLOR = vec4(0., 0., 0., 1.);
+		return;
+	}
+	altAz = normalize(altAz);
+	if (altAz.z < -0.015)
+	{
+		FRAG_COLOR = vec4(0., 0., 0., 1.);
+		return;
+	}
+	highp vec3 dir = vec3(altAz.xy, max(altAz.z, 0.));
+	highp float b = cirrusRadii.x*dir.z;
+	highp float t = cirrusRadii.z/(b + sqrt(b*b + cirrusRadii.z));
+	highp vec3 p = vec3(dir.xy*t, cirrusRadii.x + dir.z*t);
+	highp vec3 up = p/length(p);
+	highp float slant = 1./max(dot(up, dir), 0.05);
+
+	highp vec3 earth = p.x*cloudSouth + p.y*cloudEast + p.z*cloudUp;
+	highp vec2 map = 2.*cirrusRadii.y*earth.xy/(length(earth) + abs(earth.z));
+	map = vec2(cloudTurn.x*map.x - cloudTurn.y*map.y, cloudTurn.y*map.x + cloudTurn.x*map.y) + cloudTurn.zw + vec2(4711.);
+	highp float density = cirrusDensity(map, t*cirrusRadii.w*slant);
+	highp float T = exp(-cirrusCover.y*density*slant);
+	if (T > 0.999)
+	{
+		FRAG_COLOR = vec4(0., 0., 0., 1.);
+		return;
+	}
+
+	// The sunlight on the place: the Sun stands higher there towards it, by the curve of the Earth
+	highp float localSun = degrees(asin(clamp(dot(up, cirrusSun), -1., 1.)));
+	highp float x = clamp((localSun + 5.)/0.5, 0., 31.999);
+	highp int i = int(x);
+	highp vec3 sunlight = exp(mix(cirrusSunLog[i], cirrusSunLog[i + 1], x - float(i)));
+	highp vec3 light = (1. - T)*(sunlight*cirrusPhase(dot(dir, cirrusSun)) + cirrusMoonLight*cirrusPhase(dot(dir, cirrusMoon)) + cirrusSky);
+	// The air below the cirrus dims them (Rozenberg's air mass)
+	highp float sine = max(altAz.z, 0.);
+	highp vec3 way = exp(-cirrusTau/(sine + 0.025*exp(-11.*sine)));
+	// out = source + scene x alpha. The cirrus stand above nearly all the air: the light of the air in front of them stays,
+	// in the share that does not reach the observer from them
+	FRAG_COLOR = vec4(light*way, 1. - (1. - T)*way.y);
+}
+)";
+	if (!newProgram->addShaderFromSourceCode(QOpenGLShader::Vertex, vert)
+	    || !newProgram->addShaderFromSourceCode(QOpenGLShader::Fragment, frag))
+	{
+		qWarning().noquote() << "CloudMgr: error in the shaders of the cirrus:\n" << newProgram->log();
+		return;
+	}
+	newProgram->bindAttributeLocation("vertex", VertexAttribIndex);
+	if (!StelPainter::linkProg(newProgram.get(), "CloudMgr cirrus program"))
+		return;
+	cirrusProgram = std::move(newProgram);
+}
+
+void CloudMgr::drawCirrus(StelCore* core, const StelProjector& prj)
+{
+	if (!cirrusProjector || !prj.isSameProjection(*cirrusProjector))
+	{
+		buildCirrusProgram(prj);
+		cirrusProjector = core->getProjection(StelCore::FrameAltAz, StelCore::RefractionAuto);
+	}
+	if (!cirrusProgram)
+		return;
+	const StelSkyDrawer* drawer = core->getSkyDrawer();
+	const StelLocation& location = core->getCurrentLocation();
+	const SolarSystem* ssystem = GETSTELMODULE(SolarSystem);
+	QOpenGLShaderProgram& p = *cirrusProgram;
+	p.bind();
+	p.setUniformValue("projectionMatrixInverse", prj.getProjectionMatrix().toQMatrix().inverted());
+	prj.setUnProjectUniforms(p);
+
+	const double phi = static_cast<double>(location.getLatitude())*M_PI/180.;
+	const double lambda = static_cast<double>(location.getLongitude())*M_PI/180.;
+	const auto vec = [](const Vec3d& v) {return QVector3D(static_cast<float>(v[0]), static_cast<float>(v[1]), static_cast<float>(v[2]));};
+	p.setUniformValue("cloudSouth", vec(Vec3d(std::sin(phi)*std::cos(lambda), std::sin(phi)*std::sin(lambda), -std::cos(phi))));
+	p.setUniformValue("cloudEast", vec(Vec3d(-std::sin(lambda), std::cos(lambda), 0.)));
+	p.setUniformValue("cloudUp", vec(Vec3d(std::cos(phi)*std::cos(lambda), std::cos(phi)*std::sin(lambda), std::sin(phi))));
+	const CloudShape::Motion motion = CloudShape::motion(core->getJD());
+	p.setUniformValue("cloudTurn", QVector4D(static_cast<float>(motion.cosine), static_cast<float>(motion.sine),
+	                                         static_cast<float>(motion.offsetX), static_cast<float>(motion.offsetY)));
+	bindTileTexture(2);
+	p.setUniformValue("cloudTile", 2);
+	const double r0 = EarthRadius + std::max(0., location.altitude*0.001), rc = EarthRadius + cirrusHeight;
+	p.setUniformValue("cirrusRadii", QVector4D(static_cast<float>(r0), static_cast<float>(rc), static_cast<float>((rc - r0)*(rc + r0)),
+	                                           static_cast<float>(1./static_cast<double>(prj.getPixelPerRadAtCenter()))));
+	p.setUniformValue("cirrusCover", QVector2D(static_cast<float>(currentCirrusCover), static_cast<float>(cirrusOpticalDepth)));
+
+	// The light: the Sun through the air down to the layer, the Moon, the sky, the ground and the towns
+	const double scale = static_cast<double>(drawer->getPhotoSceneScale());
+	const double extinction = drawer->getEffectiveExtinctionCoefficient();
+	Vec3d sun = ssystem->getSun()->getAltAzPosGeometric(core);
+	sun.normalize();
+	Vec3d moon = ssystem->getMoon()->getAltAzPosGeometric(core);
+	moon.normalize();
+	p.setUniformValue("cirrusSun", vec(sun));
+	p.setUniformValue("cirrusMoon", vec(moon));
+	QVector3D sunLog[33];
+	for (int k = 0; k < 33; ++k)
+	{
+		const CloudLight::Rgb t = CloudLight::sunlightTransmission((-5. + 0.5*k)*M_PI/180., cirrusHeight, extinction);
+		const auto lg = [scale](double v) {return static_cast<float>(std::log(std::max(133000.*v*scale/(4.*M_PI), 1e-30)));};
+		sunLog[k] = QVector3D(lg(t[0]), lg(t[1]), lg(t[2]));
+	}
+	p.setUniformValueArray("cirrusSunLog", sunLog, 33);
+	const double moonLux = moon[2] > 0. ? 2.54e-6*std::pow(10., -0.4*static_cast<double>(ssystem->getMoon()->getVMagnitudeWithExtinction(core))) : 0.;
+	const Vec3f moonTint = drawer->getPhotoExtinctionTint(moon);
+	p.setUniformValue("cirrusMoonLight", QVector3D(static_cast<float>(moonLux*scale/(4.*M_PI)*static_cast<double>(moonTint[0])),
+	                                               static_cast<float>(moonLux*scale/(4.*M_PI)*static_cast<double>(moonTint[1])),
+	                                               static_cast<float>(moonLux*scale/(4.*M_PI)*static_cast<double>(moonTint[2]))));
+	const double sunAltitude = std::asin(std::clamp(sun[2], -1., 1.));
+	const double skyLux = CloudLight::skyIlluminance(sunAltitude);
+	const CloudLight::Rgb skyColor = CloudLight::skyColor(sunAltitude);
+	const CloudLight::Rgb sunGround = CloudLight::sunlightTransmission(sunAltitude, 0., extinction);
+	const Vec3f lamp = LightDomes::lampColor(LightDomes::LampMixed);
+	const double artificial = drawer->getLightPollutionLuminance();
+	QVector3D sky;
+	for (int c = 0; c < 3; ++c)
+	{
+		// half of the sky above, the ground of an albedo of 0.2 below, and the light of the towns
+		const double ground = 0.2*(skyLux*skyColor[static_cast<std::size_t>(c)] + 133000.*sunGround[static_cast<std::size_t>(c)]*std::max(sun[2], 0.));
+		const double value = (0.5*skyLux*skyColor[static_cast<std::size_t>(c)] + ground)/(4.*M_PI) + 2.*artificial*static_cast<double>(lamp[c]);
+		sky[c] = static_cast<float>(value*scale);
+	}
+	p.setUniformValue("cirrusSky", sky);
+	// the air at the zenith, redder the more it dims
+	const float tau = static_cast<float>(extinction/1.086);
+	p.setUniformValue("cirrusTau", QVector3D(0.62f*tau, tau, 1.75f*tau));
+
+	auto& gl = *QOpenGLContext::currentContext()->functions();
+	gl.glEnable(GL_BLEND);
+	gl.glBlendFuncSeparate(GL_ONE, GL_SRC_ALPHA, GL_ZERO, GL_ONE);
+	drawQuad();
+	p.release();
 }
 
 bool CloudMgr::drawToLowResBuffer()

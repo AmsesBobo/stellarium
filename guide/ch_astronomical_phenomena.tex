@@ -1441,6 +1441,17 @@ lower layer covers the higher one, and the higher one casts its shadows
 on the lower one in the sunlight or the moonlight. Two layers take about
 twice the work of the graphics card.
 
+\emph{Cirrus} adds thin fibrous clouds of ice high above the two layers,
+at the \emph{Height} of usually 6 to 10\,km, with their own
+\emph{Cover}. They are thin enough to let the stars through, and they
+scatter the light once: strongly forwards, with a faint halo of
+22$^\circ$ around the Sun and the Moon, red on its inside. Each part of
+them sees the Sun at its own altitude, higher towards the Sun by the
+curve of the Earth, so after sunset they glow golden and then red, and
+the furthest ones towards the Sun keep the light the longest, as before
+sunrise. The property \texttt{cirrusOpticalDepth} sets how dense they
+are (0.15 by default).
+
 To match the clouds of a photograph, a \emph{Cloud bank} lets them stand
 only in a sector of the sky: its \emph{Azimuth} and \emph{Width}, and how
 far away it begins (\emph{Distance}) and how far it reaches
@@ -1484,7 +1495,9 @@ without atmosphere. Scripts can set the properties \texttt{flagShow},
 \texttt{flatness}, \texttt{type} (0 custom, 1 cumulus, 2 stratocumulus,
 3 altocumulus), \texttt{flagBank}, \texttt{bankAzimuth},
 \texttt{bankWidth}, \texttt{bankDistance}, \texttt{bankDepth},
-\texttt{flagFollowDate} and \texttt{flagHalfResolution} of the module
+\texttt{flagCirrus}, \texttt{cirrusCover}, \texttt{cirrusHeight},
+\texttt{cirrusOpticalDepth}, \texttt{flagFollowDate} and
+\texttt{flagHalfResolution} of the module
 \texttt{CloudMgr} with \texttt{core.setStelProperty()}. The settings are
 kept in the section \texttt{[clouds]} of \texttt{config.ini}, those of the
 second layer with names that begin with \texttt{layer2\_}.

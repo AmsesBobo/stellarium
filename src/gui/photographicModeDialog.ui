@@ -1558,7 +1558,72 @@
               </property>
              </widget>
             </item>
-            <item row="6" column="0" colspan="5">
+            <item row="6" column="0">
+             <widget class="QCheckBox" name="cirrusCheckBox">
+              <property name="toolTip">
+               <string>Thin fibrous clouds of ice high up, above the two layers. Seen from below they light up in the colors of the sunset long after the lower clouds, the furthest ones towards the Sun the longest, and they may show the halo of 22 degrees around the Sun and the Moon.</string>
+              </property>
+              <property name="text">
+               <string>Cirrus</string>
+              </property>
+             </widget>
+            </item>
+            <item row="6" column="1">
+             <widget class="QLabel" name="cirrusCoverLabel">
+              <property name="text">
+               <string>Cover:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="6" column="2">
+             <widget class="QDoubleSpinBox" name="cirrusCoverSpinBox">
+              <property name="toolTip">
+               <string>How much of the sky the cirrus cover, from 0 to 1.</string>
+              </property>
+              <property name="decimals">
+               <number>2</number>
+              </property>
+              <property name="minimum">
+               <double>0</double>
+              </property>
+              <property name="maximum">
+               <double>1</double>
+              </property>
+              <property name="singleStep">
+               <double>0.05</double>
+              </property>
+             </widget>
+            </item>
+            <item row="6" column="3">
+             <widget class="QLabel" name="cirrusHeightLabel">
+              <property name="text">
+               <string>Height:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="6" column="4">
+             <widget class="QDoubleSpinBox" name="cirrusHeightSpinBox">
+              <property name="toolTip">
+               <string>The height of the cirrus over the ground, usually 6 to 10 km. Higher cirrus stay longer in the sunlight after sunset.</string>
+              </property>
+              <property name="suffix">
+               <string> km</string>
+              </property>
+              <property name="decimals">
+               <number>1</number>
+              </property>
+              <property name="minimum">
+               <double>5</double>
+              </property>
+              <property name="maximum">
+               <double>13</double>
+              </property>
+              <property name="singleStep">
+               <double>0.5</double>
+              </property>
+             </widget>
+            </item>
+            <item row="7" column="0" colspan="5">
              <widget class="QCheckBox" name="cloudsFollowDateCheckBox">
               <property name="toolTip">
                <string>Let the date set the cover. Some days are clear, and the clouds grow in the afternoon. This is made up and no weather forecast, also for dates in the past.</string>
@@ -1568,7 +1633,7 @@
               </property>
              </widget>
             </item>
-            <item row="7" column="0" colspan="5">
+            <item row="8" column="0" colspan="5">
              <widget class="QCheckBox" name="cloudsHalfResolutionCheckBox">
               <property name="toolTip">
                <string>Compute the clouds at half the resolution of the screen and scale them up: much faster, and a little softer.</string>
@@ -1578,7 +1643,7 @@
               </property>
              </widget>
             </item>
-            <item row="8" column="0" colspan="5">
+            <item row="9" column="0" colspan="5">
              <widget class="QLabel" name="cloudsInfoLabel">
               <property name="wordWrap">
                <bool>true</bool>

@@ -348,6 +348,9 @@ void PhotographicModeDialog::createDialogContent()
 	connectDoubleProperty(ui->cloudsCoverSpinBox,     "CloudMgr.cover");
 	connectDoubleProperty(ui->cloudsSizeSpinBox,      "CloudMgr.size");
 	connectBoolProperty(ui->cloudsFollowDateCheckBox, "CloudMgr.flagFollowDate");
+	connectBoolProperty(ui->cirrusCheckBox,           "CloudMgr.flagCirrus");
+	connectDoubleProperty(ui->cirrusCoverSpinBox,     "CloudMgr.cirrusCover");
+	connectDoubleProperty(ui->cirrusHeightSpinBox,    "CloudMgr.cirrusHeight");
 	connectDoubleProperty(ui->cloudsBaseSpinBox,      "CloudMgr.baseHeight");
 	connectDoubleProperty(ui->cloudsDensitySpinBox,   "CloudMgr.density");
 	connectDoubleProperty(ui->cloudsFlatnessSpinBox,  "CloudMgr.flatness");

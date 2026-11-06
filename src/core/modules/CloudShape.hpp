@@ -87,6 +87,18 @@ public:
 	//! changes over the days, with some days clear, and the clouds grow in the afternoon
 	static double coverOfDate(double jd, double longitude);
 
+	//! Cirrus: thin fibrous clouds of ice, high up. Their fibres lie along an axis of the map, from the soft noise of the
+	//! tile in three sizes stretched along it, in patches that the cover sets. The constants are shared with the shader.
+	static constexpr double CirrusAxisCos = 0.819, CirrusAxisSin = 0.574;
+	static constexpr double CirrusPatchScale = 190.;          //!< km per tile of the patches
+	static constexpr double CirrusScaleX[3] = {40., 12., 4.}; //!< km per tile along the fibres
+	static constexpr double CirrusScaleY[3] = {10., 3., 0.9}; //!< and across them
+	static constexpr double CirrusBendScale = 60.;            //!< km per tile of the noise that bends them
+	static constexpr double CirrusBend = 9.;                  //!< km
+	static constexpr double CirrusShift = 4711.;              //!< km: where the cirrus lie on the map
+	//! The density of cirrus (0 to 1) at a place of the map (km) with the cover (0 to 1)
+	static double cirrusDensity(const std::vector<float>& tile, double mapX, double mapY, double cover);
+
 	//! The tile, four values for each texel by rows
 	static std::vector<float> computeTile();
 
