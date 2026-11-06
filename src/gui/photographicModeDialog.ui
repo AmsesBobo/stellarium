@@ -1364,6 +1364,40 @@
               </property>
              </widget>
             </item>
+            <item row="2" column="3">
+             <widget class="QLabel" name="cloudsTypeLabel">
+              <property name="text">
+               <string>Type:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="2" column="4">
+             <widget class="QComboBox" name="cloudsTypeComboBox">
+              <property name="toolTip">
+               <string>A type sets the base, size, density, flatness and cover of the clouds, which you can then change. Cumulus: fair weather heaps. Stratocumulus: large flat masses close together. Altocumulus: small thin elements higher up.</string>
+              </property>
+              <item>
+               <property name="text">
+                <string>Custom</string>
+               </property>
+              </item>
+              <item>
+               <property name="text">
+                <string>Cumulus</string>
+               </property>
+              </item>
+              <item>
+               <property name="text">
+                <string>Stratocumulus</string>
+               </property>
+              </item>
+              <item>
+               <property name="text">
+                <string>Altocumulus</string>
+               </property>
+              </item>
+             </widget>
+            </item>
             <item row="3" column="0">
              <widget class="QCheckBox" name="cloudsBankCheckBox">
               <property name="toolTip">

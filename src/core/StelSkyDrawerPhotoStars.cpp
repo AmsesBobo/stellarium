@@ -1006,7 +1006,9 @@ bool StelSkyDrawer::drawPhotoBody(StelPainter* sPainter, const Vec3d& v, float d
 	flushPhotoPointSources(sPainter); // keep the order of drawing
 	PhotoStarInstance& body = photoInstances[nbPhotoPointSources];
 	body.center.set(static_cast<float>(win[0]), static_cast<float>(win[1]));
-	body.color = (linear/Y) * (flux*dim);
+	// (the clouds also cover the core in the scene, but some of what lies behind far clouds stays visible through the air
+	// in front of them: the disk must not)
+	body.color = (linear/Y) * (flux*dim*lensLight);
 	body.radius = radius;
 	body.shape.set(diskR, coreWeight, Rlit, cosPhase);
 	body.sunDir = sunDir;

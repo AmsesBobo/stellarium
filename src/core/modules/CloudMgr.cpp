@@ -125,6 +125,7 @@ void CloudMgr::setCover(double value)
 		cover = value;
 		StelApp::immediateSave("clouds/cover", value);
 		emit coverChanged(value);
+		emit typeChanged(getType());
 	}
 }
 
@@ -146,6 +147,7 @@ void CloudMgr::setBaseHeight(double value)
 		layer.base = value;
 		StelApp::immediateSave("clouds/base_height", value);
 		emit baseHeightChanged(value);
+		emit typeChanged(getType());
 	}
 }
 
@@ -157,6 +159,7 @@ void CloudMgr::setDensity(double value)
 		layer.density = value;
 		StelApp::immediateSave("clouds/density", value);
 		emit densityChanged(value);
+		emit typeChanged(getType());
 	}
 }
 
@@ -168,6 +171,7 @@ void CloudMgr::setFlatness(double value)
 		layer.flatness = value;
 		StelApp::immediateSave("clouds/flatness", value);
 		emit flatnessChanged(value);
+		emit typeChanged(getType());
 	}
 }
 
@@ -223,6 +227,44 @@ void CloudMgr::setFlagBank(bool b)
 		StelApp::immediateSave("clouds/flag_bank", b);
 		emit flagBankChanged(b);
 	}
+}
+
+namespace
+{
+// The types of clouds: base (km), size, density, flatness, cover
+struct CloudType
+{
+	double base, size, density, flatness, cover;
+};
+constexpr CloudType CloudTypes[] = {
+	{1.2, 0.8, 1., 0., 0.25},    // cumulus humilis: fair weather heaps, white in the sunlight
+	{1.0, 1.2, 0.9, 0.4, 0.6},   // stratocumulus: large flat masses close together, grey below
+	{3.5, 0.4, 0.6, 0.6, 0.55},  // altocumulus: small, thin flat elements higher up
+};
+}
+
+int CloudMgr::getType() const
+{
+	const auto near = [](double a, double b) {return std::fabs(a - b) < 0.005;};
+	for (int i = 0; i < 3; ++i)
+	{
+		const CloudType& t = CloudTypes[i];
+		if (near(layer.base, t.base) && near(size, t.size) && near(layer.density, t.density) && near(layer.flatness, t.flatness))
+			return i + 1;
+	}
+	return TypeCustom;
+}
+
+void CloudMgr::setType(int type)
+{
+	if (type < TypeCumulus || type > TypeAltocumulus || type == getType())
+		return;
+	const CloudType& t = CloudTypes[type - 1];
+	setBaseHeight(t.base);
+	setSize(t.size);
+	setDensity(t.density);
+	setFlatness(t.flatness);
+	setCover(t.cover);
 }
 
 CloudShape::Layer CloudMgr::currentLayer() const
@@ -297,6 +339,7 @@ void CloudMgr::setSize(double value)
 		size = value;
 		StelApp::immediateSave("clouds/size", value);
 		emit sizeChanged(value);
+		emit typeChanged(getType());
 	}
 }
 
@@ -407,7 +450,7 @@ highp float cloudOffset(highp vec3 p)
 	highp vec2 map = cloudMap(p);
 	highp float noise = 0.6*textureLod(cloudTile, map*cloudTileScale.y, 2.).z + 0.4*textureLod(cloudTile, map*cloudTileScale.z, 2.).z;
 	highp float grow = textureLod(cloudTile, map*cloudGrowScale + cloudGrow, 2.).z;
-	highp float offset = min(cloudCover.x + cloudCover.y*noise + cloudGrowStrength*(grow - 0.5), 0.34);
+	highp float offset = min(cloudCover.x + cloudCover.y*noise + cloudGrowStrength*(grow - 0.5), 0.45);
 	// A bank: the clouds only stand in a sector of the sky at a distance from the observer (see CloudShape::bankMask())
 	if (cloudBank.w >= 0.)
 	{
@@ -497,6 +540,7 @@ void main(void)
 	// The exposure: the moments that the camera averages, as many as the movement needs on the screen here
 	highp float spread = length(cloudSmear);
 	int samples = int(clamp(ceil(spread/(max(t0*cloudPixel, 1e-4)*4.)), 1., float(cloudSamples)));
+	highp float jitter = samples > 1 ? fract(52.9829189*fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))) : 0.5;
 	highp vec2 hitMoment = vec2(0., 0.);
 	highp float bestMoment = 2., T = 0., thin = 0.;
 	highp float hitT = -1., hitZ = 0., hitTop = 0., hitUnder = 0., hitLod = 0., hitNear = 0., hitOffset = 0.;
@@ -505,7 +549,8 @@ void main(void)
 	highp float look = log2((1.5*ds + smear)/cloudCover.z);
 	for (int moment = 0; moment < samples; ++moment)
 	{
-		highp float when = (float(moment) + 0.5)/float(samples) - 0.5;
+		// (the moments differ from pixel to pixel, so that the steps between them make grain, not stripes)
+		highp float when = (float(moment) + jitter)/float(samples) - 0.5;
 		cloudMoment = cloudSmear*when;
 		highp float firstT = -1., firstZ = 0., firstTop = 0., firstUnder = 0., firstLod = 0., firstNear = 0., firstOffset = 0.;
 		highp float depth = 0., lastOffset = 0.;
@@ -523,7 +568,7 @@ void main(void)
 			highp float offsetStart = k == 0 ? cloudOffset(vec3(altAz.xy*t, r0 + altAz.z*t)) : lastOffset;
 			lastOffset = offsetEnd;
 			highp float shape = blurred.x + 0.5*(offsetStart + offsetEnd);
-			if (t > 30. || shape > -0.3 && length(middle) - cloudRadii.y - 0.5*ds*altAz.z < cloudSize*cloudShape.w*blurred.y*pow(max(shape + 0.5, 0.), 0.7) + 0.05 + smear)
+			if (t > 30. || shape > -0.13 && length(middle) - cloudRadii.y - 0.5*ds*altAz.z < cloudSize*cloudShape.w*blurred.y*pow(max(shape + 0.5, 0.), 0.7) + 0.05 + smear)
 			{
 				// (far away a step passes over whole clouds: they blur together rather than glitter)
 				highp float foot = max(max(t*cloudPixel, ds*mix(0.1, 0.6, smoothstep(20., 60., t))), smear);
@@ -567,7 +612,8 @@ void main(void)
 				}
 			}
 		}
-		highp float through = exp(-depth);
+		// (a thick cloud is opaque: the Sun must not shine through where the way stopped)
+		highp float through = exp(-depth)*(1. - smoothstep(5., 6.9, depth));
 		T += through;
 		thin += through*(1. - through);
 		// the light of the clouds comes from the moment nearest to the middle of the exposure that met a cloud
@@ -659,10 +705,10 @@ void main(void)
 	// The way through the air dims the cloud and adds the light of the air (Rayleigh phase function)
 	highp vec3 way = exp(-airExtinction*hitT);
 	highp vec3 air = (1. - way)*(airSky + airMoon*0.75*(1. + moonCos*moonCos));
-	// In sunlit air the sky behind the cloud stands for the air in front of it, so that far clouds fade into the sky. It does
-	// not do so right at the Sun, whose disk would show, nor around a low Sun, where clouds stand dark against the bright sky
-	highp float highSun = smoothstep(0.03, 0.17, cloudSun.z);
-	highp float kept = (1. - way.y)*airSunlit*(1. - smoothstep(mix(0., 0.985, highSun), mix(0.98, 0.9995, highSun), sunCos));
+	// In sunlit air the sky behind the cloud stands for the air in front of it, so that far clouds fade into the sky
+	// (the Sun and the Moon behind the clouds are dimmed where they are drawn, so that their disks do not show through:
+	// see CloudMgr::getTransmission())
+	highp float kept = (1. - way.y)*airSunlit;
 	highp float hidden = (1. - T)*(1. - kept);
 	// out = source + scene x alpha
 	FRAG_COLOR = vec4((light*way + air)*hidden, 1. - hidden);

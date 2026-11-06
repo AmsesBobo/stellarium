@@ -350,6 +350,7 @@ void PhotographicModeDialog::createDialogContent()
 	connectDoubleProperty(ui->cloudsBaseSpinBox,      "CloudMgr.baseHeight");
 	connectDoubleProperty(ui->cloudsDensitySpinBox,   "CloudMgr.density");
 	connectDoubleProperty(ui->cloudsFlatnessSpinBox,  "CloudMgr.flatness");
+	connectIntProperty(ui->cloudsTypeComboBox,        "CloudMgr.type");
 	connectBoolProperty(ui->cloudsBankCheckBox,       "CloudMgr.flagBank");
 	connectDoubleProperty(ui->cloudsBankAzimuthSpinBox,  "CloudMgr.bankAzimuth");
 	connectDoubleProperty(ui->cloudsBankWidthSpinBox,    "CloudMgr.bankWidth");

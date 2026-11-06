@@ -179,9 +179,12 @@ std::vector<float> CloudShape::computeTile()
 			double which = 0.;
 			const double body = bodies.at(x, y, &which);
 			// lobes on the bodies; their mean is taken off, so that they make the outline lumpy too
-			const double shape = body + 0.6*(lobes.lobes(u, v) - 0.75) + 0.25*(small.lobes(u, v) - 0.75);
+			// (only near the bodies: between them the shape falls off smoothly, so that a high cover grows the clouds rather
+			// than making specks of the lobes)
+			const double near = std::clamp((body + 0.6)/0.5, 0., 1.);
+			const double shape = body + near*near*(3. - 2.*near)*(0.6*(lobes.lobes(u, v) - 0.75) + 0.25*(small.lobes(u, v) - 0.75));
 			float* texel = tile.data() + (static_cast<std::size_t>(j)*n + static_cast<std::size_t>(i))*4;
-			texel[0] = static_cast<float>(std::clamp(shape, -0.35, 1.5));
+			texel[0] = static_cast<float>(std::clamp(shape, -0.6, 1.5));
 			texel[1] = static_cast<float>(0.2 + 0.4*which);
 			texel[2] = static_cast<float>(0.65*softNoise(u*5., v*5., 5, 6) + 0.35*softNoise(u*11., v*11., 11, 7));
 			texel[3] = static_cast<float>(fine.lobes(u, v));
@@ -248,7 +251,7 @@ double CloudShape::transmission(const std::vector<float>& tile, const Layer& lay
 		const double noise = 0.6*readTile(tile, mapX/CoverScaleLarge, mapY/CoverScaleLarge, 2) + 0.4*readTile(tile, mapX/CoverScaleSmall, mapY/CoverScaleSmall, 2);
 		const double tileX = mapX*layer.stretch()/(TileSize*size), tileY = mapY/(TileSize*size);
 		const double grow = readTile(tile, mapX/GrowScale + motion.growU, mapY/GrowScale + motion.growV, 2);
-		const double shape = readTile(tile, tileX, tileY, 0) + std::min(coverOffset(layer.cover, noise) + GrowStrength*(grow - 0.5), 0.34)
+		const double shape = readTile(tile, tileX, tileY, 0) + std::min(coverOffset(layer.cover, noise) + GrowStrength*(grow - 0.5), 0.45)
 		                     + 2.5*(bankMask(layer, px, py) - 1.);
 		const double height = size*layer.heightScale()*readTile(tile, tileX, tileY, 1);
 		const double round = shape/std::pow(std::fabs(shape) + 0.01, 0.3), plateau = 0.8*std::clamp(4.*shape, -1., 1.);
@@ -261,5 +264,7 @@ double CloudShape::transmission(const std::vector<float>& tile, const Layer& lay
 		if (depth > 7.)
 			return 0.;
 	}
-	return std::exp(-depth);
+	// as in the shader: a thick cloud is opaque
+	const double fade = std::clamp((depth - 5.)/1.9, 0., 1.);
+	return std::exp(-depth)*(1. - fade*fade*(3. - 2.*fade));
 }

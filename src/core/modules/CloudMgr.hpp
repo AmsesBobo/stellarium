@@ -71,6 +71,9 @@ class CloudMgr : public StelModule
 	Q_PROPERTY(double bankDistance READ getBankDistance WRITE setBankDistance NOTIFY bankDistanceChanged)
 	//! The depth of the bank away from the observer (km)
 	Q_PROPERTY(double bankDepth READ getBankDepth WRITE setBankDepth NOTIFY bankDepthChanged)
+	//! The type of the clouds: 0 custom, 1 cumulus, 2 stratocumulus, 3 altocumulus. A type sets the base, size, density,
+	//! flatness and cover; any change of the first four of them makes the type custom again
+	Q_PROPERTY(int type READ getType WRITE setType NOTIFY typeChanged)
 	//! Let the clouds only stand in a bank: a sector of the sky at a distance, for the clouds of a photograph
 	Q_PROPERTY(bool flagBank READ getFlagBank WRITE setFlagBank NOTIFY flagBankChanged)
 	//! Let the date set the cover, in place of the setting cover. This is no weather forecast.
@@ -99,10 +102,13 @@ public:
 	double getBankDistance() const {return layer.bankDistance;}
 	double getBankDepth() const {return layer.bankDepth;}
 	bool getFlagBank() const {return layer.bank;}
+	int getType() const;
+	static constexpr int TypeCustom = 0, TypeCumulus = 1, TypeStratocumulus = 2, TypeAltocumulus = 3;
 	bool getFlagHalfResolution() const {return flagHalfResolution;}
 	QString getWeatherInfo() const {return weatherInfo;}
 
-	//! The transmission of the clouds towards a direction (AltAz) at this moment, from 0 to 1, for what is drawn over them:
+	//! The transmission of the clouds towards a direction (AltAz, without refraction, as the shader sees it) at this moment,
+	//! from 0 to 1, for what is drawn over them:
 	//! the lens effects of the bright bodies. The same field as the shader's.
 	double getTransmission(const StelCore* core, Vec3d altAz) const;
 
@@ -122,6 +128,7 @@ public slots:
 	void setBankDistance(double value);
 	void setBankDepth(double value);
 	void setFlagBank(bool b);
+	void setType(int type);
 	void setFlagHalfResolution(bool b);
 
 signals:
@@ -137,6 +144,7 @@ signals:
 	void bankDistanceChanged(double value);
 	void bankDepthChanged(double value);
 	void flagBankChanged(bool b);
+	void typeChanged(int type);
 	void flagHalfResolutionChanged(bool b);
 	void weatherInfoChanged(const QString& info);
 

@@ -128,7 +128,7 @@ CloudLight::Light CloudLight::compute(const Sources& s)
 			light.sideSun[k][i] = SideReflectance*SolarIlluminance*t[i]/M_PI;
 	}
 	const Rgb sunTop = sunlightTransmission(s.sunAltitude, s.top, s.extinction);
-	light.airSunlit = smooth(-0.5*DegreesToRadians, 3.*DegreesToRadians, s.sunAltitude);
+	light.airSunlit = smooth(-1.5*DegreesToRadians, 0.5*DegreesToRadians, s.sunAltitude);
 	const double hazeDepth = std::max(0., s.extinction - ExtinctionOfCleanAir)/1.086;
 	const double cloudLight = cloudAmplification(s.artificial)*s.artificial;
 	const double skyLight = skyIlluminance(s.sunAltitude);

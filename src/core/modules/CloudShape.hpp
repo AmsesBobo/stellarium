@@ -29,7 +29,7 @@
 //!
 //! The map is a tile that repeats, computed once: large bodies some 0.6 to 2 km across, and on them smaller lobes that
 //! shape both the outline and the top. Its channels:
-//!   0 the shape S: above 0 inside a cloud, up to about 1 in its middle, -0.35 outside (the clamp keeps the mean of
+//!   0 the shape S: above 0 inside a cloud, up to about 1 in its middle, -0.6 outside (the clamp keeps the mean of
 //!     a large area, which the mipmaps give far away, near the edge of a cloud)
 //!   1 the height of the cloud (km) at S = 1
 //!   2 a soft noise of the tile, from 0 to 1, for the areas with and without clouds
@@ -90,7 +90,7 @@ public:
 	static std::vector<float> computeTile();
 
 	//! What the shape adds with the setting cover (0 to 1) and the soft noise (from 0 to 1) at a place, before the limit of
-	//! 0.34 that keeps the clear parts of the map (-0.35) clear; below a cover of 0.1 the last clouds go away
+	//! 0.45 that keeps the clear parts of the map (-0.6) clear, with a margin for the fine lobes; below a cover of 0.1 the last clouds go away
 	static double coverOffset(double cover, double noise);
 	static constexpr double GrowScale = 14.3;     //!< km: the size of the tile for the noise of growth
 	static constexpr double GrowStrength = 0.55;

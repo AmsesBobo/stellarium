@@ -4826,7 +4826,7 @@ void Planet::draw3dModel(StelCore* core, StelProjector::ModelViewTranformP trans
 			const Vec3d pos = getJ2000EquatorialPos(core);
 			// The clouds cover the image of the body in the scene, but the lens effects are drawn over everything
 			static const CloudMgr* clouds = GETSTELMODULE(CloudMgr);
-			const float lensLight = clouds ? static_cast<float>(clouds->getTransmission(core, getAltAzPosAuto(core))) : 1.f;
+			const float lensLight = clouds ? static_cast<float>(clouds->getTransmission(core, getAltAzPosGeometric(core))) : 1.f;
 			// Bright bodies may make reflections inside the lens, even from outside the frame
 			if (photoMag < 3.f && lensLight > 0.f)
 				skyDrawer->addPhotoGhostSource(pos, photoMag - 2.5f*std::log10(lensLight), color);
