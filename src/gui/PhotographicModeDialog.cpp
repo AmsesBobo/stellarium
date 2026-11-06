@@ -349,6 +349,9 @@ void PhotographicModeDialog::createDialogContent()
 	connectDoubleProperty(ui->cloudsSizeSpinBox,      "CloudMgr.size");
 	connectBoolProperty(ui->cloudsFollowDateCheckBox, "CloudMgr.flagFollowDate");
 	connectBoolProperty(ui->cirrusCheckBox,           "CloudMgr.flagCirrus");
+	connectBoolProperty(ui->cloudsManualWindCheckBox, "CloudMgr.flagManualWind");
+	connectDoubleProperty(ui->cloudsWindSpeedSpinBox, "CloudMgr.windSpeed");
+	connectDoubleProperty(ui->cloudsWindDirectionSpinBox, "CloudMgr.windDirection");
 	connectDoubleProperty(ui->cirrusCoverSpinBox,     "CloudMgr.cirrusCover");
 	connectDoubleProperty(ui->cirrusHeightSpinBox,    "CloudMgr.cirrusHeight");
 	connectDoubleProperty(ui->cloudsBaseSpinBox,      "CloudMgr.baseHeight");
@@ -380,6 +383,13 @@ void PhotographicModeDialog::createDialogContent()
 		};
 		bank(clouds->getFlagBank());
 		connect(clouds, &CloudMgr::flagBankChanged, this, bank);
+		// The wind by hand has its settings only when it is on
+		const auto wind = [this](bool on) {
+			ui->cloudsWindSpeedSpinBox->setEnabled(on);
+			ui->cloudsWindDirectionSpinBox->setEnabled(on);
+		};
+		wind(clouds->getFlagManualWind());
+		connect(clouds, &CloudMgr::flagManualWindChanged, this, wind);
 	}
 	connectBoolProperty(ui->cometTailsCheckBox,       "CometTailMgr.flagShow");
 	connectBoolProperty(ui->cometTailGuidesCheckBox,  "CometTailMgr.flagShowGuides");

@@ -1623,7 +1623,7 @@
               </property>
              </widget>
             </item>
-            <item row="7" column="0" colspan="5">
+            <item row="7" column="0" colspan="3">
              <widget class="QCheckBox" name="cloudsFollowDateCheckBox">
               <property name="toolTip">
                <string>Let the date set the cover. Some days are clear, and the clouds grow in the afternoon. This is made up and no weather forecast, also for dates in the past.</string>
@@ -1633,13 +1633,81 @@
               </property>
              </widget>
             </item>
-            <item row="8" column="0" colspan="5">
+            <item row="7" column="3" colspan="2">
              <widget class="QCheckBox" name="cloudsHalfResolutionCheckBox">
               <property name="toolTip">
                <string>Compute the clouds at half the resolution of the screen and scale them up: much faster, and a little softer.</string>
               </property>
               <property name="text">
                <string>Half resolution (faster)</string>
+              </property>
+             </widget>
+            </item>
+            <item row="8" column="0">
+             <widget class="QCheckBox" name="cloudsManualWindCheckBox">
+              <property name="toolTip">
+               <string>Set the wind by hand, as for the clouds of a photograph, in place of the wind that follows from the date. All the clouds drift with it.</string>
+              </property>
+              <property name="text">
+               <string>Wind by hand</string>
+              </property>
+             </widget>
+            </item>
+            <item row="8" column="1">
+             <widget class="QLabel" name="cloudsWindSpeedLabel">
+              <property name="text">
+               <string>Speed:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="8" column="2">
+             <widget class="QDoubleSpinBox" name="cloudsWindSpeedSpinBox">
+              <property name="toolTip">
+               <string>The speed of the wind at the clouds.</string>
+              </property>
+              <property name="suffix">
+               <string> m/s</string>
+              </property>
+              <property name="decimals">
+               <number>0</number>
+              </property>
+              <property name="minimum">
+               <double>0</double>
+              </property>
+              <property name="maximum">
+               <double>60</double>
+              </property>
+              <property name="singleStep">
+               <double>1</double>
+              </property>
+             </widget>
+            </item>
+            <item row="8" column="3">
+             <widget class="QLabel" name="cloudsWindDirectionLabel">
+              <property name="text">
+               <string>From:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="8" column="4">
+             <widget class="QDoubleSpinBox" name="cloudsWindDirectionSpinBox">
+              <property name="toolTip">
+               <string>The direction that the wind blows from: 270 is a west wind.</string>
+              </property>
+              <property name="suffix">
+               <string> °</string>
+              </property>
+              <property name="decimals">
+               <number>0</number>
+              </property>
+              <property name="minimum">
+               <double>0</double>
+              </property>
+              <property name="maximum">
+               <double>359</double>
+              </property>
+              <property name="singleStep">
+               <double>5</double>
               </property>
              </widget>
             </item>

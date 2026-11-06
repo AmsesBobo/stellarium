@@ -92,6 +92,12 @@ class CloudMgr : public StelModule
 	Q_PROPERTY(double cirrusHeight READ getCirrusHeight WRITE setCirrusHeight NOTIFY cirrusHeightChanged)
 	//! The vertical optical depth of the densest cirrus, from 0.02 to 3 (typical 0.1 to 1)
 	Q_PROPERTY(double cirrusOpticalDepth READ getCirrusOpticalDepth WRITE setCirrusOpticalDepth NOTIFY cirrusOpticalDepthChanged)
+	//! Set the wind by hand, in place of the wind that follows from the date
+	Q_PROPERTY(bool flagManualWind READ getFlagManualWind WRITE setFlagManualWind NOTIFY flagManualWindChanged)
+	//! The speed of the wind set by hand (m/s), from 0 to 60
+	Q_PROPERTY(double windSpeed READ getWindSpeed WRITE setWindSpeed NOTIFY windSpeedChanged)
+	//! The direction that the wind set by hand blows from (degrees from the north through the east)
+	Q_PROPERTY(double windDirection READ getWindDirection WRITE setWindDirection NOTIFY windDirectionChanged)
 	//! Let the date set the cover, in place of the setting cover. This is no weather forecast.
 	Q_PROPERTY(bool flagFollowDate READ getFlagFollowDate WRITE setFlagFollowDate NOTIFY flagFollowDateChanged)
 	//! Compute the clouds at half the resolution of the screen and scale them up: four times faster, a little softer
@@ -124,6 +130,9 @@ public:
 	static constexpr int TypeCustom = 0, TypeCumulus = 1, TypeStratocumulus = 2, TypeAltocumulus = 3;
 	bool getFlagHalfResolution() const {return flagHalfResolution;}
 	bool getFlagCirrus() const {return flagCirrus;}
+	bool getFlagManualWind() const {return flagManualWind;}
+	double getWindSpeed() const {return windSpeed;}
+	double getWindDirection() const {return windDirection;}
 	double getCirrusCover() const {return cirrusCover;}
 	double getCirrusHeight() const {return cirrusHeight;}
 	double getCirrusOpticalDepth() const {return cirrusOpticalDepth;}
@@ -155,6 +164,9 @@ public slots:
 	void setType(int type);
 	void setFlagHalfResolution(bool b);
 	void setFlagCirrus(bool b);
+	void setFlagManualWind(bool b);
+	void setWindSpeed(double value);
+	void setWindDirection(double value);
 	void setCirrusCover(double value);
 	void setCirrusHeight(double value);
 	void setCirrusOpticalDepth(double value);
@@ -177,6 +189,9 @@ signals:
 	void typeChanged(int type);
 	void flagHalfResolutionChanged(bool b);
 	void flagCirrusChanged(bool b);
+	void flagManualWindChanged(bool b);
+	void windSpeedChanged(double value);
+	void windDirectionChanged(double value);
 	void cirrusCoverChanged(double value);
 	void cirrusHeightChanged(double value);
 	void cirrusOpticalDepthChanged(double value);
@@ -197,6 +212,11 @@ private:
 	bool flagShow = false;
 	bool flagFollowDate = false;
 	bool flagCirrus = false;
+	bool flagManualWind = false;
+	double windSpeed = 8.;
+	double windDirection = 250.;
+	//! Where the wind has carried the clouds at the Julian day jd: from the date, or from the wind set by hand
+	CloudShape::Motion motionAt(const StelCore* core, double jd) const;
 	double cirrusCover = 0.4;
 	double cirrusHeight = 8.;
 	double cirrusOpticalDepth = 0.15;
