@@ -39,6 +39,7 @@
 #include <QOpenGLBuffer>
 #include <QOpenGLShaderProgram>
 #include <QOpenGLVertexArrayObject>
+#include <QVector2D>
 #include <QVector3D>
 #include <QVector4D>
 #include <algorithm>
@@ -182,12 +183,19 @@ uniform highp vec4 cloudRadii;      // the observer's radius; the radius of the 
 uniform highp float cloudPixel;     // the size of a pixel (radians)
 uniform highp vec3 cloudSun;        // unit vectors towards the Sun and the Moon
 uniform highp vec3 cloudMoon;
-uniform highp vec3 cloudLight;      // the light of the clouds and the air (see CloudLight), for the scene
+uniform highp vec3 cloudKey;        // the unit vector towards the light that casts shadows
+uniform highp vec3 cloudBelow;      // the light of the clouds and the air (see CloudLight), for the scene
+uniform highp vec3 cloudAbove;
+uniform highp vec3 cloudAboveSun;
+uniform highp vec3 cloudCity;
 uniform highp vec3 sideSky;
-uniform highp vec3 sideSun;
+uniform highp vec3 sideSunLog[5];   // the logarithm of the light of CloudLight::Light::sideSun
+uniform highp vec2 sideSunOffset;   // the first offset of its altitude and its step (degrees)
 uniform highp vec3 sideMoon;
+uniform highp vec3 silverSun;
+uniform highp vec3 silverMoon;
 uniform highp vec3 airSky;
-uniform highp vec3 airSun;
+uniform highp float airSunlit;      // how much of the light of the sky comes from sunlit air below the clouds
 uniform highp vec3 airMoon;
 uniform highp vec3 airExtinction;   // per km
 const int CloudSubsteps = 6;
@@ -205,18 +213,32 @@ highp vec2 cloudMap(highp vec3 p)
 }
 
 // The heights over the base of the top and the underside of the cloud at a place (km, the top below 0 outside the clouds),
-// from the shape at the level of detail lod. near: how much the fine lobes count
-highp vec2 cloudHeights(highp vec2 map, highp float lod, highp float near)
+// from the shape at the level of detail lod. near: how much the fine lobes count at the height z
+highp vec2 cloudHeights(highp vec2 map, highp float lod, highp float near, highp float z)
 {
 	highp vec4 f = textureLod(cloudTile, map*cloudTileScale.x, lod);
 	highp float noise = 0.6*textureLod(cloudTile, map*cloudTileScale.y, 2.).z + 0.4*textureLod(cloudTile, map*cloudTileScale.z, 2.).z;
 	highp float s = f.x + min(cloudCover.x + cloudCover.y*noise, 0.34); // (it never fills the clear parts of the map)
+	// Fine lobes, stronger at the edge of a cloud, which they tear up. They change with the height, or the sides of the
+	// clouds would show grooves that run straight up
 	if (near > 0.)
-		s += near*0.12*(textureLod(cloudTile, map*cloudTileScale.w, 0.).w - 0.62);
+	{
+		highp vec2 fine = (map + z*vec2(1.2, -0.9))*cloudTileScale.w;
+		s += near*(0.12 + 0.3*(1. - clamp(s/0.3, 0., 1.)))*(textureLod(cloudTile, fine, 0.).w - 0.62)
+		   + near*0.1*(textureLod(cloudTile, fine*2.7, 0.).w - 0.62);
+	}
 	// a rounded top, and an underside that is flat but for its rim
 	highp float height = cloudSize*f.y;
 	highp float top = height*s/pow(abs(s) + 0.01, 0.3);
 	return vec2(top, 0.3*height*pow(1. - clamp(s/0.35, 0., 1.), 2.));
+}
+
+// The sunlight on a side of a cloud with the Sun higher by this much (degrees) than at the base over the observer
+highp vec3 cloudSunlight(highp float offset)
+{
+	highp float x = clamp((offset - sideSunOffset.x)/sideSunOffset.y, 0., 3.999);
+	highp int i = int(x);
+	return exp(mix(sideSunLog[i], sideSunLog[i + 1], x - float(i)));
 }
 
 highp float shellDistance(highp float b, highp float c)
@@ -253,7 +275,7 @@ void main(void)
 
 	// Through the layer, until the clouds are opaque; the first place in a cloud is the one we see. Long steps look for
 	// the clouds, short ones find their surface
-	highp float depth = 0., hitT = -1., hitZ = 0., hitTop = 0., hitUnder = 0., hitLod = 0.;
+	highp float depth = 0., hitT = -1., hitZ = 0., hitTop = 0., hitUnder = 0., hitLod = 0., hitNear = 0.;
 	for (int k = 0; k < steps && depth < 7.; ++k)
 	{
 		highp float t = t0 + float(k)*ds;
@@ -261,7 +283,7 @@ void main(void)
 		highp float z = length(p) - cloudRadii.y;
 		highp float foot = max(t*cloudPixel, 0.1*ds);
 		highp float lod = max(log2(foot/cloudCover.z), 0.);
-		highp float near = 1. - smoothstep(0.03, 0.12, foot);
+		highp float near = 1. - smoothstep(0.015, 0.05, foot/cloudSize);
 		// A blurred look at the map tells whether a cloud lies anywhere near this step (the clear parts are clamped)
 		if (textureLod(cloudTile, cloudMap(p + 0.5*ds*altAz)*cloudTileScale.x, log2(2.*ds/cloudCover.z)).x > -0.345)
 		{
@@ -271,11 +293,12 @@ void main(void)
 				highp float u = t + (float(j) + 0.5)*dt;
 				highp vec3 q = vec3(altAz.xy*u, r0 + altAz.z*u);
 				highp float height = length(q) - cloudRadii.y;
-				highp vec2 h = cloudHeights(cloudMap(q), lod, near);
+				highp vec2 h = cloudHeights(cloudMap(q), lod, near, height);
 				highp float e = max(0.012, foot);
-				highp float inside = smoothstep(-e, e, min(h.x - height, height - h.y));
+				// (the density grows over the first meters into the cloud)
+				highp float inside = smoothstep(-e, e + 0.05*cloudSize, min(h.x - height, height - h.y));
 				depth += cloudCover.w*dt*inside;
-				if (hitT < 0. && inside > 0.3)
+				if (hitT < 0. && depth > 0.03)
 				{
 					// the surface lies between this place and the last one
 					highp float inner = u, outer = u - dt;
@@ -284,8 +307,8 @@ void main(void)
 						highp float mid = 0.5*(inner + outer);
 						q = vec3(altAz.xy*mid, r0 + altAz.z*mid);
 						height = length(q) - cloudRadii.y;
-						h = cloudHeights(cloudMap(q), lod, near);
-						if (min(h.x - height, height - h.y) > 0.)
+						h = cloudHeights(cloudMap(q), lod, near, height);
+						if (min(h.x - height, height - h.y) > -e)
 							inner = mid;
 						else
 							outer = mid;
@@ -295,6 +318,7 @@ void main(void)
 					hitTop = h.x;
 					hitUnder = h.y;
 					hitLod = lod;
+					hitNear = near;
 				}
 			}
 		}
@@ -306,26 +330,73 @@ void main(void)
 	}
 	highp float T = exp(-depth);
 
-	// The base, or a side with its normal from the slope of the top: the clouds stand on the local level
+	// The normal of the surface, from the slope of the top. The clouds stand on the local level
 	highp vec3 p = vec3(altAz.xy*hitT, r0 + altAz.z*hitT);
-	highp float delta = max(0.04, hitT*cloudPixel);
+	highp float delta = max(0.035*cloudSize, 2.*hitT*cloudPixel);
+	// (the base goes over into the sides with the height)
+	highp float fromBelow = 1. - smoothstep(0., 0.3*cloudSize, hitZ);
 	highp vec2 map = cloudMap(p);
-	highp vec2 slope = vec2(cloudHeights(cloudMap(p + vec3(delta, 0., 0.)), hitLod, 0.).x, cloudHeights(cloudMap(p + vec3(0., delta, 0.)), hitLod, 0.).x) - cloudHeights(map, hitLod, 0.).x;
+	highp float centerTop = cloudHeights(map, hitLod, 0.5*hitNear, hitZ).x;
+	highp vec2 slope = vec2(cloudHeights(cloudMap(p + vec3(delta, 0., 0.)), hitLod, 0.5*hitNear, hitZ).x, cloudHeights(cloudMap(p + vec3(0., delta, 0.)), hitLod, 0.5*hitNear, hitZ).x) - centerTop;
 	highp vec3 normal = normalize(vec3(-slope/delta, 1.));
+
+	// The hollows between the lobes see less of the sky
+	highp float blurred = cloudHeights(map, hitLod + 3.5, 0., 0.).x;
+	highp float open = clamp(1. - 1.5*(blurred - hitZ)/(0.3*cloudSize), 0.35, 1.);
+
+	// The shadow from the clouds themselves and each other towards the light, in longer steps further away: scattered
+	// many times, light gets into the clouds much deeper than their extinction says
+	highp float shadow = 1.;
+	if (hitT*cloudPixel < 0.3 && cloudKey.z > -0.05)
+	{
+		highp float seen = 0., reach = 0.05*cloudSize;
+		highp vec3 start = p + 0.03*cloudSize*mix(normal, vec3(0., 0., -1.), fromBelow);
+		for (int k = 0; k < 6; ++k)
+		{
+			highp vec3 q = start + reach*cloudKey;
+			highp float height = length(q) - cloudRadii.y;
+			highp vec2 h = cloudHeights(cloudMap(q), hitLod + 0.7*float(k), 0., 0.);
+			seen += 0.5*reach*smoothstep(0., 0.1*reach + 0.03, min(h.x - height, height - h.y));
+			reach *= 1.9;
+		}
+		shadow = exp(-4.*seen/cloudSize);
+	}
+
+	highp float sunCos = dot(altAz, cloudSun), moonCos = dot(altAz, cloudMoon);
 	highp float high = clamp(hitZ/max(hitTop, 0.05), 0., 1.);
-	highp vec3 side = sideSky*(0.45 + 0.35*normal.z + 0.2*high)
-	                + sideSun*max(dot(normal, cloudSun), 0.) + sideMoon*max(dot(normal, cloudMoon), 0.);
-	// (from below the line of sight meets the underside, and the thin rim lets more through)
-	highp float fromBelow = smoothstep(0.08, -0.02, hitZ - hitUnder)*(1. - smoothstep(0.1, 0.4, hitZ));
-	highp float rim = clamp(hitUnder/0.1, 0., 1.);
-	highp vec3 light = mix(side, cloudLight + 0.4*rim*(side - cloudLight), fromBelow);
+	// Towards the Sun a cloud far away stands under a higher Sun, by the curve of the Earth, and so does a higher part of it
+	highp vec2 sunWay = cloudSun.xy/max(length(cloudSun.xy), 0.01);
+	highp vec3 sideSun = cloudSunlight(dot(p.xy, sunWay)*57.3/7433. + 0.35*hitZ);
+	highp float keyIsSun = step(0.5, dot(cloudKey, cloudSun));
+	// (soft on the side away from the light, which the cloud lets through)
+	highp float lit = 0.2 + 0.8*shadow;
+	highp vec3 side = sideSky*(0.45 + 0.35*normal.z + 0.2*high)*open
+	                + sideSun*clamp((dot(normal, cloudSun) + 0.5)/1.5, 0., 1.)*mix(1., lit, keyIsSun)
+	                + sideMoon*clamp((dot(normal, cloudMoon) + 0.5)/1.5, 0., 1.)*mix(lit, 1., keyIsSun);
+
+	// From below the line of sight meets the underside. It reflects the ground and lets through what falls on its top, less
+	// where the cloud is thick; towards the Sun that light goes on forwards
+	highp float through = 1./(1. + 6.75*max(hitTop - hitZ, 0.)/cloudSize);
+	highp float forwards = 1. + 3.*exp(-(1. - sunCos)/0.06);
+	highp vec3 base = mix(cloudBelow, cloudAbove, through) + through*cloudAboveSun*forwards*shadow + cloudCity;
+	// A low Sun lights the bumps of the underside from the side, and the light spreads in the cloud
+	highp float lowSun = 1. - smoothstep(0.03, 0.3, abs(cloudSun.z));
+	base += sideSun*lowSun*lit*(0.2 + 0.6*clamp(dot(normalize(vec3(normal.xy, 0.05)), cloudSun), 0., 1.))*(1. + 3.*exp(-(1. - sunCos)/0.15));
+	highp vec3 light = mix(side, base, fromBelow);
+
+	// The thin edges scatter the light of the Sun and the Moon forwards (Henyey-Greenstein with g = 0.85)
+	highp vec3 silver = silverSun*(0.2775/pow(1.7225 - 1.7*sunCos, 1.5)) + silverMoon*(0.2775/pow(1.7225 - 1.7*moonCos, 1.5));
+	light += silver*T*(1. - T);
 
 	// The way through the air dims the cloud and adds the light of the air (Rayleigh phase function)
 	highp vec3 way = exp(-airExtinction*hitT);
-	highp float sunCos = dot(altAz, cloudSun), moonCos = dot(altAz, cloudMoon);
-	highp vec3 air = (1. - way)*(airSky + airSun*0.75*(1. + sunCos*sunCos) + airMoon*0.75*(1. + moonCos*moonCos));
+	highp vec3 air = (1. - way)*(airSky + airMoon*0.75*(1. + moonCos*moonCos));
+	// In sunlit air the sky behind the cloud stands for the air in front of it, so that far clouds fade into the sky. It does
+	// not do so near the Sun, where the air lies in the shadow of the cloud
+	highp float kept = (1. - way.y)*airSunlit*(1. - smoothstep(0.6, 0.98, sunCos));
+	highp float cover = (1. - T)*(1. - kept);
 	// out = source + scene x alpha
-	FRAG_COLOR = vec4((light*way + air)*(1. - T), T);
+	FRAG_COLOR = vec4((light*way + air)*cover, 1. - cover);
 }
 )";
 	if (!newProgram->addShaderFromSourceCode(QOpenGLShader::Fragment, frag))
@@ -384,8 +455,11 @@ void CloudMgr::setLightUniforms(const StelCore* core, QOpenGLShaderProgram& p) c
 			light[i] = lux*static_cast<double>(tint[static_cast<int>(i)]);
 		return direction;
 	};
-	const Vec3d sun = body(ssystem->getSun(), s.sun, s.sunSine);
+	Vec3d sun = ssystem->getSun()->getAltAzPosGeometric(core);
+	sun.normalize();
+	s.sunSine = sun[2];
 	s.sunAltitude = std::asin(std::clamp(s.sunSine, -1., 1.));
+	s.top = CloudShape::BaseHeight + 0.6*size;
 	const Vec3d moon = body(ssystem->getMoon(), s.moon, s.moonSine);
 
 	s.artificial = drawer->getLightPollutionLuminance();
@@ -417,12 +491,26 @@ void CloudMgr::setLightUniforms(const StelCore* core, QOpenGLShaderProgram& p) c
 	const auto direction = [](const Vec3d& v) {return QVector3D(static_cast<float>(v[0]), static_cast<float>(v[1]), static_cast<float>(v[2]));};
 	p.setUniformValue("cloudSun", direction(sun));
 	p.setUniformValue("cloudMoon", direction(moon));
-	p.setUniformValue("cloudLight", scene(light.cloud));
+	// The shadows follow the Sun while it lights the clouds, and otherwise the Moon
+	p.setUniformValue("cloudKey", direction(light.sideSun[3][1] > light.sideMoon[1] ? sun : moon));
+	p.setUniformValue("cloudBelow", scene(light.below));
+	p.setUniformValue("cloudAbove", scene(light.above));
+	p.setUniformValue("cloudAboveSun", scene(light.aboveSun));
+	p.setUniformValue("cloudCity", scene(light.city));
 	p.setUniformValue("sideSky", scene(light.sideSky));
-	p.setUniformValue("sideSun", scene(light.sideSun));
+	QVector3D sideSunLog[5];
+	for (std::size_t k = 0; k < 5; ++k)
+	{
+		const QVector3D v = scene(light.sideSun[k]);
+		sideSunLog[k] = QVector3D(std::log(std::max(v.x(), 1e-30f)), std::log(std::max(v.y(), 1e-30f)), std::log(std::max(v.z(), 1e-30f)));
+	}
+	p.setUniformValueArray("sideSunLog", sideSunLog, 5);
+	p.setUniformValue("sideSunOffset", QVector2D(static_cast<float>(CloudLight::SunOffsetStart), static_cast<float>(CloudLight::SunOffsetStep)));
+	p.setUniformValue("silverSun", scene(light.silverSun));
+	p.setUniformValue("silverMoon", scene(light.silverMoon));
 	p.setUniformValue("sideMoon", scene(light.sideMoon));
 	p.setUniformValue("airSky", scene(light.airSky));
-	p.setUniformValue("airSun", scene(light.airSun));
+	p.setUniformValue("airSunlit", static_cast<float>(light.airSunlit));
 	p.setUniformValue("airMoon", scene(light.airMoon));
 	p.setUniformValue("airExtinction", QVector3D(static_cast<float>(light.extinction[0]), static_cast<float>(light.extinction[1]), static_cast<float>(light.extinction[2])));
 }

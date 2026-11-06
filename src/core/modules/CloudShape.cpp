@@ -190,7 +190,7 @@ double CloudShape::transmission(const std::vector<float>& tile, double cover, do
 		const double rim = 1. - std::clamp(shape/0.35, 0., 1.);
 		const double under = 0.3*height*rim*rim;
 		const double level = r - base;
-		const double e = std::clamp((std::min(topHeight - level, level - under) + 0.012)/0.024, 0., 1.);
+		const double e = std::clamp((std::min(topHeight - level, level - under) + 0.012)/(0.024 + 0.05*size), 0., 1.);
 		depth += Extinction*ds*e*e*(3. - 2.*e);
 		if (depth > 7.)
 			return 0.;

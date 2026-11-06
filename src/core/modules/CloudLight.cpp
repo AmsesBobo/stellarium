@@ -24,8 +24,8 @@
 
 namespace
 {
-constexpr double Reflectance = 0.77;    // of the base of the clouds
-constexpr double Transmittance = 0.23;  // diffuse, through the clouds
+constexpr double SolarIlluminance = 133000.;  // lux, above the atmosphere
+constexpr double BaseHeightForLight = 1.5;    // km
 constexpr double GroundAlbedo = 0.2;
 constexpr double SideReflectance = 0.85;
 constexpr double DegreesToRadians = M_PI/180.;
@@ -35,6 +35,11 @@ constexpr double RayleighHeight = 8.;    // km
 constexpr double HazeHeight = 1.5;       // km
 constexpr double HazeColor[3] = {0.87, 1., 1.2};
 constexpr double ExtinctionOfCleanAir = 0.12;  // mag/airmass, with the ozone
+constexpr double OzoneDepth[3] = {0.041, 0.026, 0.004};  // 300 DU in the Chappuis band
+constexpr double OzoneHeight = 22., OzoneWidth = 6.;     // km
+// Much of what the haze scatters stays in the beam, by forward scattering
+constexpr double HazeForwardShare = 0.6;
+constexpr double RefractedEarthRadius = 6371.*7./6.;     // km
 
 CloudLight::Rgb mix(const CloudLight::Rgb& a, const CloudLight::Rgb& b, double t)
 {
@@ -72,6 +77,40 @@ double CloudLight::skyIlluminance(double sunAltitude)
 	return std::pow(10., logLux[i-1] + t*(logLux[i] - logLux[i-1]));
 }
 
+CloudLight::Rgb CloudLight::sunlightTransmission(double sunAltitude, double height, double extinction)
+{
+	// the ray from the point, over the Earth with the larger radius: x along the surface, y up from its center
+	const double radius = RefractedEarthRadius + height;
+	const double dirX = std::cos(sunAltitude), dirY = std::sin(sunAltitude);
+	// its tangent height: where a ray that goes down is lowest (with the disk of the Sun that softens it)
+	double visible = 1.;
+	if (sunAltitude < 0.)
+		visible = smooth(-0.5, 0.5, radius*dirX - RefractedEarthRadius);
+	if (visible <= 0.)
+		return {0., 0., 0.};
+	double rayleigh = 0., haze = 0., ozone = 0.;
+	double s = 0., ds = 0.25;
+	while (s < 1500.)
+	{
+		const double x = (s + 0.5*ds)*dirX, y = radius + (s + 0.5*ds)*dirY;
+		const double h = std::sqrt(x*x + y*y) - RefractedEarthRadius;
+		if (h > 80.)
+			break;
+		const double level = std::max(h, 0.);
+		rayleigh += ds*std::exp(-level/RayleighHeight)/RayleighHeight;
+		haze += ds*std::exp(-level/HazeHeight)/HazeHeight;
+		const double o = (level - OzoneHeight)/OzoneWidth;
+		ozone += ds*std::exp(-0.5*o*o)/(OzoneWidth*std::sqrt(2.*M_PI));
+		s += ds;
+		ds = std::min(ds*1.1, 8.);
+	}
+	const double hazeDepth = std::max(0., extinction - ExtinctionOfCleanAir)/1.086;
+	Rgb t;
+	for (std::size_t i = 0; i < 3; ++i)
+		t[i] = visible*std::exp(-RayleighDepth[i]*rayleigh - (1. - HazeForwardShare)*hazeDepth*HazeColor[i]*haze - OzoneDepth[i]*ozone);
+	return t;
+}
+
 double CloudLight::cloudAmplification(double artificial)
 {
 	// the power law through (0.00025 cd/m^2, 4.7) and (0.0025 cd/m^2, 10.7)
@@ -82,21 +121,32 @@ CloudLight::Light CloudLight::compute(const Sources& s)
 {
 	Light light;
 	const Rgb sky = skyColor(s.sunAltitude);
-	// The air below the clouds stands in the shadow of the Earth with the Sun more than about 1.2 degrees below the horizon
-	const double sunlitAir = smooth(-2.5*DegreesToRadians, -0.5*DegreesToRadians, s.sunAltitude);
+	for (std::size_t k = 0; k < light.sideSun.size(); ++k)
+	{
+		const double offset = SunOffsetStart + SunOffsetStep*static_cast<double>(k);
+		const Rgb t = sunlightTransmission(s.sunAltitude + offset*DegreesToRadians, BaseHeightForLight, s.extinction);
+		for (std::size_t i = 0; i < 3; ++i)
+			light.sideSun[k][i] = SideReflectance*SolarIlluminance*t[i]/M_PI;
+	}
+	const Rgb sunTop = sunlightTransmission(s.sunAltitude, s.top, s.extinction);
+	light.airSunlit = smooth(-0.5*DegreesToRadians, 3.*DegreesToRadians, s.sunAltitude);
 	const double hazeDepth = std::max(0., s.extinction - ExtinctionOfCleanAir)/1.086;
 	const double cloudLight = cloudAmplification(s.artificial)*s.artificial;
 	const double skyLight = skyIlluminance(s.sunAltitude);
 	for (std::size_t i = 0; i < 3; ++i)
 	{
-		const double above = skyLight*sky[i] + s.sun[i]*std::max(0., s.sunSine) + s.moon[i]*std::max(0., s.moonSine);
-		const double ground = above + s.groundExtra[i];
-		light.cloud[i] = (Reflectance*GroundAlbedo*ground + Transmittance*above)/M_PI + cloudLight*s.lamp[i];
+		const double aboveSky = skyLight*sky[i] + s.moon[i]*std::max(0., s.moonSine);
+		const double aboveSun = SolarIlluminance*sunTop[i]*std::max(0., s.sunSine);
+		const double ground = aboveSky + aboveSun + s.groundExtra[i];
+		light.below[i] = GroundAlbedo*ground/M_PI;
+		light.above[i] = aboveSky/M_PI;
+		light.aboveSun[i] = aboveSun/M_PI;
+		light.city[i] = cloudLight*s.lamp[i];
 		light.airSky[i] = skyLight*sky[i]/(4.*M_PI) + s.artificial*s.lamp[i];
-		light.airSun[i] = sunlitAir*s.sun[i]/(4.*M_PI);
 		light.airMoon[i] = (s.moonSine > 0. ? 1. : 0.)*s.moon[i]/(4.*M_PI);
 		light.sideSky[i] = SideReflectance*(skyLight*sky[i] + 0.5*GroundAlbedo*ground)/M_PI + 0.5*cloudLight*s.lamp[i];
-		light.sideSun[i] = sunlitAir*SideReflectance*s.sun[i]/M_PI;
+		light.silverSun[i] = SolarIlluminance*sunTop[i]/(4.*M_PI);
+		light.silverMoon[i] = (s.moonSine > 0. ? 1. : 0.)*s.moon[i]/(4.*M_PI);
 		light.sideMoon[i] = (s.moonSine > 0. ? SideReflectance : 0.)*s.moon[i]/M_PI;
 		light.extinction[i] = RayleighDepth[i]/RayleighHeight + hazeDepth*HazeColor[i]*(1. - std::exp(-1.))/HazeHeight;
 	}

@@ -26,11 +26,15 @@
 //! The light of the ordinary clouds and of the air in front of them, from what lights them at this moment. Seen from the
 //! ground a thick cloud shows its base, and it stays much the same over the sky, however much the sky behind it changes.
 //!
-//! The base is a diffuse surface, with the luminance
-//!   L = (R a E + D E) / pi + L_city
-//! It reflects the light of the ground below it, with its reflectance R and the albedo a of the ground, and it lets through
-//! the part D of the light on its top. R and D belong to a layer of an optical depth of about 30 that does not absorb
-//! (D = 1/(1 + 0.75 tau (1 - g)) with g = 0.85).
+//! The base is a diffuse surface. It reflects the light of the ground and lets through the light on its top, more where
+//! the cloud is thin: with the part D of that light that gets through (D = 1/(1 + 0.75 tau (1 - g)), g = 0.85),
+//!   L = ((1 - D) a E + D E) / pi + L_city
+//! with the albedo a of the ground. The shader applies this at each place, from the parts given here.
+//!
+//! Sunlight reaches the clouds through the air, along a ray that the refraction bends around the Earth, as a straight
+//! ray over an Earth of 7/6 of its radius. Low Sun makes it red, and it stays on the clouds after sunset, first
+//! on their undersides and then on their tops only, until the shadow of the Earth reaches them. Clouds towards the Sun stay
+//! in its light the longest.
 //!
 //! The light of the sky comes from a table of the illuminance against the altitude of the Sun, not from the average
 //! luminance of the atmosphere: that follows the bright part of the sky near the Sun and misses the cosine of a level
@@ -43,24 +47,26 @@
 //! the luminance of the cloud.
 //!
 //! Low over the horizon the sides of the clouds show. They are a white surface in the light of the sky, the ground, the Sun
-//! and the Moon.
+//! and the Moon. The thin edges of a cloud near the Sun or the Moon scatter it forwards, which makes the silver lining.
 //!
 //! The air between the observer and the cloud dims it and adds its own light. It only scatters what reaches it: direct
-//! sunlight while it stands above the shadow of the Earth, moonlight, the light of the sky, and that of towns. With
+//! moonlight, the light of the sky, that of towns, and direct sunlight while it stands above the shadow of the Earth. With
 //! the extinction along the way, the light of each source is its illuminance E, a phase function and
 //!   E (1 - exp(-tau)) / (4 pi)
-//! The air stands in the shadow of the cloud towards the Sun and the Moon, so there is no forward peak.
+//! The air stands in the shadow of the cloud towards the Sun and the Moon, so there is no forward peak. Sunlit air is not
+//! computed: the sky behind the cloud stands for it, which takes it to the color of the sky at each place.
 class CloudLight
 {
 public:
 	using Rgb = std::array<double, 3>;
+	static constexpr double SunOffsetStart = -1.5, SunOffsetStep = 0.75;
 
 	//! What lights the clouds at this moment, all linear sRGB of the scene
 	struct Sources
 	{
 		double sunAltitude = 0.;      //!< radians
-		Rgb sun = {0., 0., 0.};       //!< lux on a surface facing the Sun, with the extinction
 		double sunSine = 0.;          //!< the sine of the altitude of the Sun
+		double top = 2.3;             //!< km: the height of the tops of the clouds over the ground
 		Rgb moon = {0., 0., 0.};      //!< lux on a surface facing the Moon, with the extinction
 		double moonSine = 0.;
 		Rgb groundExtra = {0., 0., 0.}; //!< lux on the ground from other sources (the light domes, the aurorae)
@@ -72,18 +78,27 @@ public:
 	//! The light of the clouds and the air at this moment
 	struct Light
 	{
-		Rgb cloud = {0., 0., 0.};       //!< the luminance of the base of the clouds (cd/m^2)
+		Rgb below = {0., 0., 0.};       //!< the luminance of a surface that reflects all of the light of the ground
+		Rgb above = {0., 0., 0.};       //!< the same, that lets through all of the light of the sky and the Moon on its top
+		Rgb aboveSun = {0., 0., 0.};    //!< the same for the sunlight on its top
+		Rgb city = {0., 0., 0.};        //!< the luminance of the base from the light of towns
 		Rgb airSky = {0., 0., 0.};      //!< of the air, at optical depth without limit: from the sky and the towns
-		Rgb airSun = {0., 0., 0.};      //!< the same from the Sun, for a phase function of 1
+		double airSunlit = 0.;          //!< how much of the light of the sky comes from sunlit air below the clouds, from 0 to 1
 		Rgb airMoon = {0., 0., 0.};     //!< the same from the Moon
+		Rgb silverSun = {0., 0., 0.};   //!< the illuminance of the Sun on the tops, over 4 pi
+		Rgb silverMoon = {0., 0., 0.};  //!< the same of the Moon
 		Rgb extinction = {0., 0., 0.};  //!< the optical depth of the air below the clouds per km
 		Rgb sideSky = {0., 0., 0.};     //!< the luminance of the sides of the clouds in the light of the sky and the ground
-		Rgb sideSun = {0., 0., 0.};     //!< the same in sunlight, on a side that faces the Sun
+		//! The same in sunlight, on a side that faces the Sun, at the base over the observer. Clouds far away see the Sun at
+		//! another altitude, and so do their tops: the values are for its altitude plus SunOffsetStart + i SunOffsetStep degrees
+		std::array<Rgb, 5> sideSun = {};
 		Rgb sideMoon = {0., 0., 0.};    //!< the same in moonlight
 	};
 
 	static Light compute(const Sources& sources);
 
+	//! The transmission of the air for sunlight at a height (km) with the Sun at an altitude (radians) as seen from the ground
+	static Rgb sunlightTransmission(double sunAltitude, double height, double extinction);
 	//! The color of the light of the sky (at unit luminance) with the Sun at this altitude (radians)
 	static Rgb skyColor(double sunAltitude);
 	//! The horizontal illuminance (lux) from the clear sky alone with the Sun at this altitude (radians), down to the
