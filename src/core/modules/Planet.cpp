@@ -4559,8 +4559,13 @@ void Planet::draw3dModel(StelCore* core, StelProjector::ModelViewTranformP trans
 	}
 	if (photoMode)
 	{
-		const double pixPerRad = static_cast<double>(core->getProjection(StelCore::FrameJ2000)->getPixelPerRadAtCenter());
-		photoDiskPixRadius = static_cast<float>(getSpheroidAngularRadius(core)*M_PI_180*pixPerRad);
+		// The radius of the disk where it lies on the screen: far from the center of a wide field the projection
+		// stretches it, and a disk that would be small at the center is resolved there. (With the radius at the
+		// center, the PSF core drawn for a small disk and the stretched disk itself made a double image.)
+		const StelProjectorP prj = core->getProjection(StelCore::FrameJ2000);
+		Vec3d center;
+		if (!StelSkyDrawer::photoDiskImage(*prj, getJ2000EquatorialPos(core), getSpheroidAngularRadius(core)*M_PI_180, center, photoDiskPixRadius))
+			photoDiskPixRadius = static_cast<float>(getSpheroidAngularRadius(core)*M_PI_180*static_cast<double>(prj->getPixelPerRadAtCenter()));
 		photoDiskFraction = skyDrawer->getPhotoDiskFraction(photoDiskPixRadius);
 	}
 	// Photographic mode: the body moves against the stars during the exposure (the Moon visibly). Its trail and
@@ -4831,7 +4836,8 @@ void Planet::draw3dModel(StelCore* core, StelProjector::ModelViewTranformP trans
 			if (photoMag < 3.f && lensLight > 0.f)
 				skyDrawer->addPhotoGhostSource(pos, photoMag - 2.5f*std::log10(lensLight), color);
 			if (isSun)
-				skyDrawer->drawPhotoBody(&sPainter, pos, photoDiskPixRadius, photoMag, color, 1.f, Vec3d(0.), lensLight);
+				skyDrawer->drawPhotoBody(&sPainter, pos, photoDiskPixRadius, photoMag, color, 1.f, Vec3d(0.), lensLight,
+				                         getSpheroidAngularRadius(core)*M_PI_180);
 			else
 			{
 				// The light comes from the lit part: direction towards the Sun in the sky, and the illuminated fraction
@@ -4840,7 +4846,8 @@ void Planet::draw3dModel(StelCore* core, StelProjector::ModelViewTranformP trans
 				s.normalize();
 				const Vec3d sunDirection = s - p*(s*p);
 				const float k = static_cast<float>(getPhase(core->getObserverHeliocentricEclipticPos()));
-				skyDrawer->drawPhotoBody(&sPainter, pos, photoDiskPixRadius, photoMag, color, k, sunDirection, lensLight);
+				skyDrawer->drawPhotoBody(&sPainter, pos, photoDiskPixRadius, photoMag, color, k, sunDirection, lensLight,
+				                         getSpheroidAngularRadius(core)*M_PI_180);
 			}
 		}
 		return;

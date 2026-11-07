@@ -1172,11 +1172,21 @@ public slots:
 	//! @param sunDirection direction towards the Sun in the sky (J2000, perpendicular to v), used with illuminatedFraction
 	//! @param lensLight the share of the light that reaches the lens past the clouds (see CloudMgr). The core is drawn in
 	//!        the scene, where the clouds cover it too, but the halo and the spikes are drawn over everything
+	//! @param angularRadius the angular radius of the disk (radians): far from the center of a wide field the projection
+	//!        stretches the disk and moves its image off the projected center (see photoDiskImage()). 0: not known
+	bool drawPhotoBody(StelPainter* sPainter, const Vec3d& v, float diskPixRadius, float mag, const Vec3f& color,
+	                   float illuminatedFraction = 1.f, const Vec3d& sunDirection = Vec3d(0.), float lensLight = 1.f,
+	                   double angularRadius = 0.);
+	//! Photographic mode: the image on the screen of a small disk of an angular radius (radians) around the direction v.
+	//! Far from the center of a wide field the projection stretches it (a perspective projection by 1/cos^2 of the angle
+	//! from the center outwards, 1/cos across) and its center lies outside the projected center of the disk.
+	//! @param center the window position of the center of the image
+	//! @param radius the radius of a circle of the same area (pixels)
+	//! @return false if the disk is not projected
+	static bool photoDiskImage(const StelProjector& prj, const Vec3d& v, double angularRadius, Vec3d& center, float& radius);
 	//! Draw the halo and the spikes of the bright bodies of this frame (see drawPhotoBody()). StelApp calls
 	//! this after all modules, so that the lens effects also cover the landscape.
 	void drawDeferredPhotoBodies(StelCore* core);
-	bool drawPhotoBody(StelPainter* sPainter, const Vec3d& v, float diskPixRadius, float mag, const Vec3f& color,
-	                   float illuminatedFraction = 1.f, const Vec3d& sunDirection = Vec3d(0.), float lensLight = 1.f);
 
 	//! Informing the drawer whether atmosphere is displayed.
 	//! This is used to avoid twinkling/simulate extinction/refraction.

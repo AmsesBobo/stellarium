@@ -905,8 +905,31 @@ float StelSkyDrawer::getPhotoDiskFraction(float diskPixRadius) const
 	return (1.f - photoHaloFraction - spikeFraction) * (1.f - getPhotoCoreWeight(diskPixRadius));
 }
 
+bool StelSkyDrawer::photoDiskImage(const StelProjector& prj, const Vec3d& v, double angularRadius, Vec3d& center, float& radius)
+{
+	if (!(angularRadius > 0.) || !(v.normSquared() > 0.))
+		return false;
+	// Two perpendicular diameters of the disk. The projection of a small disk is nearly linear: the images of these
+	// diameters are conjugate diameters of the ellipse, which give its area and (with their ends) its center
+	const Vec3d n = v/v.norm();
+	Vec3d e1 = std::fabs(n[2]) < 0.9 ? Vec3d(0., 0., 1.)^n : Vec3d(1., 0., 0.)^n;
+	e1.normalize();
+	const Vec3d e2 = n^e1;
+	const double c = std::cos(angularRadius), s = std::sin(angularRadius);
+	Vec3d w[4];
+	const Vec3d d[4] = {e1, -e1, e2, -e2};
+	for (int i=0; i<4; ++i)
+		if (!prj.project(n*c + d[i]*s, w[i]))
+			return false;
+	center = 0.25*(w[0] + w[1] + w[2] + w[3]);
+	const double ux = 0.5*(w[0][0] - w[1][0]), uy = 0.5*(w[0][1] - w[1][1]);
+	const double vx = 0.5*(w[2][0] - w[3][0]), vy = 0.5*(w[2][1] - w[3][1]);
+	radius = static_cast<float>(std::sqrt(std::fabs(ux*vy - uy*vx)));
+	return radius > 0.f;
+}
+
 bool StelSkyDrawer::drawPhotoBody(StelPainter* sPainter, const Vec3d& v, float diskPixRadius, float mag, const Vec3f& color,
-                                  float illuminatedFraction, const Vec3d& sunDirection, float lensLight)
+                                  float illuminatedFraction, const Vec3d& sunDirection, float lensLight, double angularRadius)
 {
 	if (photoInstances.empty() || !photoStarShaderProgram)
 		return false;
@@ -984,6 +1007,14 @@ bool StelSkyDrawer::drawPhotoBody(StelPainter* sPainter, const Vec3d& v, float d
 		if (win[0] < prj->getViewportPosX() - margin || win[0] > prj->getViewportPosX() + prj->getViewportWidth() + margin ||
 		    win[1] < prj->getViewportPosY() - margin || win[1] > prj->getViewportPosY() + prj->getViewportHeight() + margin)
 			return false;
+	}
+	// Far from the center of a wide field the image of the disk lies outside the projected center: the core goes there,
+	// on the disk that the caller draws (else the two separate into a double image)
+	{
+		Vec3d center;
+		float unused = 0.f;
+		if (photoDiskImage(*prj, v, angularRadius, center, unused))
+			win.set(center[0], center[1], win[2]);
 	}
 
 	// Direction towards the Sun on the screen
