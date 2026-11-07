@@ -103,6 +103,9 @@ public:
 	static Motion motion(double jd);
 	//! How much faster than at 1.5 km the wind blows at a height (km): it grows with the height up to the jet stream
 	static double windAtHeight(double height) {return 0.75 + height/6.;}
+	//! How far the wind turns with the height (radians per km): clockwise seen from above in the north, as when warm air
+	//! comes in, and the other way in the south
+	static constexpr double WindTurn = 3.*M_PI/180.;
 	//! The cover (0 to FrontMax) of the fronts at a place of the map (km), without the shift of a layer
 	static double frontCover(const std::vector<float>& tile, double mapX, double mapY, const Front& front, const Motion& motion);
 	//! How the clouds that the Sun makes grow over the day (0.7 to 1 of the cover, most in the afternoon), at a longitude (degrees)

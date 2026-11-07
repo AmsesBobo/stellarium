@@ -1646,7 +1646,7 @@
             <item row="8" column="0">
              <widget class="QCheckBox" name="cloudsManualWindCheckBox">
               <property name="toolTip">
-               <string>Set the wind by hand, as for the clouds of a photograph, in place of the wind that follows from the date. Each layer has its own wind; the cirrus go with that of layer 1, faster by their height.</string>
+               <string>Set the wind by hand, as for the clouds of a photograph, in place of the wind that follows from the date. Each layer has its own wind; the cirrus go with that of layer 1, faster and turned by their height.</string>
               </property>
               <property name="text">
                <string>Wind by hand</string>

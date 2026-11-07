@@ -1455,8 +1455,10 @@ scatter the light once: strongly forwards, with a faint halo of
 them sees the Sun at its own altitude, higher towards the Sun by the
 curve of the Earth, so after sunset they glow golden and then red, and
 the furthest ones towards the Sun keep the light the longest, as before
-sunrise. The property \texttt{cirrusOpticalDepth} sets how dense they
-are (0.15 by default).
+sunrise. They cast faint shadows on the clouds below them, most of all
+with a low Sun, when its light goes through them on a long slant. The
+property \texttt{cirrusOpticalDepth} sets how dense they are (0.15 by
+default).
 
 To match the clouds of a photograph, a \emph{Cloud bank} lets them stand
 only in a sector of the sky: its \emph{Azimuth} and \emph{Width}, and how
@@ -1491,10 +1493,12 @@ The wind follows from the date: westerly on average, mostly 2 to
 16\,m/s at the first layer, and it carries the clouds, while they grow and dissolve in some 10 to 20
 minutes. Higher up it blows faster, by about a third at 3.5\,km and
 twice at 8\,km, though the higher clouds still seem to move more slowly
-across the sky, being further away. To match a photograph or a time-lapse, \emph{Wind by hand} sets
+across the sky, being further away; and it turns by 3$^\circ$ per km,
+clockwise seen from above in the northern hemisphere, as when warm air
+comes in. To match a photograph or a time-lapse, \emph{Wind by hand} sets
 the \emph{Speed} and the direction it blows \emph{From} (270$^\circ$:
 from the west) instead, for each layer of its own; the cirrus go with the
-wind of the first layer, faster by their height. The fronts always go
+wind of the first layer, faster and turned by their height. The fronts always go
 with the wind of the first layer. The camera averages what moves during its exposure, unless the
 mount is set to \emph{No motion}.
 

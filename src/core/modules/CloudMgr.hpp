@@ -95,7 +95,7 @@ class CloudMgr : public StelModule
 	//! Set the wind by hand, in place of the wind that follows from the date
 	Q_PROPERTY(bool flagManualWind READ getFlagManualWind WRITE setFlagManualWind NOTIFY flagManualWindChanged)
 	//! The speed of the wind set by hand (m/s), from 0 to 60, for the layer that the properties change. The cirrus go with
-	//! the wind of the first layer, faster by their height
+	//! the wind of the first layer, faster and turned by their height
 	Q_PROPERTY(double windSpeed READ getWindSpeed WRITE setWindSpeed NOTIFY windSpeedChanged)
 	//! The direction that the wind set by hand blows from (degrees from the north through the east)
 	Q_PROPERTY(double windDirection READ getWindDirection WRITE setWindDirection NOTIFY windDirectionChanged)

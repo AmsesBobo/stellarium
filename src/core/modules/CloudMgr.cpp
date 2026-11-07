@@ -78,6 +78,31 @@ QByteArray frontShader()
 	       "}\n";
 }
 
+// The density of the cirrus, for both shaders: see CloudShape::cirrusDensity()
+QByteArray cirrusShader()
+{
+	return R"(highp float cirrusNoise(highp vec2 uv, highp float lod)
+{
+	return textureLod(cloudTile, uv, lod).z;
+}
+
+// The density from 0 to 1 at a place of the map, with the size of a pixel there (km) and the cover: see
+// CloudShape::cirrusDensity()
+highp float cirrusDensity(highp vec2 map, highp float foot, highp float cover)
+{
+	highp vec2 m = vec2(0.819*map.x - 0.574*map.y, 0.574*map.x + 0.819*map.y);
+	// the fibres bend
+	m += 9.*vec2(cirrusNoise(map/60. + 0.5, max(log2(foot*1024./60.), 0.)), cirrusNoise(map/60. + 0.25, max(log2(foot*1024./60.), 0.))) - 4.5;
+	highp float patch = cirrusNoise(map/190., max(log2(foot*1024./190.), 0.));
+	highp float area = clamp((patch - 0.85 + 0.9*cover)/0.2, 0., 1.);
+	highp float fibres = 0.5*cirrusNoise(vec2(m.x/40., m.y/10.), max(log2(foot*1024./10.), 0.))
+	                   + 0.3*cirrusNoise(vec2(m.x/12. + 0.37, m.y/3. + 0.71), max(log2(foot*1024./3.), 0.))
+	                   + 0.2*cirrusNoise(vec2(m.x/4. + 0.13, m.y/0.9 + 0.29), max(log2(foot*1024./0.9), 0.));
+	return area*smoothstep(0.4, 0.68, fibres + 0.3*(area - 0.5));
+}
+)";
+}
+
 QVector4D frontUniform(const CloudShape::Front& front)
 {
 	return QVector4D(front.on ? 1.f : 0.f, static_cast<float>(front.shift), static_cast<float>(front.bias), static_cast<float>(front.scale));
@@ -465,8 +490,9 @@ CloudShape::Motion CloudMgr::motionAt(const StelCore* core, double jd, int wind)
 	{
 		if (qFuzzyCompare(faster, 1.))
 			return m;
-		// Faster higher up: the map moves on by what the wind of the date carried it over the observer since the start of
-		// a span of 10 days, times the factor less one (the clouds jump at its ends, as below)
+		// Faster higher up, and turned: the map moves on by what the wind of the date carried it over the observer since
+		// the start of a span of 10 days, turned and times the factor, less that way itself (the clouds jump at the ends of
+		// the span, as below). (The map turns the same way for the south, where it is seen from below)
 		const StelLocation& location = core->getCurrentLocation();
 		const double phi = static_cast<double>(location.getLatitude())*M_PI/180.;
 		const double lambda = static_cast<double>(location.getLongitude())*M_PI/180.;
@@ -475,17 +501,19 @@ CloudShape::Motion CloudMgr::motionAt(const StelCore* core, double jd, int wind)
 		const CloudShape::Motion start = CloudShape::motion(10.*std::floor(jd/10.));
 		const double dx = (m.cosine - start.cosine)*x - (m.sine - start.sine)*y + m.offsetX - start.offsetX;
 		const double dy = (m.sine - start.sine)*x + (m.cosine - start.cosine)*y + m.offsetY - start.offsetY;
-		m.offsetX += (faster - 1.)*dx;
-		m.offsetY += (faster - 1.)*dy;
+		const double turn = -CloudShape::WindTurn*(windHeight(wind) - layers[0].base);
+		m.offsetX += faster*(std::cos(turn)*dx - std::sin(turn)*dy) - dx;
+		m.offsetY += faster*(std::sin(turn)*dx + std::cos(turn)*dy) - dy;
 		return m;
 	}
-	// (the cirrus go with the wind of the first layer, faster by their height)
-	const double windSpeed = wind == CirrusWind ? windSpeeds[0]*faster : windSpeeds[wind];
-	const double windDirection = windDirections[wind == CirrusWind ? 0 : wind];
 	// The wind set by hand: the map does not turn, and moves at the speed of the wind over the observer. Its way counts
 	// from the start of a span of 10 days, to keep it short for the precision of the shader: the clouds jump at its ends
 	const StelLocation& location = core->getCurrentLocation();
 	const double phi = static_cast<double>(location.getLatitude())*M_PI/180.;
+	// (the cirrus go with the wind of the first layer, faster and turned by their height)
+	const double windSpeed = wind == CirrusWind ? windSpeeds[0]*faster : windSpeeds[wind];
+	const double windDirection = wind == CirrusWind ? windDirections[0] + (phi >= 0. ? 1. : -1.)*CloudShape::WindTurn*180./M_PI*(cirrusHeight - layers[0].base)
+	                                                : windDirections[wind];
 	const double lambda = static_cast<double>(location.getLongitude())*M_PI/180.;
 	const double towards = (windDirection + 180.)*M_PI/180.;
 	const double east = 0.001*windSpeed*std::sin(towards), north = 0.001*windSpeed*std::cos(towards);  // km/s
@@ -648,6 +676,7 @@ void main()
 	                        + projector.getUnProjectShader()
 	                        + extinction.getForwardTransformShader()
 	                        + frontShader()
+	                        + cirrusShader()
 	                        + R"(
 VARYING highp vec3 ndcPos;
 uniform highp mat4 projectionMatrixInverse;
@@ -700,6 +729,10 @@ uniform highp vec4 otherFront;
 uniform highp vec2 otherShift;
 uniform highp vec3 otherRadius;
 uniform highp vec4 otherTurn;
+// The cirrus, which also cast shadows on the clouds below
+uniform highp vec4 cirrusShade;     // their optical depth at the densest (0: none), the radius of their layer, their cover
+uniform highp vec4 cirrusTurn;      // where the wind has carried them (as cloudTurn)
+uniform highp vec4 cirrusFront;     // their fronts (see frontCover())
 
 // The place on the map: a polar stereographic projection, in km, of each hemisphere
 highp vec2 cloudMoment = vec2(0., 0.);    // where the clouds are at this moment of the exposure, against its middle
@@ -720,6 +753,20 @@ highp vec2 cloudMapAt(highp vec3 p, highp float radius, highp vec2 shift, highp 
 highp vec2 cloudMap(highp vec3 p)
 {
 	return cloudMapAt(p, cloudRadii.y, cloudShift, cloudTurn);
+}
+
+// The light that the cirrus let through to a place, towards the light key (a soft shadow)
+highp float cirrusShadow(highp vec3 p, highp vec3 key)
+{
+	highp float r = length(p);
+	if (cirrusShade.x <= 0. || r > cirrusShade.y || key.z < -0.03)
+		return 1.;
+	highp vec3 q = p + key*(cirrusShade.y - r)/max(dot(p/r, key), 0.03);
+	highp vec2 still = stillMap(q, cirrusShade.y);
+	highp vec2 map = vec2(cirrusTurn.x*still.x - cirrusTurn.y*still.y, cirrusTurn.y*still.x + cirrusTurn.x*still.y) + cirrusTurn.zw + vec2(4711.);
+	highp float cover = cirrusFront.x > 0. ? frontCover(frontMap(still), cirrusFront) : cirrusShade.z;
+	highp float slant = 1./max(dot(q/length(q), key), 0.05);
+	return exp(-cirrusShade.x*cirrusDensity(map, 0.4, cover)*slant);
 }
 
 // What the cover and the growth add to the shape around a place p with its place on the map, with the cover offset of a
@@ -991,8 +1038,8 @@ void main(void)
 		highp float around = 1. - towardKey;
 		shadow = (exp(-tau) + around*(0.5*exp(-0.4*tau) + 0.25*exp(-0.15*tau)))/(1. + 0.75*around);
 	}
-	// and the shadow of the layer above
-	highp float upper = otherShadow(p, cloudKey);
+	// and the shadows of the layer above and of the cirrus
+	highp float upper = otherShadow(p, cloudKey)*cirrusShadow(p, cloudKey);
 	shadow *= upper;
 
 	highp float sunCos = dot(altAz, cloudSun), moonCos = dot(altAz, cloudMoon);
@@ -1014,7 +1061,8 @@ void main(void)
 	// From below the line of sight meets the underside. It reflects the ground and lets through what falls on its top, less
 	// where the cloud is thick; towards the Sun that light goes on forwards
 	highp float through = 1./(1. + 6.75*cloudShape.z*max(hitTop - hitZ, 0.)/cloudSize);
-	highp float forwards = 1. + 3.*exp(-(1. - sunCos)/0.06);
+	// (only what goes through thin clouds keeps its way: through thick ones the light is scattered to all sides)
+	highp float forwards = 1. + 3.*exp(-(1. - sunCos)/0.06)*through*through;
 	highp vec3 base = mix(cloudBelow, cloudAbove, through) + through*cloudAboveSun*forwards*shadow + cloudCity;
 	// A low Sun lights the bumps of the underside from the side, and the light spreads in the cloud
 	highp float lowSun = 1. - smoothstep(0.03, 0.3, abs(cloudSun.z));
@@ -1345,6 +1393,11 @@ void CloudMgr::drawLayer(StelCore* core, const StelProjector& prj, int i, int ot
 	// (the layer above in its own wind, the fronts in that of the first layer)
 	p.setUniformValue("otherTurn", turn(motionAt(core, core->getJD(), other >= 0 ? other : i)));
 	p.setUniformValue("cloudFrontTurn", turn(motionAt(core, core->getJD(), 0)));
+	// (the cirrus cast their shadows if they show)
+	p.setUniformValue("cirrusShade", QVector4D(isCirrusShown(core) ? static_cast<float>(cirrusOpticalDepth) : 0.f, static_cast<float>(EarthRadius + cirrusHeight),
+	                                           static_cast<float>(currentCirrusCover), 0.f));
+	p.setUniformValue("cirrusTurn", turn(motionAt(core, core->getJD(), CirrusWind)));
+	p.setUniformValue("cirrusFront", frontUniform(cirrusFront));
 	p.setUniformValue("cloudGrow", QVector2D(static_cast<float>(motion.growU), static_cast<float>(motion.growV)));
 	p.setUniformValue("cloudBoil", QVector2D(static_cast<float>(motion.boilX), static_cast<float>(motion.boilY)));
 	p.setUniformValue("cloudFrontDrift", QVector2D(static_cast<float>(motion.frontU), static_cast<float>(motion.frontV)));
@@ -1397,6 +1450,7 @@ void main()
 	const QByteArray frag = StelOpenGL::globalShaderPrefix(StelOpenGL::FRAGMENT_SHADER)
 	                        + projector.getUnProjectShader()
 	                        + frontShader()
+	                        + cirrusShader()
 	                        + R"(
 VARYING highp vec3 ndcPos;
 uniform highp mat4 projectionMatrixInverse;
@@ -1415,26 +1469,6 @@ uniform highp vec3 cirrusSunLog[33];// the logarithm of the sunlight on the laye
 uniform highp vec3 cirrusMoonLight; // the moonlight over 4 pi
 uniform highp vec3 cirrusSky;       // the light of the sky, the ground and the towns over 4 pi
 uniform highp vec3 cirrusTau;       // the optical depth of the air at the zenith
-
-highp float cirrusNoise(highp vec2 uv, highp float lod)
-{
-	return textureLod(cloudTile, uv, lod).z;
-}
-
-// The density from 0 to 1 at a place of the map, with the size of a pixel there (km) and the cover: see
-// CloudShape::cirrusDensity()
-highp float cirrusDensity(highp vec2 map, highp float foot, highp float cover)
-{
-	highp vec2 m = vec2(0.819*map.x - 0.574*map.y, 0.574*map.x + 0.819*map.y);
-	// the fibres bend
-	m += 9.*vec2(cirrusNoise(map/60. + 0.5, max(log2(foot*1024./60.), 0.)), cirrusNoise(map/60. + 0.25, max(log2(foot*1024./60.), 0.))) - 4.5;
-	highp float patch = cirrusNoise(map/190., max(log2(foot*1024./190.), 0.));
-	highp float area = clamp((patch - 0.85 + 0.9*cover)/0.2, 0., 1.);
-	highp float fibres = 0.5*cirrusNoise(vec2(m.x/40., m.y/10.), max(log2(foot*1024./10.), 0.))
-	                   + 0.3*cirrusNoise(vec2(m.x/12. + 0.37, m.y/3. + 0.71), max(log2(foot*1024./3.), 0.))
-	                   + 0.2*cirrusNoise(vec2(m.x/4. + 0.13, m.y/0.9 + 0.29), max(log2(foot*1024./0.9), 0.));
-	return area*smoothstep(0.4, 0.68, fibres + 0.3*(area - 0.5));
-}
 
 // Ice crystals: a strong forward peak, light to all sides, and the halo of 22 degrees, red inside and sharp there
 highp vec3 cirrusPhase(highp float cosine)
