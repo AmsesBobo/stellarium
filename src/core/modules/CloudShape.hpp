@@ -101,6 +101,8 @@ public:
 		double frontU = 0., frontV = 0.;  //!< where the fronts lie on the tile, as they change
 	};
 	static Motion motion(double jd);
+	//! How much faster than at 1.5 km the wind blows at a height (km): it grows with the height up to the jet stream
+	static double windAtHeight(double height) {return 0.75 + height/6.;}
 	//! The cover (0 to FrontMax) of the fronts at a place of the map (km), without the shift of a layer
 	static double frontCover(const std::vector<float>& tile, double mapX, double mapY, const Front& front, const Motion& motion);
 	//! How the clouds that the Sun makes grow over the day (0.7 to 1 of the cover, most in the afternoon), at a longitude (degrees)
@@ -133,7 +135,8 @@ public:
 	//! @param south, east, up the axes of that frame in the Earth-fixed one
 	//! @param layer the settings of the layer
 	//! @param motion where the wind has carried the clouds
-	static double transmission(const std::vector<float>& tile, const Layer& layer, const Motion& motion, double observerRadius, const std::array<double, 3>& altAz,
+	//! @param frontMotion where the wind has carried the fronts
+	static double transmission(const std::vector<float>& tile, const Layer& layer, const Motion& motion, const Motion& frontMotion, double observerRadius, const std::array<double, 3>& altAz,
 	                           const std::array<double, 3>& south, const std::array<double, 3>& east, const std::array<double, 3>& up);
 };
 

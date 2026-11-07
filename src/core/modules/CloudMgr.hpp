@@ -94,7 +94,8 @@ class CloudMgr : public StelModule
 	Q_PROPERTY(double cirrusOpticalDepth READ getCirrusOpticalDepth WRITE setCirrusOpticalDepth NOTIFY cirrusOpticalDepthChanged)
 	//! Set the wind by hand, in place of the wind that follows from the date
 	Q_PROPERTY(bool flagManualWind READ getFlagManualWind WRITE setFlagManualWind NOTIFY flagManualWindChanged)
-	//! The speed of the wind set by hand (m/s), from 0 to 60
+	//! The speed of the wind set by hand (m/s), from 0 to 60, for the layer that the properties change. The cirrus go with
+	//! the wind of the first layer, faster by their height
 	Q_PROPERTY(double windSpeed READ getWindSpeed WRITE setWindSpeed NOTIFY windSpeedChanged)
 	//! The direction that the wind set by hand blows from (degrees from the north through the east)
 	Q_PROPERTY(double windDirection READ getWindDirection WRITE setWindDirection NOTIFY windDirectionChanged)
@@ -132,8 +133,8 @@ public:
 	bool getFlagHalfResolution() const {return flagHalfResolution;}
 	bool getFlagCirrus() const {return flagCirrus;}
 	bool getFlagManualWind() const {return flagManualWind;}
-	double getWindSpeed() const {return windSpeed;}
-	double getWindDirection() const {return windDirection;}
+	double getWindSpeed() const {return windSpeeds[edited];}
+	double getWindDirection() const {return windDirections[edited];}
 	double getCirrusCover() const {return cirrusCover;}
 	double getCirrusHeight() const {return cirrusHeight;}
 	double getCirrusOpticalDepth() const {return cirrusOpticalDepth;}
@@ -214,10 +215,15 @@ private:
 	bool flagFollowDate = false;
 	bool flagCirrus = false;
 	bool flagManualWind = false;
-	double windSpeed = 8.;
-	double windDirection = 250.;
-	//! Where the wind has carried the clouds at the Julian day jd: from the date, or from the wind set by hand
-	CloudShape::Motion motionAt(const StelCore* core, double jd) const;
+	double windSpeeds[2] = {8., 12.};
+	double windDirections[2] = {250., 260.};
+	//! The winds: of the layers 0 and 1, and of the cirrus
+	static constexpr int CirrusWind = 2;
+	//! The height of the clouds of a wind (km)
+	double windHeight(int wind) const;
+	//! Where the wind has carried the clouds of a wind at the Julian day jd: from the date, faster higher up, or from the
+	//! wind set by hand. The fronts go with the wind of the first layer
+	CloudShape::Motion motionAt(const StelCore* core, double jd, int wind) const;
 	double cirrusCover = 0.4;
 	double cirrusHeight = 8.;
 	double cirrusOpticalDepth = 0.15;
@@ -240,9 +246,9 @@ private:
 	double currentCovers[LayerCount] = {0.2, 0.2};  //!< the cover at this moment, over the observer
 	CloudShape::Front fronts[LayerCount];           //!< the fronts of the layers, if the date sets the cover
 	CloudShape::Front cirrusFront;
-	double windEast = 0., windNorth = 0.;  //!< the wind at the observer at this moment (km/s)
+	double windEast[2] = {0., 0.}, windNorth[2] = {0., 0.};  //!< the winds of the layers at the observer at this moment (km/s)
 	//! The wind at the observer (km/s) on the map of the clouds, from where it carries them
-	void computeWind(const StelCore* core, double* mapX, double* mapY) const;
+	void computeWind(const StelCore* core, int wind, double* mapX, double* mapY) const;
 	void setUniformsOfLayer(QOpenGLShaderProgram& p, int i, const char* prefix) const;
 
 	//! The height map (see CloudShape), computed when it is first needed

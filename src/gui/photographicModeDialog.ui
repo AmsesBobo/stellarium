@@ -1646,7 +1646,7 @@
             <item row="8" column="0">
              <widget class="QCheckBox" name="cloudsManualWindCheckBox">
               <property name="toolTip">
-               <string>Set the wind by hand, as for the clouds of a photograph, in place of the wind that follows from the date. All the clouds drift with it.</string>
+               <string>Set the wind by hand, as for the clouds of a photograph, in place of the wind that follows from the date. Each layer has its own wind; the cirrus go with that of layer 1, faster by their height.</string>
               </property>
               <property name="text">
                <string>Wind by hand</string>
@@ -1663,7 +1663,7 @@
             <item row="8" column="2">
              <widget class="QDoubleSpinBox" name="cloudsWindSpeedSpinBox">
               <property name="toolTip">
-               <string>The speed of the wind at the clouds.</string>
+               <string>The speed of the wind at the clouds of this layer.</string>
               </property>
               <property name="suffix">
                <string> m/s</string>

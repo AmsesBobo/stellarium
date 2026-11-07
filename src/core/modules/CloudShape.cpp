@@ -245,7 +245,7 @@ double CloudShape::bankMask(const Layer& layer, double x, double y)
 	return m;
 }
 
-double CloudShape::transmission(const std::vector<float>& tile, const Layer& layer, const Motion& motion, double observerRadius, const std::array<double, 3>& altAz,
+double CloudShape::transmission(const std::vector<float>& tile, const Layer& layer, const Motion& motion, const Motion& frontMotion, double observerRadius, const std::array<double, 3>& altAz,
                                 const std::array<double, 3>& south, const std::array<double, 3>& east, const std::array<double, 3>& up)
 {
 	if (altAz[2] < -0.015)
@@ -275,7 +275,9 @@ double CloudShape::transmission(const std::vector<float>& tile, const Layer& lay
 		const double noise = 0.6*readTile(tile, mapX/CoverScaleLarge, mapY/CoverScaleLarge, 2) + 0.4*readTile(tile, mapX/CoverScaleSmall, mapY/CoverScaleSmall, 2);
 		const double tileX = mapX*layer.stretch()/(TileSize*size), tileY = mapY/(TileSize*size);
 		const double grow = readTile(tile, mapX/GrowScale + motion.growU, mapY/GrowScale + motion.growV, 2);
-		const double cover = layer.front.on ? frontCover(tile, mapX - layer.shift, mapY - layer.shift, layer.front, motion) : layer.cover;
+		const double cover = layer.front.on ? frontCover(tile, frontMotion.cosine*scale*ex - frontMotion.sine*scale*ey + frontMotion.offsetX,
+		                                                 frontMotion.sine*scale*ex + frontMotion.cosine*scale*ey + frontMotion.offsetY, layer.front, frontMotion)
+		                                    : layer.cover;
 		const double shape = readTile(tile, tileX, tileY, 0) + std::min(coverOffset(cover, noise) + GrowStrength*(grow - 0.5), 0.45)
 		                     + 2.5*(bankMask(layer, px, py) - 1.);
 		const double height = size*layer.heightScale()*readTile(tile, tileX, tileY, 1);

@@ -1488,10 +1488,14 @@ light than the bodies of the clouds, while near the Sun or the Moon they
 light up by scattering forwards as a silver lining.
 
 The wind follows from the date: westerly on average, mostly 2 to
-16\,m/s, and it carries the clouds, while they grow and dissolve in some 10 to 20
-minutes. To match a photograph or a time-lapse, \emph{Wind by hand} sets
-its \emph{Speed} and the direction it blows \emph{From} (270$^\circ$:
-from the west) instead. All layers drift with the same wind. The camera averages what moves during its exposure, unless the
+16\,m/s at the first layer, and it carries the clouds, while they grow and dissolve in some 10 to 20
+minutes. Higher up it blows faster, by about a third at 3.5\,km and
+twice at 8\,km, though the higher clouds still seem to move more slowly
+across the sky, being further away. To match a photograph or a time-lapse, \emph{Wind by hand} sets
+the \emph{Speed} and the direction it blows \emph{From} (270$^\circ$:
+from the west) instead, for each layer of its own; the cirrus go with the
+wind of the first layer, faster by their height. The fronts always go
+with the wind of the first layer. The camera averages what moves during its exposure, unless the
 mount is set to \emph{No motion}.
 
 The clouds are demanding for the graphics card. By default they are
@@ -1507,7 +1511,7 @@ without atmosphere. Scripts can set the properties \texttt{flagShow},
 \texttt{bankWidth}, \texttt{bankDistance}, \texttt{bankDepth},
 \texttt{flagCirrus}, \texttt{cirrusCover}, \texttt{cirrusHeight},
 \texttt{cirrusOpticalDepth}, \texttt{flagManualWind}, \texttt{windSpeed} (m/s),
-\texttt{windDirection} (degrees), \texttt{flagFollowDate} and
+\texttt{windDirection} (degrees; both for the layer that \texttt{layer} chose), \texttt{flagFollowDate} and
 \texttt{flagHalfResolution} of the module
 \texttt{CloudMgr} with \texttt{core.setStelProperty()}. The settings are
 kept in the section \texttt{[clouds]} of \texttt{config.ini}, those of the
