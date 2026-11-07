@@ -439,6 +439,11 @@ bool StelSkyImageTile::drawTile(StelCore* core, StelPainter& sPainter, const Vec
 			computePhotoLuminanceScale(core);
 		if (photoLuminanceScale > 0.f)
 			photoValue = photoLuminanceScale * drawer->getPhotoSceneScale();
+		// The images are processed pictures, most of them deep exposures that show far more than a camera records in a
+		// short exposure with a wide lens. Only those of the objects that do show on such photographs (listed in the
+		// JSON) and the globular clusters keep their light; the others are dimmed
+		if (layerMgr && !photoShown && photoObjectType != Nebula::NebGc)
+			photoValue *= static_cast<float>(std::pow(10., -0.4*layerMgr->getPhotoImageDimming()));
 		ad_lum = photoValue;
 		if (!tex->bind())
 			return false;
@@ -682,6 +687,9 @@ void StelSkyImageTile::loadFromQVariantMap(const QVariantMap& map)
 		if (!ok || !(photoHalphaScale > 0.f))
 			photoHalphaScale = 0.f;
 	}
+
+	if (map.contains("photoShown"))
+		photoShown = map.value("photoShown").toBool();
 
 	// Load the convex polygons (if any)
 	QVariantList polyList = map.value("skyConvexPolygons").toList();

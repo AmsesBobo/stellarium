@@ -41,6 +41,8 @@ class StelSkyLayerMgr : public StelModule
 	Q_PROPERTY(bool flagImageBrightnessLimit READ getFlagImageBrightnessLimit WRITE setFlagImageBrightnessLimit NOTIFY flagImageBrightnessLimitChanged)
 	//! The faintest surface brightness (V mag/arcsec^2) of the bright parts of an image that is shown
 	Q_PROPERTY(double imageBrightnessLimit READ getImageBrightnessLimit WRITE setImageBrightnessLimit NOTIFY imageBrightnessLimitChanged)
+	//! Photographic mode: how much the images of nebulae that seldom show on wide-field photographs are dimmed (magnitudes)
+	Q_PROPERTY(double photoImageDimming READ getPhotoImageDimming WRITE setPhotoImageDimming NOTIFY photoImageDimmingChanged)
 
 public:
 	StelSkyLayerMgr();
@@ -104,6 +106,12 @@ public slots:
 	//! North America Nebula 23.6, faint Sharpless nebulae 24 to 25. Allowed: 15 to 27.
 	void setImageBrightnessLimit(double mu);
 	double getImageBrightnessLimit() const {return imageBrightnessLimit;}
+	//! Photographic mode: dim the images of nebulae that seldom show on wide-field photographs by this many magnitudes
+	//! (0 to 10; 0: not at all). Those of the objects that do (marked "photoShown" in textures.json: M 31, M 33, M 42,
+	//! the Horsehead Nebula, the North America Nebula, the Eta Carinae Nebula, the Pleiades, M 44, the Double Cluster)
+	//! and of the globular clusters keep their light.
+	void setPhotoImageDimming(double mag);
+	double getPhotoImageDimming() const {return photoImageDimming;}
 	//! Load an image from a file into a quad described with 4 corner coordinates.
 	//! The corners are always given in counterclockwise from top-left, also for azaltimuthal images.
 	//! This should not be called directly from scripts because it is not thread safe.
@@ -175,6 +183,7 @@ signals:
 	void flagShowChanged(bool b);
 	void flagImageBrightnessLimitChanged(bool b);
 	void imageBrightnessLimitChanged(double mu);
+	void photoImageDimmingChanged(double mag);
 	void collectionLoaded();
 
 private slots:
@@ -199,6 +208,7 @@ private:
 	bool flagShow;
 	bool flagImageBrightnessLimit = false;
 	double imageBrightnessLimit = 22.;
+	double photoImageDimming = 4.;
 };
 
 #endif // STELSKYLAYERMGR_HPP

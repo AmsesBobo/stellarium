@@ -3003,6 +3003,44 @@
                    </property>
                   </widget>
                  </item>
+                 <item row="3" column="0" colspan="2">
+                  <widget class="QLabel" name="nebulaPhotoDimmingLabel">
+                   <property name="toolTip">
+                    <string>In the photographic mode, dim the images of deep-sky objects that seldom show on wide-field photographs: most images are deep exposures that show far more than a short exposure with a wide lens. M 31, M 33, the Orion Nebula, the Horsehead Nebula, the North America Nebula, the Eta Carinae Nebula, the Pleiades, M 44, the Double Cluster and the globular clusters keep their light. 0 dims none.</string>
+                   </property>
+                   <property name="text">
+                    <string>Photographic mode, dim others:</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="3" column="2">
+                  <widget class="QDoubleSpinBox" name="nebulaPhotoDimmingDoubleSpinBox">
+                   <property name="toolTip">
+                    <string>How much the other images are dimmed in the photographic mode (magnitudes; 2.5 is a tenth)</string>
+                   </property>
+                   <property name="alignment">
+                    <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+                   </property>
+                   <property name="suffix">
+                    <string notr="true"> mag</string>
+                   </property>
+                   <property name="decimals">
+                    <number>1</number>
+                   </property>
+                   <property name="minimum">
+                    <double>0.000000000000000</double>
+                   </property>
+                   <property name="maximum">
+                    <double>10.000000000000000</double>
+                   </property>
+                   <property name="singleStep">
+                    <double>0.500000000000000</double>
+                   </property>
+                   <property name="value">
+                    <double>4.000000000000000</double>
+                   </property>
+                  </widget>
+                 </item>
                 </layout>
                </item>
               </layout>
@@ -7016,6 +7054,7 @@
   <tabstop>nebulaLimitMagnitudeDoubleSpinBox</tabstop>
   <tabstop>nebulaImageLimitCheckBox</tabstop>
   <tabstop>nebulaImageLimitDoubleSpinBox</tabstop>
+  <tabstop>nebulaPhotoDimmingDoubleSpinBox</tabstop>
   <tabstop>pushButtonConfigureDSOColors</tabstop>
   <tabstop>page_markings</tabstop>
   <tabstop>celestialSphereGroupBox</tabstop>

@@ -147,6 +147,9 @@ protected:
 	//! Photographic mode: emission nebulae, the H-alpha intensity (Rayleigh) of a texel of value 1 (linear, taken to
 	//! the power PHOTO_DSO_DESTRETCH), measured against an all-sky H-alpha map ("halphaScale" in the JSON; 0: none)
 	float photoHalphaScale = 0.f;
+	//! Photographic mode: an image of an object that shows on wide-field photographs ("photoShown" in the JSON). The
+	//! others, but for the globular clusters, are dimmed (StelSkyLayerMgr::setPhotoImageDimming())
+	bool photoShown = false;
 	//! Surface brightness (V mag/arcsec^2) of the lit parts of the image with its calibration (99: not known), for the
 	//! limit of the images (StelSkyLayerMgr::setFlagImageBrightnessLimit())
 	float photoSurfaceBrightness = 99.f;

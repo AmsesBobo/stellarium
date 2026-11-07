@@ -252,6 +252,7 @@
 	{
 		"imageCredits" : {"short" : "LEE ang HG731GZ"},
 		"imageUrl" : "m31.png",
+		"photoShown" : true,
 		"worldCoords" : [[[12.6537,39.8284], [8.9795,39.6673], [8.6791,42.4868], [12.5152,42.6567]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 2.45937695,
@@ -260,6 +261,7 @@
 	{
 		"imageCredits" : {"short" : "HG731GZ"},
 		"imageUrl" : "m33.png",
+		"photoShown" : true,
 		"worldCoords" : [[[24.5389,30.5842], [23.3977,29.7536], [22.426,30.7322], [23.5697,31.5705]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.2169148018,
@@ -324,6 +326,7 @@
 	{
 		"imageCredits" : {"short" : "HG731GZ"},
 		"imageUrl" : "m42.png",
+		"photoShown" : true,
 		"halphaScale" : 3.325e+04,
 		"worldCoords" : [[[86.083,-7.122], [82.8645,-7.5215], [82.4686,-4.3286], [85.6746,-3.9321]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
@@ -333,6 +336,7 @@
 	{
 		"imageCredits": {"short" : "Giuseppe Donatiello", "infoUrl": "https://commons.wikimedia.org/wiki/File:Messier_44_2018.jpg"},
 		"imageUrl" : "m44.png",
+		"photoShown" : true,
 		"worldCoords" :	[[[130.5426, 19.0194], [129.3201,19.0839], [129.3875,20.2393], [130.6182,20.1733]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 0.9194358833,
@@ -341,6 +345,7 @@
 	{
 		"imageCredits": {"short" : "HG731GZ"},
 		"imageUrl" : "pleiades.png",
+		"photoShown" : true,
 		"worldCoords" : [[[57.8101,23.9301], [56.4627,23.0651], [55.5068,24.2933], [56.8609,25.1672]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 1.447520924,
@@ -1110,6 +1115,7 @@
 	{
 		"imageCredits": {"short" : "Maxime Spano"},
 		"imageUrl" : "n869-884spano.png",
+		"photoShown" : true,
 		"worldCoords" : [[[36.2464, 56.6371], [34.2082, 56.4965], [33.9144, 57.6168], [36.01425, 57.7618]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 1.131608666,
@@ -3589,6 +3595,7 @@
 	{
 		"imageCredits" : {"short" : "Adam Block/Steward Observatory/University of Arizona","infoUrl": "http://www.caelumobservatory.com/gallery/n7000astrograph.shtml"},
 		"imageUrl" : "n7000.png",
+		"photoShown" : true,
 		"halphaScale" : 5606,
 		"worldCoords" : [[[316.7411,41.8383], [311.1343,42.0255], [311.1982,46.2025], [317.2162,45.9995]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
@@ -3920,6 +3927,7 @@
 	{
 		"imageCredits": {"short" : "Manuel Peitsch, post-processing: Sun Shuwei","infoUrl": "https://manuel-astro.ch/project/south-of-orions-belt/"},
 		"imageUrl" : "ic434.png",
+		"photoShown" : true,
 		"worldCoords" :	[[[85.9484, -3.7416],[83.5078,-3.7871],[83.4671,-1.3472],[85.9007,-1.3064]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
 		"minResolution" : 2.066023154,
@@ -5158,6 +5166,7 @@
 	{
 		"imageCredits" : {"short" : "Harel Boren","infoUrl": "http://www.pbase.com/boren/image/151851961/original"},
 		"imageUrl" : "etaCarinae.png",
+		"photoShown" : true,
 		"halphaScale" : 1.382e+05,
 		"worldCoords" : [[[163.98,-61.3168], [157.8101,-61.2812], [158.143,-58.3275], [163.7832,-58.3588]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
