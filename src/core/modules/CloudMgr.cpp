@@ -773,9 +773,7 @@ uniform highp vec3 cloudMoon;
 uniform highp vec3 cloudKey;        // the unit vector towards the light that casts shadows
 uniform highp vec3 cloudBelow;      // the light of the clouds and the air (see CloudLight), for the scene
 uniform highp vec3 cloudAbove;
-uniform highp vec3 cloudAboveSun;
 uniform highp vec3 cloudCity;
-uniform highp vec3 sideSky;
 uniform highp vec3 sideSunLog[5];   // the logarithm of the light of CloudLight::Light::sideSun
 uniform highp vec2 sideSunOffset;   // the first offset of its altitude and its step (degrees)
 uniform highp vec3 sideMoon;
@@ -941,8 +939,7 @@ highp float otherShadow(highp vec3 p, highp vec3 key)
 	highp float round = s/pow(abs(s) + 0.01, 0.3);
 	highp float plateau = 0.8*s/sqrt(s*s + 0.0625);
 	highp float top = height*mix(round, plateau, otherShape.y);
-	highp float rim = 1. - clamp(s/0.35, 0., 1.);
-	highp float under = height*(0.025 + 0.05*f.z + 0.08*rim*rim);
+	highp float under = otherRadius.y*otherShape.w*(0.012 + 0.008*f.z);
 	// Optical thickness, including the oblique path through the upper layer. Unlike
 	// a linear density subtraction this stays nonnegative even for dense clouds.
 	highp float slant = 1./max(dot(q/length(q), key), 0.05);
@@ -981,9 +978,9 @@ highp vec2 cloudHeights(highp vec2 map, CloudWeather weather, highp float lod, h
 	// clipping their tops into plates. Keep the CPU transmission model in sync.
 	highp float plateau = 0.8*s/sqrt(s*s + 0.0625);
 	highp float top = height*mix(round, plateau, cloudShape.y);
-	// A shallow, gently varying base instead of a deep circular bowl around each body.
-	highp float rim = 1. - clamp(s/0.35, 0., 1.);
-	return vec2(top, height*(0.025 + 0.05*f.z + 0.08*rim*rim));
+	// A common condensation level with only broad, shallow variation. Do not
+	// imprint each rounded top or its rim on the underside. Mirror on the CPU.
+	return vec2(top, cloudSize*cloudShape.w*(0.012 + 0.008*f.z));
 }
 
 // The sunlight on a side of a cloud with the Sun higher by this much (degrees) than at the base over the observer
@@ -1032,8 +1029,10 @@ void main(void)
 	highp float jitter = samples > 1 ? fract(52.9829189*fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))) : 0.5;
 	highp vec2 hitMoment = vec2(0., 0.);
 	highp float bestMoment = 2., T = 0., thin = 0.;
-	highp float hitT = -1., hitZ = 0., hitTop = 0., hitUnder = 0., hitLod = 0.;
+	highp float hitT = -1.;
 	CloudWeather hitWeather = CloudWeather(vec3(0.), vec2(0.));
+	highp vec4 hitVolume[2];
+	highp vec2 hitVolumeWeight = vec2(0.);
 	// the steps between two moments blur the surface, so that they do not show
 	highp float smear = spread/float(samples);
 	highp float look = log2((1.5*ds + smear)/cloudCover.z);
@@ -1042,10 +1041,13 @@ void main(void)
 		// (the moments differ from pixel to pixel, so that the steps between them make grain, not stripes)
 		highp float when = (float(moment) + jitter)/float(samples) - 0.5;
 		cloudMoment = cloudSmear*when;
-		highp float firstWeight = 0., firstT = 0., firstZ = 0., firstTop = 0., firstUnder = 0., firstLod = 0.;
+		highp float firstWeight = 0., firstT = 0.;
 		CloudWeather firstWeather = CloudWeather(vec3(0.), vec2(0.));
 		highp float depth = 0.;
 		CloudWeather lastWeather = CloudWeather(vec3(0.), vec2(0.));
+		highp vec4 volume[2];
+		volume[0] = vec4(0.); volume[1] = vec4(0.);
+		highp vec2 volumeWeight = vec2(0.);
 		// Through the layer, until the clouds are opaque. Long steps look for clouds;
 		// short ones integrate opacity and the representative lighting position
 		for (int k = 0; k < steps && depth < 7.; ++k)
@@ -1088,13 +1090,17 @@ void main(void)
 					// threshold crossing jumped between steps and drew rings on the bases.
 					highp float opticalDepth = cloudCover.w*weather.growth.z*dt*inside;
 					highp float weight = exp(-depth)*(1. - exp(-opticalDepth));
+					// Two overlapping optical-depth strata, not a single surface hit.
+					// Smooth weights avoid a visible switch when a ray crosses a stratum.
+					highp float deeper = smoothstep(0.2, 1.8, depth + 0.5*opticalDepth);
+					highp vec2 vw = weight*vec2(1. - deeper, deeper);
+					highp vec4 samplePoint = vec4(u, height, h.x, lod);
+					volume[0] += vw.x*samplePoint;
+					volume[1] += vw.y*samplePoint;
+					volumeWeight += vw;
 					depth += opticalDepth;
 					firstWeight += weight;
 					firstT += weight*u;
-					firstZ += weight*height;
-					firstTop += weight*h.x;
-					firstUnder += weight*h.y;
-					firstLod += weight*lod;
 					firstWeather.growth += weight*weather.growth;
 					firstWeather.drift += weight*weather.drift;
 				}
@@ -1110,11 +1116,10 @@ void main(void)
 			bestMoment = abs(when);
 			hitMoment = cloudMoment;
 			hitT = firstT/firstWeight;
-			hitZ = firstZ/firstWeight;
-			hitTop = firstTop/firstWeight;
-			hitUnder = firstUnder/firstWeight;
-			hitLod = firstLod/firstWeight;
 			hitWeather = CloudWeather(firstWeather.growth/firstWeight, firstWeather.drift/firstWeight);
+			hitVolume[0] = volume[0]/max(volumeWeight.x, 1e-8);
+			hitVolume[1] = volume[1]/max(volumeWeight.y, 1e-8);
+			hitVolumeWeight = volumeWeight/firstWeight;
 		}
 	}
 	if (hitT < 0.)
@@ -1126,109 +1131,94 @@ void main(void)
 	thin /= float(samples);
 	cloudMoment = hitMoment;
 
-	// The normal of the surface, from the slope of the top. The clouds stand on the local level
+	// Integrate scattering from two opacity-weighted parts of the visible volume.
+	// There is no surface normal and no separate side/underside material.
 	highp vec3 p = vec3(altAz.xy*hitT, r0 + altAz.z*hitT);
-	// (over some tens of meters, a step of the tile coarser: the light spreads in the cloud, and the facets of the tile
-	// between its texels would show)
-	highp float delta = max(0.08*cloudSize, 2.5*hitT*cloudPixel);
-	// Blend relative to the local base and thickness, including flattened layers.
-	highp float fromBelow = 1. - smoothstep(0.05, 0.65,
-		(hitZ - hitUnder)/max(hitTop - hitUnder, 0.1*cloudSize*cloudShape.w));
-	highp vec2 map = cloudMap(p);
-	// Light responds to broad billows, not the fine wisps used for the silhouette.
-	highp float normalLod = hitLod + 1.5;
-	highp float centerTop = cloudHeights(map, hitWeather, normalLod, 0., hitZ).x;
-	highp vec2 slope = vec2(cloudHeights(cloudMap(p + vec3(delta, 0., 0.)), hitWeather, normalLod, 0., hitZ).x, cloudHeights(cloudMap(p + vec3(0., delta, 0.)), hitWeather, normalLod, 0., hitZ).x) - centerTop;
-	highp vec3 normal = normalize(vec3(-slope/delta, 1.));
-
-	// The hollows between the lobes see less of the sky
-	highp float blurred = cloudHeights(map, hitWeather, hitLod + 3.5, 0., 0.).x;
-	highp float open = clamp(1. - 1.5*(blurred - hitZ)/(0.3*cloudSize), 0.35, 1.);
-
-	// The shadow from the clouds themselves and each other towards the light, in longer steps further away: scattered
-	// many times, light gets into the clouds much deeper than their extinction says
-	highp float shadow = 1.;
-	// (looking towards the light we see the side in shadow, from which less of the light that went around comes)
+	highp float sunCos = dot(altAz, cloudSun), moonCos = dot(altAz, cloudMoon);
+	highp float keyIsSun = step(0.5, dot(cloudKey, cloudSun));
 	highp float towardKey = smoothstep(0.3, 0.9, dot(altAz, cloudKey));
-	// Fade the approximation out smoothly when it is subpixel or the key is below
-	// the horizon, rather than switching all self-shadowing on or off in one frame.
 	highp float shadowWeight = (1. - smoothstep(0.15, 0.3, hitT*cloudPixel))*smoothstep(-0.05, 0.02, cloudKey.z);
+	highp float upper = otherShadow(p, cloudKey)*cirrusShadow(p, cloudKey);
+	// Weather varies much more slowly than density. Share two weather anchors
+	// between the light rays; each stratum still samples its own cloud geometry.
+	highp float middleDistance = 0.32*cloudSize, endDistance = 1.28*cloudSize;
+	CloudWeather middleWeather = hitWeather, endWeather = hitWeather;
 	if (shadowWeight > 0.)
 	{
-		highp float seen = 0., distance = 0., stepLength = 0.025*cloudSize;
-		highp vec3 start = p + 0.03*cloudSize*mix(normal, vec3(0., 0., -1.), fromBelow);
-		// Development varies slowly. Two extra anchors let a neighbouring cloud have
-		// its own height, density and deformation without evaluating weather at every
-		// shadow sample. The six intervals span approximately 1.28 cloud sizes.
-		highp float middleDistance = 0.32*cloudSize, endDistance = 1.28*cloudSize;
-		CloudWeather middleWeather = cloudWeather(start + middleDistance*cloudKey);
-		CloudWeather endWeather = cloudWeather(start + endDistance*cloudKey);
-		for (int k = 0; k < 6; ++k)
-		{
-			highp float reach = distance + 0.5*stepLength;
-			CloudWeather weather = reach < middleDistance
-				? mixWeather(hitWeather, middleWeather, reach/middleDistance)
-				: mixWeather(middleWeather, endWeather, clamp((reach - middleDistance)/(endDistance - middleDistance), 0., 1.));
-			highp vec3 q = start + reach*cloudKey;
-			highp float height = length(q) - cloudRadii.y;
-			highp vec2 h = cloudHeights(cloudMap(q), weather, hitLod + 0.7*float(k), 0., 0.);
-			// Integrate local density over each interval, with broader filtering farther
-			// away to approximate light arriving through a volume instead of a hard face.
-			highp float inside = smoothstep(-0.1*stepLength - 0.02, 0.4*stepLength + 0.05, min(h.x - height, height - h.y));
-			seen += stepLength*weather.growth.z*inside;
-			distance += stepLength;
-			stepLength *= 1.9;
-		}
-		// Several effective scattering orders keep dense regions softly illuminated.
-		highp float tau = 4.*cloudShape.z*seen/cloudSize;
-		highp float around = 1. - towardKey;
-		highp float scattered = (exp(-tau) + around*(0.5*exp(-0.4*tau) + 0.25*exp(-0.15*tau)))/(1. + 0.75*around);
-		shadow = mix(1., scattered, shadowWeight);
+		middleWeather = cloudWeather(p + middleDistance*cloudKey);
+		endWeather = cloudWeather(p + endDistance*cloudKey);
 	}
-	// and the shadows of the layer above and of the cirrus
-	highp float upper = otherShadow(p, cloudKey)*cirrusShadow(p, cloudKey);
-	shadow *= upper;
-
-	highp float sunCos = dot(altAz, cloudSun), moonCos = dot(altAz, cloudMoon);
-	highp float high = clamp(hitZ/max(hitTop, 0.05), 0., 1.);
-	// Towards the Sun a cloud far away stands under a higher Sun, by the curve of the Earth, and so does a higher part of it
 	highp vec2 sunWay = cloudSun.xy/max(length(cloudSun.xy), 0.01);
-	highp vec3 sideSun = cloudSunlight(dot(p.xy, sunWay)*57.3/7433. + 0.35*hitZ);
-	highp float keyIsSun = step(0.5, dot(cloudKey, cloudSun));
-	// (soft on the side away from the light, which the cloud lets through)
-	highp float lit = mix(0.25, 0.2, towardKey) + mix(0.75, 0.8, towardKey)*shadow;
-	// (the light spreads in the cloud: its sides away from the light are less dark than on a solid body, but towards the
-	// light we look at the side in shadow, through which little of it comes)
-	highp float sunFacing = mix(clamp((dot(normal, cloudSun) + 0.5)/1.5, 0., 1.), 0.55, 0.35 - 0.25*smoothstep(0.3, 0.9, sunCos));
-	highp float moonFacing = mix(clamp((dot(normal, cloudMoon) + 0.5)/1.5, 0., 1.), 0.55, 0.35 - 0.25*smoothstep(0.3, 0.9, moonCos));
-	highp vec3 side = sideSky*(0.45 + 0.35*normal.z + 0.2*high)*open
-	                + sideSun*sunFacing*mix(1., lit, keyIsSun)
-	                + sideMoon*moonFacing*mix(lit, 1., keyIsSun);
-
-	// From below the line of sight meets the underside. It reflects the ground and lets through what falls on its top, less
-	// where the cloud is thick; towards the Sun that light goes on forwards
-	highp float through = 1./(1. + 6.75*cloudShape.z*hitWeather.growth.z*max(hitTop - hitZ, 0.)/cloudSize);
-	// (only what goes through thin clouds keeps its way: through thick ones the light is scattered to all sides)
-	highp float forwards = 1. + 3.*exp(-(1. - sunCos)/0.06)*through*through;
-	highp vec3 base = mix(cloudBelow, cloudAbove, through) + through*cloudAboveSun*forwards*shadow + cloudCity;
-	// A low Sun lights the bumps of the underside from the side, and the light spreads in the cloud
-	highp float lowSun = 1. - smoothstep(0.03, 0.3, abs(cloudSun.z));
-	highp float wide = 0.25*cloudSize;
-	highp float wideLod = hitLod + 3.;
-	highp vec2 rimOut = vec2(cloudHeights(cloudMap(p + vec3(wide, 0., 0.)), hitWeather, wideLod, 0., 0.).x, cloudHeights(cloudMap(p + vec3(0., wide, 0.)), hitWeather, wideLod, 0., 0.).x)
-	                  - cloudHeights(map, hitWeather, wideLod, 0., 0.).x;
-	highp float facing = clamp(dot(normalize(vec3(-rimOut, 0.1*cloudSize)), cloudSun), 0., 1.);
-	base += sideSun*lowSun*mix(lit, 1., 0.7)*(0.2 + 0.6*facing)*(1. + 3.*exp(-(1. - sunCos)/0.15));
-	highp vec3 light = mix(side, base, fromBelow);
+	highp vec3 light = vec3(0.);
+	// Single scattering must include extinction on the incoming light path.
+	// Accumulate it with the same visible-volume weights as the diffuse light.
+	highp float singleTransmission = 0.;
+	for (int v = 0; v < 2; ++v)
+	{
+		highp float contribution = hitVolumeWeight[v];
+		if (contribution < 1e-6) continue;
+		highp vec4 point = hitVolume[v];
+		highp vec3 start = vec3(altAz.xy*point.x, r0 + altAz.z*point.x);
+		highp float shadow = 1.;
+		// When the light march is subpixel, use the view transmission as a
+		// forward-direction approximation instead of unattenuated illumination.
+		highp float directTransmission = T;
+		if (shadowWeight > 0.)
+		{
+			highp float seen = 0., distance = 0., stepLength = 0.025*cloudSize;
+			for (int k = 0; k < 6; ++k)
+			{
+				highp float reach = distance + 0.5*stepLength;
+				CloudWeather weather = reach < middleDistance
+					? mixWeather(hitWeather, middleWeather, reach/middleDistance)
+					: mixWeather(middleWeather, endWeather, clamp((reach - middleDistance)/(endDistance - middleDistance), 0., 1.));
+				highp vec3 q = start + reach*cloudKey;
+				highp float height = length(q) - cloudRadii.y;
+				highp vec2 h = cloudHeights(cloudMap(q), weather, point.w + 0.7*float(k), 0., 0.);
+				highp float inside = smoothstep(-0.1*stepLength - 0.02, 0.4*stepLength + 0.05, min(h.x - height, height - h.y));
+				seen += stepLength*weather.growth.z*inside;
+				distance += stepLength;
+				stepLength *= 1.9;
+			}
+			directTransmission = mix(T, exp(-cloudCover.w*seen), shadowWeight);
+			highp float tau = 4.*cloudShape.z*seen/cloudSize;
+			highp float around = 1. - towardKey;
+			highp float scattered = (exp(-tau) + around*(0.5*exp(-0.4*tau) + 0.25*exp(-0.15*tau)))/(1. + 0.75*around);
+			shadow = mix(1., scattered, shadowWeight);
+		}
+		singleTransmission += contribution*directTransmission;
+		shadow *= upper;
+		// Broad diffuse transport retains depth without tracing each rounded top
+		// onto the base. Direct light is determined by the density light march.
+		highp vec4 field = textureLod(cloudTile, cloudTileAt(cloudMap(start) + hitWeather.drift), max(point.w + 3., 4.));
+		highp float broadDepth = cloudSize*cloudShape.w*field.y*hitWeather.growth.y;
+		highp float diffuseDepth = mix(max(point.z - point.y, 0.), broadDepth, 0.85);
+		highp float through = 1./(1. + 6.75*cloudShape.z*hitWeather.growth.z*diffuseDepth/cloudSize);
+		highp vec3 ambient = mix(cloudBelow, cloudAbove, through) + cloudCity;
+		highp vec3 sunlight = cloudSunlight(dot(start.xy, sunWay)*57.3/7433. + 0.35*point.y);
+		// A broad forward lobe for multiply scattered light. The narrow silver
+		// lining below uses the separately integrated incoming transmission.
+		highp float sunPhase = 0.65 + 0.35*exp(-(1. - sunCos)/0.25);
+		highp float moonPhase = 0.65 + 0.35*exp(-(1. - moonCos)/0.25);
+		highp float scatteredLight = 0.2 + 0.8*shadow;
+		light += contribution*(ambient
+			+ sunlight*sunPhase*mix(1., scatteredLight, keyIsSun)
+			+ sideMoon*moonPhase*mix(scatteredLight, 1., keyIsSun));
+	}
 
 	// The thin edges scatter the light of the Sun and the Moon forwards (Henyey-Greenstein with g = 0.85)
 	// (the edges light up only within some 20 degrees of them: further away the bodies of the clouds outshine them)
-	highp vec3 silver = silverSun*(0.2775/pow(1.7225 - 1.7*sunCos, 1.5))*smoothstep(0.88, 0.985, sunCos)
-	                  + silverMoon*(0.2775/pow(1.7225 - 1.7*moonCos, 1.5))*smoothstep(0.88, 0.985, moonCos);
+	// The non-key source has no separate light march. Its forward contribution
+	// uses view transmission; the dominant source uses the sampled incoming path.
+	highp vec3 silver = mix(T, singleTransmission, keyIsSun)*silverSun*(0.2775/pow(1.7225 - 1.7*sunCos, 1.5))*smoothstep(0.88, 0.985, sunCos)
+	                  + mix(singleTransmission, T, keyIsSun)*silverMoon*(0.2775/pow(1.7225 - 1.7*moonCos, 1.5))*smoothstep(0.88, 0.985, moonCos);
 	// The thin parts send back less light than the body of a cloud, which has more orders of scattering: away from the
 	// light the edges fade into the sky rather than outline the clouds
 	highp float forwardLight = max(smoothstep(0.88, 0.985, sunCos), smoothstep(0.88, 0.985, moonCos));
 	light *= mix(0.45 + 0.55*(1. - T*T), 1., forwardLight);
+	// Keep the partial-transmission edge envelope, but attenuate it by the
+	// incoming path above. Previously shadowed billows could glow as bright
+	// contours solely because their view transmission happened to be near 0.5.
 	light += silver*thin*upper;
 
 	// The way through the air dims the cloud and adds the light of the air (Rayleigh phase function)
@@ -1407,9 +1397,7 @@ void CloudMgr::setLightUniforms(const StelCore* core, QOpenGLShaderProgram& p, i
 	p.setUniformValue("cloudKey", direction(light.sideSun[3][1] > light.sideMoon[1] ? sun : moon));
 	p.setUniformValue("cloudBelow", scene(light.below));
 	p.setUniformValue("cloudAbove", scene(light.above));
-	p.setUniformValue("cloudAboveSun", scene(light.aboveSun));
 	p.setUniformValue("cloudCity", scene(light.city));
-	p.setUniformValue("sideSky", scene(light.sideSky));
 	QVector3D sideSunLog[5];
 	for (std::size_t k = 0; k < 5; ++k)
 	{

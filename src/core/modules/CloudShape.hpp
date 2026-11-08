@@ -27,6 +27,8 @@
 //! @class CloudShape
 //! The forms of the cumulus clouds: a flat base and a lumpy top over a height map. Heaps of spheres make the rounded
 //! bodies and the cauliflower of a cumulus, with sharp edges, where noise alone would make smoke.
+//! Large bodies have varied elliptical footprints, attached shoulders and gently offset tops, baked into the tile.
+//! Narrow clefts between neighbouring billows are closed and blended to form a shared body.
 //!
 //! The map is a tile that repeats, computed once: large bodies some 0.6 to 2 km across, and on them smaller lobes that
 //! shape both the outline and the top. Its channels:

@@ -44,25 +44,40 @@ int wrap(int i, int n)
 	return ((i % n) + n) % n;
 }
 
-// Spheres in the cells of a layer of the tile, one at most in a cell, with a radius in cells
+// Rounded seeds, at most one per cell, with radii in cells. Large bodies may have
+// elliptical footprints and attached shoulders; fine lobes remain spherical.
 struct Sphere
 {
 	float x, y, radius, number;
 	bool exists;
+	float cosine = 1.f, sine = 0.f, aspect = 1.f, shoulder = 0.f;
 };
 class SphereLayer
 {
 public:
-	SphereLayer(int cellCount, std::uint32_t layer, double radius0, double radius1, double chance)
+	SphereLayer(int cellCount, std::uint32_t layer, double radius0, double radius1, double chance, bool variedBodies = false)
 		: cells(cellCount), spheres(static_cast<std::size_t>(cellCount)*cellCount)
 	{
 		for (int j = 0; j < cells; ++j)
 			for (int i = 0; i < cells; ++i)
-				spheres[index(i, j)] = {static_cast<float>(cellRandom(i, j, layer, 1)), static_cast<float>(cellRandom(i, j, layer, 2)),
+			{
+				Sphere& sphere = spheres[index(i, j)];
+				sphere = {static_cast<float>(cellRandom(i, j, layer, 1)), static_cast<float>(cellRandom(i, j, layer, 2)),
 				                        static_cast<float>(radius0 + (radius1 - radius0)*cellRandom(i, j, layer, 3)),
 				                        static_cast<float>(cellRandom(i, j, layer, 4)), cellRandom(i, j, layer, 0) <= chance};
+				if (variedBodies)
+				{
+					const double angle = 2.*M_PI*cellRandom(i, j, layer, 6);
+					sphere.cosine = static_cast<float>(std::cos(angle));
+					sphere.sine = static_cast<float>(std::sin(angle));
+					// Reciprocal axes preserve footprint area. Keep the support within
+					// the two-cell neighbourhood, including the attached shoulder.
+					sphere.aspect = static_cast<float>(0.86 + 0.34*cellRandom(i, j, layer, 7));
+					sphere.shoulder = static_cast<float>(0.25 + 0.40*cellRandom(i, j, layer, 8));
+				}
+			}
 	}
-	//! At the position (in cells): the largest of 1 - (d/r)^2, and a smoothly blended height seed from 0 to 1
+	//! At the position (in cells): the body field and a smoothly blended height seed from 0 to 1
 	double at(double x, double y, double* number = nullptr) const
 	{
 		const int cx = static_cast<int>(std::floor(x)), cy = static_cast<int>(std::floor(y));
@@ -75,7 +90,18 @@ public:
 					continue;
 				const double dx = x - (cx + i + static_cast<double>(sphere.x)), dy = y - (cy + j + static_cast<double>(sphere.y));
 				const double r = static_cast<double>(sphere.radius);
-				const double s = 1. - (dx*dx + dy*dy)/(r*r);
+				const double along = (sphere.cosine*dx + sphere.sine*dy)/(r*sphere.aspect);
+				const double across = (-sphere.sine*dx + sphere.cosine*dy)*sphere.aspect/r;
+				double s = 1. - along*along - across*across;
+				if (sphere.shoulder > 0.f)
+				{
+					// A lower attached billow, never a detached satellite. Blend its
+					// join so the silhouette is asymmetric without a sharp crease.
+					const double q = along - sphere.shoulder;
+					const double shoulder = 0.72 - (q*q + across*across)/0.64;
+					const double blend = std::max(0.12 - std::abs(s - shoulder), 0.)/0.12;
+					s = std::max(s, shoulder) + 0.03*blend*blend;
+				}
 				best = std::max(best, s);
 				if (number)
 				{
@@ -84,7 +110,10 @@ public:
 					const double w = std::max(s + 0.6, 0.);
 					const double weight = w*w*w;
 					weightSum += weight;
-					heightSum += weight*static_cast<double>(sphere.number);
+					// Gently offset the tallest part from the footprint centre.
+					// This is baked into the height channel, shared by CPU and GPU.
+					const double lean = sphere.shoulder > 0.f ? 0.12*std::clamp(along, -1., 1.) : 0.;
+					heightSum += weight*std::clamp(static_cast<double>(sphere.number) + lean, 0., 1.);
 				}
 			}
 		if (number)
@@ -231,7 +260,7 @@ std::vector<float> CloudShape::computeTile()
 {
 	const int n = TileTexels;
 	constexpr int Bodies = 26;  // cells per tile: 1.6 km
-	const SphereLayer bodies(Bodies, 3, 0.2, 0.55, 0.85), lobes(78, 4, 0.45, 0.8, 1.), small(190, 5, 0.45, 0.8, 1.), fine(64, 8, 0.45, 0.8, 1.);
+	const SphereLayer bodies(Bodies, 3, 0.2, 0.55, 0.85, true), lobes(78, 4, 0.45, 0.8, 1.), small(190, 5, 0.45, 0.8, 1.), fine(64, 8, 0.45, 0.8, 1.);
 	std::vector<float> tile(static_cast<std::size_t>(n)*n*4);
 	for (int j = 0; j < n; ++j)
 		for (int i = 0; i < n; ++i)
@@ -261,6 +290,51 @@ std::vector<float> CloudShape::computeTile()
 			texel[2] = static_cast<float>(0.65*softNoise(u*5., v*5., 5, 6) + 0.35*softNoise(u*11., v*11., 11, 7));
 			texel[3] = static_cast<float>(fine.lobes(u, v));
 		}
+	// Close narrow clefts between neighbouring billows to give a cloud a shared
+	// body. A circular closing preserves isolated silhouettes and large openings;
+	// unlike inflating every sphere it does not grow every cloud indiscriminately.
+	// All operations wrap, so the procedural tile remains seamless.
+	constexpr int JoinRadius = 6;
+	std::vector<float> dilated(static_cast<std::size_t>(n)*n), added(dilated.size());
+	const auto pixel = [n](int x, int y) {
+		return static_cast<std::size_t>(wrap(y, n))*n + wrap(x, n);
+	};
+	for (int y = 0; y < n; ++y) for (int x = 0; x < n; ++x)
+	{
+		float value = -0.6f;
+		for (int dy = -JoinRadius; dy <= JoinRadius; ++dy)
+			for (int dx = -JoinRadius; dx <= JoinRadius; ++dx)
+				if (dx*dx + dy*dy <= JoinRadius*JoinRadius)
+					value = std::max(value, tile[4*pixel(x + dx, y + dy)]);
+		dilated[pixel(x, y)] = value;
+	}
+	for (int y = 0; y < n; ++y) for (int x = 0; x < n; ++x)
+	{
+		float value = 1.5f;
+		for (int dy = -JoinRadius; dy <= JoinRadius; ++dy)
+			for (int dx = -JoinRadius; dx <= JoinRadius; ++dx)
+				if (dx*dx + dy*dy <= JoinRadius*JoinRadius)
+					value = std::min(value, dilated[pixel(x + dx, y + dy)]);
+		added[pixel(x, y)] = std::max(value - tile[4*pixel(x, y)], 0.f);
+	}
+	// Smooth only the added connections, retaining the original wispy detail.
+	// A separable binomial kernel avoids hard ridges from the closing operation.
+	constexpr float weights[5] = {1.f, 4.f, 6.f, 4.f, 1.f};
+	for (int y = 0; y < n; ++y) for (int x = 0; x < n; ++x)
+	{
+		float sum = 0.f;
+		for (int dx = -2; dx <= 2; ++dx)
+			sum += weights[dx + 2]*added[pixel(x + dx, y)];
+		dilated[pixel(x, y)] = sum/16.f;
+	}
+	for (int y = 0; y < n; ++y) for (int x = 0; x < n; ++x)
+	{
+		float sum = 0.f;
+		for (int dy = -2; dy <= 2; ++dy)
+			sum += weights[dy + 2]*dilated[pixel(x, y + dy)];
+		float& shape = tile[4*pixel(x, y)];
+		shape = std::min(shape + 0.95f*sum/16.f, 1.5f);
+	}
 	return tile;
 }
 
@@ -409,8 +483,7 @@ double CloudShape::transmission(const std::vector<float>& tile, const Layer& lay
 		const double height = size*layer.heightScale()*readTile(tile, tileX, tileY, 1)*weather[1];
 		const double round = shape/std::pow(std::fabs(shape) + 0.01, 0.3), plateau = 0.8*shape/std::sqrt(shape*shape + 0.0625);
 		const double topHeight = height*(round + flat*(plateau - round));
-		const double rim = 1. - std::clamp(shape/0.35, 0., 1.);
-		const double under = height*(0.025 + 0.05*readTile(tile, tileX, tileY, 2) + 0.08*rim*rim);
+		const double under = size*layer.heightScale()*(0.012 + 0.008*readTile(tile, tileX, tileY, 2));
 		const double level = r - base;
 		const double e = std::clamp((std::min(topHeight - level, level - under) + 0.012)/(0.024 + 0.1*size), 0., 1.);
 		depth += Extinction*layer.density*weather[2]*ds*e*e*(3. - 2.*e);
