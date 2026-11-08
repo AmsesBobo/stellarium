@@ -839,9 +839,15 @@ void LandscapeMgr::draw(StelCore* core)
 	StelSkyDrawer* drawer=core->getSkyDrawer();
 	QFont font=QGuiApplication::font();
 
-	// Draw the atmosphere
-	if (!getFlagAtmosphereNoScatter() && core->getFlagClearSky())
-	    atmosphere->draw(core);
+	// Keep an atmosphere-only image for aerial perspective in clouds. Capturing
+	// the already composed scene here would also capture the solar/lunar disks.
+	static CloudMgr* clouds = GETSTELMODULE(CloudMgr);
+	const bool drawAtmosphere = !getFlagAtmosphereNoScatter() && core->getFlagClearSky();
+	const bool captureAtmosphere = clouds && clouds->beginAtmosphereCapture(core, drawAtmosphere);
+	if (drawAtmosphere)
+		atmosphere->draw(core);
+	if (captureAtmosphere)
+		clouds->endAtmosphereCapture();
 
 	// GZ 2016-01: When we draw the atmosphere with a low sun, it is possible that the glaring red ball is overpainted and thus invisible.
 	// Attempt to draw the sun only here while not having drawn it by SolarSystem:
@@ -855,7 +861,6 @@ void LandscapeMgr::draw(StelCore* core)
 	}
 
 	// The clouds hide the sky, but not the landscape (see CloudMgr)
-	static CloudMgr* clouds = GETSTELMODULE(CloudMgr);
 	if (clouds)
 		clouds->drawOverSky(core);
 

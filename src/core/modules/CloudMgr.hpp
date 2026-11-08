@@ -145,6 +145,11 @@ public:
 	//! the lens effects of the bright bodies. The same field as the shader's.
 	double getTransmission(const StelCore* core, Vec3d altAz) const;
 
+	//! Capture only the additive atmosphere pass, excluding previously drawn bodies.
+	//! Call begin every frame (also when disabled), and end only if begin returns true.
+	bool beginAtmosphereCapture(StelCore* core, bool enabled);
+	void endAtmosphereCapture();
+
 	//! Draw the clouds over the sky. To be called after the atmosphere and before the landscape.
 	void drawOverSky(StelCore* core);
 
@@ -265,6 +270,12 @@ private:
 	std::unique_ptr<QOpenGLBuffer> vbo;
 	std::unique_ptr<QOpenGLVertexArrayObject> vao;
 	std::unique_ptr<QOpenGLFramebufferObject> lowResBuffer;
+	std::unique_ptr<QOpenGLFramebufferObject> atmosphereBuffer;
+	std::unique_ptr<QOpenGLShaderProgram> atmosphereComposite;
+	bool atmosphereReady = false;
+	int atmospherePreviousBuffer = 0;
+	int atmosphereViewport[4] = {0, 0, 1, 1};
+	void bindAtmosphere(QOpenGLShaderProgram& p) const;
 	std::unique_ptr<QOpenGLShaderProgram> compositeProgram;
 };
 

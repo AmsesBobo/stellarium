@@ -105,6 +105,24 @@ highp float cirrusDensity(highp vec2 map, highp float foot, highp float cover)
 )";
 }
 
+// The actual directional atmosphere radiance, in the same linear camera units
+// as the scene. Its capture contains no Sun, Moon, stars or landscape.
+QByteArray atmosphereShader()
+{
+	return R"(
+uniform sampler2D cloudSkyTex;
+uniform bool cloudHasSky;
+uniform highp vec4 cloudSkyUv;
+highp vec3 foregroundSky(highp vec2 ndc, highp vec3 fallback)
+{
+	if (!cloudHasSky)
+		return fallback;
+	highp vec2 uv = cloudSkyUv.xy + (0.5*ndc + 0.5)*cloudSkyUv.zw;
+	return max(texture2D(cloudSkyTex, uv).rgb, vec3(0.));
+}
+)";
+}
+
 // Keep potentially very large wind translations out of float world coordinates.
 // Each repeating texture gets its own double-precision fractional phase. Resetting a
 // shared map origin would not preserve textures with different scales or rotations.
@@ -740,6 +758,7 @@ void main()
 	                        + extinction.getForwardTransformShader()
 	                        + frontShader()
 	                        + cirrusShader()
+	                        + atmosphereShader()
 	                        + R"(
 VARYING highp vec3 ndcPos;
 uniform highp mat4 projectionMatrixInverse;
@@ -763,7 +782,6 @@ uniform highp vec3 sideMoon;
 uniform highp vec3 silverSun;
 uniform highp vec3 silverMoon;
 uniform highp vec3 airSky;
-uniform highp float airSunlit;      // how much of the light of the sky comes from sunlit air below the clouds
 uniform highp vec3 airMoon;
 uniform highp vec3 airExtinction;   // per km
 const int CloudSubsteps = 6;
@@ -1215,14 +1233,15 @@ void main(void)
 
 	// The way through the air dims the cloud and adds the light of the air (Rayleigh phase function)
 	highp vec3 way = exp(-airExtinction*hitT);
-	highp vec3 air = (1. - way)*(airSky + airMoon*0.75*(1. + moonCos*moonCos));
-	// In sunlit air the sky behind the cloud stands for the air in front of it, so that far clouds fade into the sky
-	// (the Sun and the Moon behind the clouds are dimmed where they are drawn, so that their disks do not show through:
-	// see CloudMgr::getTransmission())
-	highp float kept = (1. - way.y)*airSunlit;
-	highp float hidden = (1. - T)*(1. - kept);
+	highp vec3 sky = foregroundSky(ndcPos.xy, airSky + airMoon*0.75*(1. + moonCos*moonCos));
+	highp vec3 air = (1. - way)*sky;
+	// Haze is emitted in front of the cloud; it does not open a path through it.
+	// Keep background transmission equal to T, including at the horizon. Fading
+	// opacity with atmospheric extinction also revealed the Sun/Moon behind opaque
+	// clouds. The air term above supplies the foreground haze independently.
+	highp float hidden = 1. - T;
 	// out = source + scene x alpha
-	FRAG_COLOR = vec4((light*way + air)*hidden, 1. - hidden);
+	FRAG_COLOR = vec4((light*way + air)*hidden, T);
 }
 )";
 	if (!newProgram->addShaderFromSourceCode(QOpenGLShader::Fragment, frag))
@@ -1403,7 +1422,6 @@ void CloudMgr::setLightUniforms(const StelCore* core, QOpenGLShaderProgram& p, i
 	p.setUniformValue("silverMoon", scene(light.silverMoon));
 	p.setUniformValue("sideMoon", scene(light.sideMoon));
 	p.setUniformValue("airSky", scene(light.airSky));
-	p.setUniformValue("airSunlit", static_cast<float>(light.airSunlit));
 	p.setUniformValue("airMoon", scene(light.airMoon));
 	p.setUniformValue("airExtinction", QVector3D(static_cast<float>(light.extinction[0]), static_cast<float>(light.extinction[1]), static_cast<float>(light.extinction[2])));
 }
@@ -1427,6 +1445,130 @@ void CloudMgr::setUniformsOfLayer(QOpenGLShaderProgram& p, int i, const char* pr
 	// the radius of the base (km), the size of the clouds, 1/km of the tile
 	p.setUniformValue((name + "Radius").constData(), QVector3D(static_cast<float>(EarthRadius + layer.base), static_cast<float>(layer.size),
 	                                                           static_cast<float>(1./(layer.size*CloudShape::TileSize))));
+}
+
+bool CloudMgr::beginAtmosphereCapture(StelCore* core, bool enabled)
+{
+	// Never use a previous frame when the atmosphere or the clouds are disabled.
+	atmosphereReady = false;
+	if (!enabled || !isShown(core) || !(isLayerShown(core, 0) || isLayerShown(core, 1) || isCirrusShown(core)))
+		return false;
+	auto& gl = *QOpenGLContext::currentContext()->functions();
+	gl.glGetIntegerv(GL_FRAMEBUFFER_BINDING, &atmospherePreviousBuffer);
+	gl.glGetIntegerv(GL_VIEWPORT, atmosphereViewport);
+	if (!atmosphereComposite)
+	{
+		auto composite = std::make_unique<QOpenGLShaderProgram>();
+		const QByteArray vert = StelOpenGL::globalShaderPrefix(StelOpenGL::VERTEX_SHADER) + R"(
+ATTRIBUTE highp vec2 vertex;
+VARYING highp vec2 texCoord;
+void main()
+{
+	gl_Position = vec4(vertex, 0., 1.);
+	texCoord = 0.5*vertex + 0.5;
+}
+)";
+		const QByteArray frag = StelOpenGL::globalShaderPrefix(StelOpenGL::FRAGMENT_SHADER) + R"(
+VARYING highp vec2 texCoord;
+uniform sampler2D skyTex;
+uniform highp vec4 skyUv;
+void main()
+{
+	FRAG_COLOR = texture2D(skyTex, skyUv.xy + texCoord*skyUv.zw);
+}
+)";
+		if (!composite->addShaderFromSourceCode(QOpenGLShader::Vertex, vert)
+		    || !composite->addShaderFromSourceCode(QOpenGLShader::Fragment, frag))
+			return false;
+		composite->bindAttributeLocation("vertex", VertexAttribIndex);
+		if (!StelPainter::linkProg(composite.get(), "cloud atmosphere capture"))
+			return false;
+		atmosphereComposite = std::move(composite);
+	}
+	// Keep the original viewport and pixel coordinates: the atmosphere renderers
+	// also use projection matrices and meshes expressed in those coordinates.
+	const QSize size(std::max(1, std::max(atmosphereViewport[2], atmosphereViewport[0] + atmosphereViewport[2])),
+	                 std::max(1, std::max(atmosphereViewport[3], atmosphereViewport[1] + atmosphereViewport[3])));
+	if (!atmosphereBuffer || atmosphereBuffer->size() != size)
+	{
+		QOpenGLFramebufferObjectFormat format;
+		format.setInternalTextureFormat(GL_RGBA16F);
+		atmosphereBuffer = std::make_unique<QOpenGLFramebufferObject>(size, format);
+		gl.glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(atmospherePreviousBuffer));
+		if (!atmosphereBuffer->isValid())
+		{
+			atmosphereBuffer.reset();
+			return false;
+		}
+		gl.glBindTexture(GL_TEXTURE_2D, atmosphereBuffer->texture());
+		gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		gl.glBindTexture(GL_TEXTURE_2D, 0);
+	}
+	gl.glBindFramebuffer(GL_FRAMEBUFFER, atmosphereBuffer->handle());
+	GLfloat clear[4]; GLboolean mask[4];
+	gl.glGetFloatv(GL_COLOR_CLEAR_VALUE, clear);
+	gl.glGetBooleanv(GL_COLOR_WRITEMASK, mask);
+	const bool scissor = gl.glIsEnabled(GL_SCISSOR_TEST);
+	gl.glDisable(GL_SCISSOR_TEST);
+	gl.glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	gl.glClearColor(0.f, 0.f, 0.f, 0.f);
+	gl.glClear(GL_COLOR_BUFFER_BIT);
+	gl.glClearColor(clear[0], clear[1], clear[2], clear[3]);
+	gl.glColorMask(mask[0], mask[1], mask[2], mask[3]);
+	if (scissor) gl.glEnable(GL_SCISSOR_TEST);
+	return true;
+}
+
+void CloudMgr::endAtmosphereCapture()
+{
+	auto& gl = *QOpenGLContext::currentContext()->functions();
+	gl.glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(atmospherePreviousBuffer));
+	gl.glViewport(atmosphereViewport[0], atmosphereViewport[1], atmosphereViewport[2], atmosphereViewport[3]);
+	GLint blend[4], activeTexture, texture0, currentProgram;
+	gl.glGetIntegerv(GL_BLEND_SRC_RGB, &blend[0]); gl.glGetIntegerv(GL_BLEND_DST_RGB, &blend[1]);
+	gl.glGetIntegerv(GL_BLEND_SRC_ALPHA, &blend[2]); gl.glGetIntegerv(GL_BLEND_DST_ALPHA, &blend[3]);
+	gl.glGetIntegerv(GL_ACTIVE_TEXTURE, &activeTexture);
+	gl.glGetIntegerv(GL_CURRENT_PROGRAM, &currentProgram);
+	const bool blending = gl.glIsEnabled(GL_BLEND), depth = gl.glIsEnabled(GL_DEPTH_TEST);
+	gl.glActiveTexture(GL_TEXTURE0);
+	gl.glGetIntegerv(GL_TEXTURE_BINDING_2D, &texture0);
+	atmosphereComposite->bind();
+	atmosphereComposite->setUniformValue("skyTex", 0);
+	atmosphereComposite->setUniformValue("skyUv", QVector4D(float(atmosphereViewport[0])/atmosphereBuffer->width(),
+		float(atmosphereViewport[1])/atmosphereBuffer->height(), float(atmosphereViewport[2])/atmosphereBuffer->width(),
+		float(atmosphereViewport[3])/atmosphereBuffer->height()));
+	gl.glBindTexture(GL_TEXTURE_2D, atmosphereBuffer->texture());
+	gl.glDisable(GL_DEPTH_TEST);
+	gl.glEnable(GL_BLEND);
+	// All supported atmospheres add their linear radiance in photographic mode.
+	gl.glBlendFuncSeparate(GL_ONE, GL_ONE, GL_ZERO, GL_ONE);
+	drawQuad();
+	atmosphereComposite->release();
+	gl.glUseProgram(static_cast<GLuint>(currentProgram));
+	gl.glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(texture0));
+	gl.glActiveTexture(static_cast<GLenum>(activeTexture));
+	gl.glBlendFuncSeparate(static_cast<GLenum>(blend[0]), static_cast<GLenum>(blend[1]), static_cast<GLenum>(blend[2]), static_cast<GLenum>(blend[3]));
+	if (!blending) gl.glDisable(GL_BLEND);
+	if (depth) gl.glEnable(GL_DEPTH_TEST);
+	atmosphereReady = true;
+}
+
+void CloudMgr::bindAtmosphere(QOpenGLShaderProgram& p) const
+{
+	p.setUniformValue("cloudHasSky", atmosphereReady);
+	p.setUniformValue("cloudSkyTex", 1);
+	if (!atmosphereReady)
+		return;
+	auto& gl = *QOpenGLContext::currentContext()->functions();
+	gl.glActiveTexture(GL_TEXTURE1);
+	gl.glBindTexture(GL_TEXTURE_2D, atmosphereBuffer->texture());
+	gl.glActiveTexture(GL_TEXTURE0);
+	p.setUniformValue("cloudSkyUv", QVector4D(float(atmosphereViewport[0])/atmosphereBuffer->width(),
+		float(atmosphereViewport[1])/atmosphereBuffer->height(), float(atmosphereViewport[2])/atmosphereBuffer->width(),
+		float(atmosphereViewport[3])/atmosphereBuffer->height()));
 }
 
 void CloudMgr::drawOverSky(StelCore* core)
@@ -1482,6 +1624,7 @@ void CloudMgr::drawLayer(StelCore* core, const StelProjector& prj, int i, int ot
 
 	QOpenGLShaderProgram& p = *program;
 	p.bind();
+	bindAtmosphere(p);
 	p.setUniformValue("projectionMatrixInverse", prj.getProjectionMatrix().toQMatrix().inverted());
 	prj.setUnProjectUniforms(p);
 	drawer->getExtinction().setForwardTransformUniforms(p);
@@ -1580,6 +1723,7 @@ void main()
 	                        + projector.getUnProjectShader()
 	                        + frontShader()
 	                        + cirrusShader()
+	                        + atmosphereShader()
 	                        + R"(
 VARYING highp vec3 ndcPos;
 uniform highp mat4 projectionMatrixInverse;
@@ -1597,6 +1741,7 @@ uniform highp vec3 cirrusSunLog[33];// the logarithm of the sunlight on the laye
                                     // seen from the place: from -5 degrees in steps of 0.5 degree
 uniform highp vec3 cirrusMoonLight; // the moonlight over 4 pi
 uniform highp vec3 cirrusSky;       // the light of the sky, the ground and the towns over 4 pi
+uniform highp vec3 cirrusAir;       // foreground air radiance at large optical depth
 uniform highp vec3 cirrusTau;       // the optical depth of the air at the zenith
 
 // Ice crystals: a strong forward peak, light to all sides, and the halo of 22 degrees, red inside and sharp there
@@ -1653,9 +1798,13 @@ void main(void)
 	// The air below the cirrus dims them (Rozenberg's air mass)
 	highp float sine = max(altAz.z, 0.);
 	highp vec3 way = exp(-cirrusTau/(sine + 0.025*exp(-11.*sine)));
-	// out = source + scene x alpha. The cirrus stand above nearly all the air: the light of the air in front of them stays,
-	// in the share that does not reach the observer from them
-	FRAG_COLOR = vec4(light*way, 1. - (1. - T)*way.y);
+	// Foreground air adds light, but cannot make the solar/lunar disk behind the
+	// cloud visible again. Use the same transmission as the cloud optical depth.
+	highp float moonCos = dot(dir, cirrusMoon);
+	highp vec3 sky = foregroundSky(ndcPos.xy, cirrusAir + cirrusMoonLight*0.75*(1. + moonCos*moonCos));
+	highp vec3 air = (1. - way)*sky;
+	// light already contains the factor (1 - T).
+	FRAG_COLOR = vec4(light*way + air*(1. - T), T);
 }
 )";
 	if (!newProgram->addShaderFromSourceCode(QOpenGLShader::Vertex, vert)
@@ -1684,6 +1833,7 @@ void CloudMgr::drawCirrus(StelCore* core, const StelProjector& prj)
 	const SolarSystem* ssystem = GETSTELMODULE(SolarSystem);
 	QOpenGLShaderProgram& p = *cirrusProgram;
 	p.bind();
+	bindAtmosphere(p);
 	p.setUniformValue("projectionMatrixInverse", prj.getProjectionMatrix().toQMatrix().inverted());
 	prj.setUnProjectUniforms(p);
 
@@ -1733,15 +1883,18 @@ void CloudMgr::drawCirrus(StelCore* core, const StelProjector& prj)
 	const CloudLight::Rgb sunGround = CloudLight::sunlightTransmission(sunAltitude, 0., extinction);
 	const Vec3f lamp = LightDomes::lampColor(LightDomes::LampMixed);
 	const double artificial = drawer->getLightPollutionLuminance();
-	QVector3D sky;
+	QVector3D sky, air;
 	for (int c = 0; c < 3; ++c)
 	{
 		// half of the sky above, the ground of an albedo of 0.2 below, and the light of the towns
 		const double ground = 0.2*(skyLux*skyColor[static_cast<std::size_t>(c)] + 133000.*sunGround[static_cast<std::size_t>(c)]*std::max(sun[2], 0.));
 		const double value = (0.5*skyLux*skyColor[static_cast<std::size_t>(c)] + ground)/(4.*M_PI) + 2.*artificial*static_cast<double>(lamp[c]);
 		sky[c] = static_cast<float>(value*scale);
+		air[c] = static_cast<float>((skyLux*skyColor[static_cast<std::size_t>(c)]/(4.*M_PI)
+		                             + artificial*static_cast<double>(lamp[c]))*scale);
 	}
 	p.setUniformValue("cirrusSky", sky);
+	p.setUniformValue("cirrusAir", air);
 	// the air at the zenith, redder the more it dims
 	const float tau = static_cast<float>(extinction/1.086);
 	p.setUniformValue("cirrusTau", QVector3D(0.62f*tau, tau, 1.75f*tau));
