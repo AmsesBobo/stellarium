@@ -809,6 +809,12 @@ IF(ENABLE_TESTING)
      ADD_CUSTOM_TARGET(buildTests)
      SET_TARGET_PROPERTIES(buildTests PROPERTIES FOLDER "src/tests")
 
+     # Pure cloud geometry/animation tests also run without a window or OpenGL context.
+     ADD_EXECUTABLE(testCloudBehaviour tests/testCloudBehaviour.cpp core/modules/CloudShape.cpp)
+     ADD_DEPENDENCIES(buildTests testCloudBehaviour)
+     ADD_TEST(testCloudBehaviour testCloudBehaviour)
+     SET_TARGET_PROPERTIES(testCloudBehaviour PROPERTIES FOLDER "src/tests" AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
+
      SET(tests_testDates_SRCS
           tests/testDates.hpp
           tests/testDates.cpp

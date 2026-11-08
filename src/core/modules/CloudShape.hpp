@@ -21,6 +21,7 @@
 #define CLOUDSHAPE_HPP
 
 #include <array>
+#include <cmath>
 #include <vector>
 
 //! @class CloudShape
@@ -97,10 +98,15 @@ public:
 	{
 		double cosine = 1., sine = 0., offsetX = 0., offsetY = 0.;
 		double growU = 0., growV = 0.;
+		double deformU = 0., deformV = 0.;
 		double boilX = 0., boilY = 0.;
 		double frontU = 0., frontV = 0.;  //!< where the fronts lie on the tile, as they change
 	};
 	static Motion motion(double jd);
+	//! Continuous height-dependent motion at an observer's projected position (km).
+	static Motion heightMotion(double jd, double x, double y, double speedRatio, double turn);
+	//! Constant projected wind (km/s); translation is measured from J2000 in double precision.
+	static Motion manualMotion(double jd, double vx, double vy);
 	//! How much faster than at 1.5 km the wind blows at a height (km): it grows with the height up to the jet stream
 	static double windAtHeight(double height) {return 0.75 + height/6.;}
 	//! How far the wind turns with the height (radians per km): clockwise seen from above in the north, as when warm air
@@ -108,8 +114,11 @@ public:
 	static constexpr double WindTurn = 3.*M_PI/180.;
 	//! The cover (0 to FrontMax) of the fronts at a place of the map (km), without the shift of a layer
 	static double frontCover(const std::vector<float>& tile, double mapX, double mapY, const Front& front, const Motion& motion);
-	//! How the clouds that the Sun makes grow over the day (0.7 to 1 of the cover, most in the afternoon), at a longitude (degrees)
-	static double afternoon(double jd, double longitude);
+	//! Smooth heating proxy (0..1) from recent geometric sunlight; latitude is in radians.
+	//! Reconstructs the last six hours with fixed solar declination, without mutating simulation time.
+	static double solarHeating(double latitude, const std::array<double, 3>& sunAltAz);
+	//! Weaker solar response for flattened and elevated layers; does not clear the night sky.
+	static double solarCoverScale(const Layer& layer, double heating);
 
 	//! Cirrus: thin fibrous clouds of ice, high up. Their fibres lie along an axis of the map, from the soft noise of the
 	//! tile in three sizes stretched along it, in patches that the cover sets. The constants are shared with the shader.
@@ -130,7 +139,23 @@ public:
 	//! 0.45 that keeps the clear parts of the map (-0.6) clear, with a margin for the fine lobes; below a cover of 0.1 the last clouds go away
 	static double coverOffset(double cover, double noise);
 	static constexpr double GrowScale = 14.3;     //!< km: the size of the tile for the noise of growth
-	static constexpr double GrowStrength = 0.55;
+	static constexpr double GrowStrength = 0.75;
+	static constexpr double DeformScale = 37.;   //!< km per tile: slow, broad deformation
+	static constexpr double GroupScale = 61.;    //!< km per tile: groups several cloud bodies across
+	//! Inverse group scales (1/km), coverage contrast and strength of broken bands.
+	//! Continuous in height and flatness, including custom cloud settings.
+	static std::array<double, 4> formationParameters(const Layer& layer);
+	//! Coverage adjustment, height multiplier and density multiplier. Shared with cloudWeatherAt().
+	static std::array<double, 3> development(const std::vector<float>& tile, const Layer& layer,
+	                                      const Motion& motion, double mapX, double mapY);
+
+	//! Preserve cumulus bodies at low coverage and dissolve them through density.
+	//! Takes the combined coverage/development/bank offset; mirrors the shader.
+	static std::array<double, 3> cohesiveWeather(double offset, double height, double density, double flatness, double cover);
+
+	//! Smooth horizontal displacement (km), shared by geometry and transmission.
+	static std::array<double, 2> deformation(const std::vector<float>& tile, const Layer& layer,
+	                                      const Motion& motion, double mapX, double mapY);
 
 	//! The transmission of the clouds along a line of sight, from a tile of computeTile().
 	//! @param observerRadius km from the center of the Earth

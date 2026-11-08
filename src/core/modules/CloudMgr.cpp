@@ -58,7 +58,8 @@ constexpr int MaxExposureSamples = 5;
 QByteArray frontShader()
 {
 	const auto n = [](double v) {return QByteArray::number(v, 'g', 8);};
-	return "uniform sampler2D cloudTile;        // the height map (see CloudShape)\n"
+	return "uniform highp vec2 frontPhase[2];\n"
+	       "uniform sampler2D cloudTile;        // the height map (see CloudShape)\n"
 	       "uniform highp vec2 cloudFrontDrift; // where the fronts lie on the tile\n"
 	       "uniform highp vec4 cloudFrontTurn;  // where the wind has carried them: the turn of the map, as cosine and sine; its offset (km)\n"
 	       "// The place on the map of the fronts, from a place on the map before the wind\n"
@@ -70,9 +71,9 @@ QByteArray frontShader()
 	       "// fronts (km), the bias of the cover, its scale\n"
 	       "highp float frontCover(highp vec2 map, highp vec4 front)\n"
 	       "{\n"
-	       "\thighp float bend = " + n(CloudShape::FrontBend) + "*(textureLod(cloudTile, map/" + n(CloudShape::FrontBendScale) + " + vec2(0.1, 0.6), 1.).z - 0.5);\n"
+	       "\thighp float bend = " + n(CloudShape::FrontBend) + "*(textureLod(cloudTile, map/" + n(CloudShape::FrontBendScale) + " + frontPhase[0] + vec2(0.1, 0.6), 1.).z - 0.5);\n"
 	       "\thighp vec2 uv = vec2((" + n(CloudShape::FrontAxisCos) + "*map.x - (" + n(CloudShape::FrontAxisSin) + ")*map.y)/" + n(CloudShape::FrontAlong)
-	       + ", ((" + n(CloudShape::FrontAxisSin) + ")*map.x + " + n(CloudShape::FrontAxisCos) + "*map.y + bend + front.y)/" + n(CloudShape::FrontAcross) + ") + cloudFrontDrift;\n"
+	       + ", ((" + n(CloudShape::FrontAxisSin) + ")*map.x + " + n(CloudShape::FrontAxisCos) + "*map.y + bend + front.y)/" + n(CloudShape::FrontAcross) + ") + cloudFrontDrift + frontPhase[1];\n"
 	       "\treturn front.w*clamp(" + n(CloudShape::FrontGain) + "*(textureLod(cloudTile, uv, 1.).z - " + n(CloudShape::FrontMid) + ") + front.z, 0., "
 	       + n(CloudShape::FrontMax) + ");\n"
 	       "}\n";
@@ -81,7 +82,8 @@ QByteArray frontShader()
 // The density of the cirrus, for both shaders: see CloudShape::cirrusDensity()
 QByteArray cirrusShader()
 {
-	return R"(highp float cirrusNoise(highp vec2 uv, highp float lod)
+	return R"(uniform highp vec2 cirrusTexturePhase[5];
+highp float cirrusNoise(highp vec2 uv, highp float lod)
 {
 	return textureLod(cloudTile, uv, lod).z;
 }
@@ -92,15 +94,79 @@ highp float cirrusDensity(highp vec2 map, highp float foot, highp float cover)
 {
 	highp vec2 m = vec2(0.819*map.x - 0.574*map.y, 0.574*map.x + 0.819*map.y);
 	// the fibres bend
-	m += 9.*vec2(cirrusNoise(map/60. + 0.5, max(log2(foot*1024./60.), 0.)), cirrusNoise(map/60. + 0.25, max(log2(foot*1024./60.), 0.))) - 4.5;
-	highp float patch = cirrusNoise(map/190., max(log2(foot*1024./190.), 0.));
+	m += 9.*vec2(cirrusNoise(map/60. + cirrusTexturePhase[0] + 0.5, max(log2(foot*1024./60.), 0.)), cirrusNoise(map/60. + cirrusTexturePhase[0] + 0.25, max(log2(foot*1024./60.), 0.))) - 4.5;
+	highp float patch = cirrusNoise(map/190. + cirrusTexturePhase[1], max(log2(foot*1024./190.), 0.));
 	highp float area = clamp((patch - 0.85 + 0.9*cover)/0.2, 0., 1.);
-	highp float fibres = 0.5*cirrusNoise(vec2(m.x/40., m.y/10.), max(log2(foot*1024./10.), 0.))
-	                   + 0.3*cirrusNoise(vec2(m.x/12. + 0.37, m.y/3. + 0.71), max(log2(foot*1024./3.), 0.))
-	                   + 0.2*cirrusNoise(vec2(m.x/4. + 0.13, m.y/0.9 + 0.29), max(log2(foot*1024./0.9), 0.));
+	highp float fibres = 0.5*cirrusNoise(vec2(m.x/40., m.y/10.) + cirrusTexturePhase[2], max(log2(foot*1024./10.), 0.))
+	                   + 0.3*cirrusNoise(vec2(m.x/12. + 0.37, m.y/3. + 0.71) + cirrusTexturePhase[3], max(log2(foot*1024./3.), 0.))
+	                   + 0.2*cirrusNoise(vec2(m.x/4. + 0.13, m.y/0.9 + 0.29) + cirrusTexturePhase[4], max(log2(foot*1024./0.9), 0.));
 	return area*smoothstep(0.4, 0.68, fibres + 0.3*(area - 0.5));
 }
 )";
+}
+
+// Keep potentially very large wind translations out of float world coordinates.
+// Each repeating texture gets its own double-precision fractional phase. Resetting a
+// shared map origin would not preserve textures with different scales or rotations.
+QVector2D texturePhase(double x, double y)
+{
+	return QVector2D(static_cast<float>(std::remainder(x, 1.)), static_cast<float>(std::remainder(y, 1.)));
+}
+
+void setWindTurn(QOpenGLShaderProgram& p, const char* name, const CloudShape::Motion& motion)
+{
+	p.setUniformValue(name, QVector4D(static_cast<float>(motion.cosine), static_cast<float>(motion.sine), 0.f, 0.f));
+}
+
+void setLayerMotion(QOpenGLShaderProgram& p, const char* prefix, const CloudShape::Layer& layer, const CloudShape::Motion& motion)
+{
+	const QByteArray name(prefix);
+	setWindTurn(p, (name + "Turn").constData(), motion);
+	const double x = motion.offsetX, y = motion.offsetY;
+	const double fine = 1./(layer.size*CloudShape::FineScale);
+	const auto formation = CloudShape::formationParameters(layer);
+	p.setUniformValue((name + "Formation").constData(), QVector4D(static_cast<float>(formation[0]), static_cast<float>(formation[1]),
+	                                                            static_cast<float>(formation[2]), static_cast<float>(formation[3])));
+	const QVector2D phases[] = {
+		texturePhase(x*layer.stretch()/(layer.size*CloudShape::TileSize), y/(layer.size*CloudShape::TileSize)),
+		texturePhase(x/CloudShape::CoverScaleLarge, y/CloudShape::CoverScaleLarge),
+		texturePhase(x/CloudShape::CoverScaleSmall, y/CloudShape::CoverScaleSmall),
+		texturePhase(x/CloudShape::GrowScale, y/CloudShape::GrowScale),
+		texturePhase(x*formation[0], y*formation[1]),
+		texturePhase(x*fine, y*fine), texturePhase(x*fine*2.7, y*fine*2.7),
+		texturePhase(x*fine*0.37, y*fine*0.37),
+		texturePhase(x/CloudShape::DeformScale, y/CloudShape::DeformScale),
+		texturePhase(x*formation[0]*2.3, y*formation[1]*2.3)
+	};
+	p.setUniformValueArray((name + "Phase").constData(), phases, 10);
+}
+
+void setFrontMotion(QOpenGLShaderProgram& p, const CloudShape::Motion& motion)
+{
+	setWindTurn(p, "cloudFrontTurn", motion);
+	const double x = motion.offsetX, y = motion.offsetY;
+	const QVector2D phases[] = {
+		texturePhase(x/CloudShape::FrontBendScale, y/CloudShape::FrontBendScale),
+		texturePhase((CloudShape::FrontAxisCos*x - CloudShape::FrontAxisSin*y)/CloudShape::FrontAlong,
+		             (CloudShape::FrontAxisSin*x + CloudShape::FrontAxisCos*y)/CloudShape::FrontAcross)
+	};
+	p.setUniformValueArray("frontPhase", phases, 2);
+}
+
+void setCirrusMotion(QOpenGLShaderProgram& p, const char* turnName, const CloudShape::Motion& motion)
+{
+	setWindTurn(p, turnName, motion);
+	const double x = motion.offsetX, y = motion.offsetY;
+	const double u = CloudShape::CirrusAxisCos*x - CloudShape::CirrusAxisSin*y;
+	const double v = CloudShape::CirrusAxisSin*x + CloudShape::CirrusAxisCos*y;
+	const QVector2D phases[] = {
+		texturePhase(x/CloudShape::CirrusBendScale, y/CloudShape::CirrusBendScale),
+		texturePhase(x/CloudShape::CirrusPatchScale, y/CloudShape::CirrusPatchScale),
+		texturePhase(u/CloudShape::CirrusScaleX[0], v/CloudShape::CirrusScaleY[0]),
+		texturePhase(u/CloudShape::CirrusScaleX[1], v/CloudShape::CirrusScaleY[1]),
+		texturePhase(u/CloudShape::CirrusScaleX[2], v/CloudShape::CirrusScaleY[2])
+	};
+	p.setUniformValueArray("cirrusTexturePhase", phases, 5);
 }
 
 QVector4D frontUniform(const CloudShape::Front& front)
@@ -490,24 +556,18 @@ CloudShape::Motion CloudMgr::motionAt(const StelCore* core, double jd, int wind)
 	{
 		if (qFuzzyCompare(faster, 1.))
 			return m;
-		// Faster higher up, and turned: the map moves on by what the wind of the date carried it over the observer since
-		// the start of a span of 10 days, turned and times the factor, less that way itself (the clouds jump at the ends of
-		// the span, as below). (The map turns the same way for the south, where it is seen from below)
+		// Reference the bounded automatic motion to a fixed epoch, not a resetting ten-day
+		// window. The height correction then remains continuous when time is scrubbed.
 		const StelLocation& location = core->getCurrentLocation();
 		const double phi = static_cast<double>(location.getLatitude())*M_PI/180.;
 		const double lambda = static_cast<double>(location.getLongitude())*M_PI/180.;
 		const double radius = 2.*(EarthRadius + windHeight(wind))*std::cos(phi)/(1. + std::fabs(std::sin(phi)));
 		const double x = radius*std::cos(lambda), y = radius*std::sin(lambda);
-		const CloudShape::Motion start = CloudShape::motion(10.*std::floor(jd/10.));
-		const double dx = (m.cosine - start.cosine)*x - (m.sine - start.sine)*y + m.offsetX - start.offsetX;
-		const double dy = (m.sine - start.sine)*x + (m.cosine - start.cosine)*y + m.offsetY - start.offsetY;
 		const double turn = -CloudShape::WindTurn*(windHeight(wind) - layers[0].base);
-		m.offsetX += faster*(std::cos(turn)*dx - std::sin(turn)*dy) - dx;
-		m.offsetY += faster*(std::sin(turn)*dx + std::cos(turn)*dy) - dy;
-		return m;
+		return CloudShape::heightMotion(jd, x, y, faster, turn);
 	}
-	// The wind set by hand: the map does not turn, and moves at the speed of the wind over the observer. Its way counts
-	// from the start of a span of 10 days, to keep it short for the precision of the shader: the clouds jump at its ends
+	// Constant manual wind from a fixed epoch. Texture phases are reduced in double
+	// precision before upload, so long journeys do not lose the small cloud details.
 	const StelLocation& location = core->getCurrentLocation();
 	const double phi = static_cast<double>(location.getLatitude())*M_PI/180.;
 	// (the cirrus go with the wind of the first layer, faster and turned by their height)
@@ -523,12 +583,7 @@ CloudShape::Motion CloudMgr::motionAt(const StelCore* core, double jd, int wind)
 	const double pole = phi >= 0. ? -1. : 1.;
 	const double vx = k*(-std::sin(lambda)*east + pole*std::cos(lambda)*north);
 	const double vy = k*(std::cos(lambda)*east + pole*std::sin(lambda)*north);
-	const double seconds = (jd - 10.*std::floor(jd/10.))*86400.;
-	m.cosine = 1.;
-	m.sine = 0.;
-	m.offsetX = -vx*seconds;
-	m.offsetY = -vy*seconds;
-	return m;
+	return CloudShape::manualMotion(jd, vx, vy);
 }
 
 void CloudMgr::computeWind(const StelCore* core, int wind, double* mapX, double* mapY) const
@@ -550,15 +605,23 @@ void CloudMgr::update(double)
 		return;
 	const StelCore* core = StelApp::getInstance().getCore();
 	const double longitude = static_cast<double>(core->getCurrentLocation().getLongitude());
-	// With the date, weather fronts set the cover. The higher clouds of a front lie a little across it, and the cirrus
-	// further, so that they may come first; the clouds that the Sun makes grow in the afternoon
-	const double afternoon = CloudShape::afternoon(core->getJD(), longitude);
+	// Recent solar heating affects cumulus most. Only the automatic weather mode uses
+	// this modulation; manually selected coverage remains under the user's control.
+	double heating = 0.;
+	if (flagFollowDate)
+	{
+		const SolarSystem* ssystem = GETSTELMODULE(SolarSystem);
+		Vec3d sun = ssystem->getSun()->getAltAzPosGeometric(core);
+		sun.normalize();
+		heating = CloudShape::solarHeating(core->getCurrentLocation().getLatitude()*M_PI/180., {sun[0], sun[1], sun[2]});
+	}
+	// The higher clouds of a front precede the lower layers.
 	for (int i = 0; i < LayerCount; ++i)
 	{
 		fronts[i].on = flagFollowDate;
 		fronts[i].shift = layers[i].base > 2.5 ? 180. : 0.;
 		fronts[i].bias = layers[i].base > 2.5 ? -0.1 : 0.;
-		fronts[i].scale = afternoon;
+		fronts[i].scale = CloudShape::solarCoverScale(layers[i], heating);
 	}
 	cirrusFront.on = flagFollowDate;
 	cirrusFront.shift = 420.;
@@ -707,6 +770,12 @@ const int CloudSubsteps = 6;
 uniform highp vec4 cloudTileScale;  // 1/km: of the tile, of its two cover sizes, of the fine lobes
 uniform highp float cloudSize;      // the scale of the clouds against those of the tile
 uniform highp vec4 cloudTurn;       // the wind: the turn of the map, as cosine and sine; its offset (km)
+uniform highp vec4 cloudFormation;
+uniform highp vec4 otherFormation;
+uniform highp vec2 cloudPhase[10];
+uniform highp vec2 otherPhase[10];
+uniform highp vec2 cloudDeform;
+uniform highp float cloudDeformScale;
 uniform highp vec2 cloudGrow;       // the place of the noise of growth (tiles)
 uniform highp vec2 cloudBoil;       // of the fine lobes (km)
 uniform highp float cloudGrowScale; // 1/km
@@ -769,13 +838,34 @@ highp float cirrusShadow(highp vec3 p, highp vec3 key)
 	return exp(-cirrusShade.x*cirrusDensity(map, 0.4, cover)*slant);
 }
 
+// Development and broad deformation are sampled only at the coarse step endpoints.
+// Fine ray samples interpolate them, keeping the extra texture work out of that loop.
+struct CloudWeather
+{
+	highp vec3 growth; // coverage offset, height and density multipliers
+	highp vec2 drift;  // smooth horizontal displacement in km
+};
+CloudWeather mixWeather(CloudWeather a, CloudWeather b, highp float t)
+{
+	return CloudWeather(mix(a.growth, b.growth, t), mix(a.drift, b.drift, t));
+}
+
 // What the cover and the growth add to the shape around a place p with its place on the map, with the cover offset of a
 // layer, its fronts, its radius and its bank. It changes slowly: one value serves a whole step of the way. It never fills
 // the clear parts of the map
-highp float cloudOffsetAt(highp vec3 p, highp vec2 map, highp vec4 cover, highp vec4 front, highp float radius, highp vec4 bank)
+CloudWeather cloudWeatherAt(highp vec3 p, highp vec2 map, highp vec4 cover, highp vec4 front, highp float radius, highp vec4 bank, highp vec4 shape, highp float size, highp vec4 formation, highp vec2 phases[10])
 {
-	highp float noise = 0.6*textureLod(cloudTile, map*cloudTileScale.y, 2.).z + 0.4*textureLod(cloudTile, map*cloudTileScale.z, 2.).z;
-	highp float grow = textureLod(cloudTile, map*cloudGrowScale + cloudGrow, 2.).z;
+	highp float noise = 0.6*textureLod(cloudTile, map*cloudTileScale.y + phases[1], 2.).z + 0.4*textureLod(cloudTile, map*cloudTileScale.z + phases[2], 2.).z;
+	highp vec2 growthMap = map*cloudGrowScale + phases[3];
+	highp float grow = 0.7*textureLod(cloudTile, growthMap + cloudGrow, 2.).z
+	                 + 0.3*textureLod(cloudTile, growthMap + vec2(-cloudGrow.y, cloudGrow.x) + vec2(0.37, 0.19), 2.).z;
+	highp float life = mix(smoothstep(0.25, 0.75, grow), 0.5, 0.65*shape.y);
+	highp vec2 groupUV = map*formation.xy + phases[4];
+	highp float broad = textureLod(cloudTile, groupUV, 2.).z;
+	highp float detail = textureLod(cloudTile, map*formation.xy*2.3 + phases[9] + vec2(0.31, 0.57), 2.).z;
+	highp float patches = 0.75*broad + 0.25*detail;
+	highp float bands = 0.5 + 0.5*cos(6.28318530718*(5.*fract(groupUV.y) + 0.8*(broad - 0.5) + 0.35*(detail - 0.5)));
+	highp float group = mix(patches, bands, formation.w*smoothstep(0.25, 0.75, broad));
 	highp float offset = cover.x + cover.y*noise;
 	// (with fronts, the cover of the place: see CloudShape::coverOffset())
 	if (front.x > 0.)
@@ -784,7 +874,8 @@ highp float cloudOffsetAt(highp vec3 p, highp vec2 map, highp vec4 cover, highp 
 		highp float fading = max(0.1 - c, 0.);
 		offset = 1.1*(c - 0.45) + 2.*(noise - 0.5) - 150.*fading*fading;
 	}
-	offset = min(offset + cloudGrowStrength*(grow - 0.5), 0.45);
+	highp float presence = smoothstep(-2.995, -1.385, offset - 2.*noise);
+	offset = min(offset + formation.z*(group - 0.5) + cloudGrowStrength*(life - 0.5), 0.45);
 	// A bank: the clouds only stand in a sector of the sky at a distance from the observer (see CloudShape::bankMask())
 	if (bank.w >= 0.)
 	{
@@ -799,12 +890,21 @@ highp float cloudOffsetAt(highp vec3 p, highp vec2 map, highp vec4 cover, highp 
 		}
 		offset += 2.5*(m - 1.);
 	}
-	return offset;
+	highp vec2 uv = map*cloudDeformScale + phases[8] + cloudDeform;
+	highp vec2 drift = 0.3*size*(1. - 0.4*shape.y)*
+		(vec2(textureLod(cloudTile, uv, 2.).z, textureLod(cloudTile, uv + vec2(0.37, 0.71), 2.).z) - 0.5);
+	// At low coverage, fade the cloud body rather than eroding it down to detached
+	// billow tops. Flat layers retain their more broken structure. See cohesiveWeather().
+	highp float coherence = 1. - smoothstep(0.15, 0.5, shape.y);
+	highp float fade = smoothstep(-1.25, -0.20, offset);
+	highp float density = (0.45 + 0.55*life)*mix(1., fade, coherence)*presence;
+	offset = mix(offset, max(offset, -0.20), coherence);
+	return CloudWeather(vec3(offset, 0.65 + 0.35*life, density), drift);
 }
 
-highp float cloudOffset(highp vec3 p)
+CloudWeather cloudWeather(highp vec3 p)
 {
-	return cloudOffsetAt(p, cloudMap(p), cloudCover, cloudFront, cloudRadii.y, cloudBank);
+	return cloudWeatherAt(p, cloudMap(p), cloudCover, cloudFront, cloudRadii.y, cloudBank, cloudShape, cloudSize, cloudFormation, cloudPhase);
 }
 
 // The light that the layer above lets through to a place, towards the light key: one look at the middle of its clouds
@@ -816,22 +916,36 @@ highp float otherShadow(highp vec3 p, highp vec3 key)
 	highp float r = length(p);
 	highp vec3 q = p + key*(otherRadius.x + middle - r)/max(dot(p/r, key), 0.02);
 	highp vec2 map = cloudMapAt(q, otherRadius.x, otherShift, otherTurn);
-	highp float s = textureLod(cloudTile, vec2(map.x*otherShape.x, map.y)*otherRadius.z, 1.5).x + cloudOffsetAt(q, map, otherCover, otherFront, otherRadius.x, otherBank);
-	return 1. - 0.9*otherShape.z*smoothstep(-0.05, 0.1, s);
+	CloudWeather weather = cloudWeatherAt(q, map, otherCover, otherFront, otherRadius.x, otherBank, otherShape, otherRadius.y, otherFormation, otherPhase);
+	highp vec4 f = textureLod(cloudTile, vec2((map.x + weather.drift.x)*otherShape.x, map.y + weather.drift.y)*otherRadius.z + otherPhase[0], 1.5);
+	highp float s = f.x + weather.growth.x;
+	highp float height = otherRadius.y*otherShape.w*f.y*weather.growth.y;
+	highp float round = s/pow(abs(s) + 0.01, 0.3);
+	highp float plateau = 0.8*s/sqrt(s*s + 0.0625);
+	highp float top = height*mix(round, plateau, otherShape.y);
+	highp float rim = 1. - clamp(s/0.35, 0., 1.);
+	highp float under = height*(0.025 + 0.05*f.z + 0.08*rim*rim);
+	// Optical thickness, including the oblique path through the upper layer. Unlike
+	// a linear density subtraction this stays nonnegative even for dense clouds.
+	highp float slant = 1./max(dot(q/length(q), key), 0.05);
+	highp float tau = otherCover.w*weather.growth.z*max(top - under, 0.)*slant;
+	highp float transmission = 0.15 + 0.85*exp(-tau);
+	return mix(1., transmission, smoothstep(0.02, 0.08, key.z));
 }
 
 // Where a place of the map lies on the tile of the shapes, which flat clouds stretch
 highp vec2 cloudTileAt(highp vec2 map)
 {
-	return vec2(map.x*cloudShape.x, map.y)*cloudTileScale.x;
+	return vec2(map.x*cloudShape.x, map.y)*cloudTileScale.x + cloudPhase[0];
 }
 
 // The heights over the base of the top and the underside of the cloud at a place (km, the top below 0 outside the clouds),
-// from the shape at the level of detail lod with the offset of the place. near: how much the fine lobes count at the height z
-highp vec2 cloudHeights(highp vec2 map, highp float offset, highp float lod, highp float near, highp float z)
+// from the shape at the level of detail lod with the local development parameters. near: how much the fine lobes count at the height z
+highp vec2 cloudHeights(highp vec2 map, CloudWeather weather, highp float lod, highp float near, highp float z)
 {
+	map += weather.drift;
 	highp vec4 f = textureLod(cloudTile, cloudTileAt(map), lod);
-	highp float s = f.x + offset;
+	highp float s = f.x + weather.growth.x;
 	// Fine lobes, stronger at the edge of a cloud, which they tear up. They change with the height, or the sides of the
 	// clouds would show grooves that run straight up
 	if (near > 0.)
@@ -839,14 +953,19 @@ highp vec2 cloudHeights(highp vec2 map, highp float offset, highp float lod, hig
 		highp vec2 fine = (map + cloudBoil + z*vec2(1.2, -0.9))*cloudTileScale.w;
 		// (they shape the clouds, but make none in the clear sky)
 		highp float lobes = near*smoothstep(-0.15, 0.02, s);
-		s += lobes*(0.12 + 0.2*(1. - clamp(s/0.3, 0., 1.)))*(textureLod(cloudTile, fine, 0.).w - 0.62)
-		   + lobes*0.1*(textureLod(cloudTile, fine*2.7, 0.).w - 0.62);
+		s += lobes*(0.04 + 0.10*(1. - clamp(s/0.3, 0., 1.)))*(textureLod(cloudTile, fine + cloudPhase[5], 0.).w - 0.62)
+		   + lobes*0.025*(textureLod(cloudTile, fine*2.7 + cloudPhase[6], 0.).w - 0.62);
 	}
 	// a rounded top, or a flat one, and an underside that is flat but for its rim
-	highp float height = cloudSize*cloudShape.w*f.y;
+	highp float height = cloudSize*cloudShape.w*f.y*weather.growth.y;
 	highp float round = s/pow(abs(s) + 0.01, 0.3);
-	highp float top = height*mix(round, 0.8*clamp(4.*s, -1., 1.), cloudShape.y);
-	return vec2(top, 0.3*height*pow(1. - clamp(s/0.35, 0., 1.), 2.));
+	// Smooth shoulders retain relief in stratocumulus and altocumulus instead of
+	// clipping their tops into plates. Keep the CPU transmission model in sync.
+	highp float plateau = 0.8*s/sqrt(s*s + 0.0625);
+	highp float top = height*mix(round, plateau, cloudShape.y);
+	// A shallow, gently varying base instead of a deep circular bowl around each body.
+	highp float rim = 1. - clamp(s/0.35, 0., 1.);
+	return vec2(top, height*(0.025 + 0.05*f.z + 0.08*rim*rim));
 }
 
 // The sunlight on a side of a cloud with the Sun higher by this much (degrees) than at the base over the observer
@@ -895,7 +1014,8 @@ void main(void)
 	highp float jitter = samples > 1 ? fract(52.9829189*fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))) : 0.5;
 	highp vec2 hitMoment = vec2(0., 0.);
 	highp float bestMoment = 2., T = 0., thin = 0.;
-	highp float hitT = -1., hitZ = 0., hitTop = 0., hitUnder = 0., hitLod = 0., hitNear = 0., hitOffset = 0.;
+	highp float hitT = -1., hitZ = 0., hitTop = 0., hitUnder = 0., hitLod = 0.;
+	CloudWeather hitWeather = CloudWeather(vec3(0.), vec2(0.));
 	// the steps between two moments blur the surface, so that they do not show
 	highp float smear = spread/float(samples);
 	highp float look = log2((1.5*ds + smear)/cloudCover.z);
@@ -904,23 +1024,25 @@ void main(void)
 		// (the moments differ from pixel to pixel, so that the steps between them make grain, not stripes)
 		highp float when = (float(moment) + jitter)/float(samples) - 0.5;
 		cloudMoment = cloudSmear*when;
-		highp float firstT = -1., firstZ = 0., firstTop = 0., firstUnder = 0., firstLod = 0., firstNear = 0., firstOffset = 0.;
-		highp float depth = 0., lastOffset = 0.;
-		// Through the layer, until the clouds are opaque; the first place in a cloud is the one we see. Long steps look for
-		// the clouds, short ones find their surface
+		highp float firstWeight = 0., firstT = 0., firstZ = 0., firstTop = 0., firstUnder = 0., firstLod = 0.;
+		CloudWeather firstWeather = CloudWeather(vec3(0.), vec2(0.));
+		highp float depth = 0.;
+		CloudWeather lastWeather = CloudWeather(vec3(0.), vec2(0.));
+		// Through the layer, until the clouds are opaque. Long steps look for clouds;
+		// short ones integrate opacity and the representative lighting position
 		for (int k = 0; k < steps && depth < 7.; ++k)
 		{
 			highp float t = t0 + float(k)*ds;
 			highp vec3 middle = vec3(altAz.xy*(t + 0.5*ds), r0 + altAz.z*(t + 0.5*ds));
 			highp vec2 middleMap = cloudMap(middle);
 			// A blurred look at the map tells whether a cloud may lie in this step, and how high it may reach
-			highp vec4 blurred = textureLod(cloudTile, cloudTileAt(middleMap), look);
 			// (the offset of the end of this step, against the one at its start: the clouds must not jump between steps)
-			highp float offsetEnd = cloudOffset(vec3(altAz.xy*(t + ds), r0 + altAz.z*(t + ds)));
-			highp float offsetStart = k == 0 ? cloudOffset(vec3(altAz.xy*t, r0 + altAz.z*t)) : lastOffset;
-			lastOffset = offsetEnd;
-			highp float shape = blurred.x + 0.5*(offsetStart + offsetEnd);
-			if (t > 30. || shape > -0.13 && length(middle) - cloudRadii.y - 0.5*ds*altAz.z < cloudSize*cloudShape.w*blurred.y*pow(max(shape + 0.5, 0.), 0.7) + 0.05 + smear)
+			CloudWeather weatherEnd = cloudWeather(vec3(altAz.xy*(t + ds), r0 + altAz.z*(t + ds)));
+			CloudWeather weatherStart = k == 0 ? cloudWeather(vec3(altAz.xy*t, r0 + altAz.z*t)) : lastWeather;
+			lastWeather = weatherEnd;
+			highp vec4 blurred = textureLod(cloudTile, cloudTileAt(middleMap + 0.5*(weatherStart.drift + weatherEnd.drift)), look);
+			highp float shape = blurred.x + 0.5*(weatherStart.growth.x + weatherEnd.growth.x);
+			if (max(weatherStart.growth.z, weatherEnd.growth.z) > 1e-5 && (t > 30. || shape > -0.13 && length(middle) - cloudRadii.y - 0.5*ds*altAz.z < cloudSize*cloudShape.w*blurred.y*pow(max(shape + 0.5, 0.), 0.7) + 0.05 + smear))
 			{
 				// (far away a step passes over whole clouds: they blur together rather than glitter)
 				highp float foot = max(max(t*cloudPixel, ds*mix(0.1, 0.6, smoothstep(20., 60., t))), smear);
@@ -933,41 +1055,30 @@ void main(void)
 					highp float u = t + (float(j) + 0.5)*dt;
 					highp vec3 q = vec3(altAz.xy*u, r0 + altAz.z*u);
 					highp float height = length(q) - cloudRadii.y;
-					highp float offset = mix(offsetStart, offsetEnd, (float(j) + 0.5)/float(CloudSubsteps));
-					highp vec2 h = cloudHeights(cloudMap(q), offset, lod, near, height);
+					CloudWeather weather = mixWeather(weatherStart, weatherEnd, (float(j) + 0.5)/float(CloudSubsteps));
+					highp vec2 h = cloudHeights(cloudMap(q), weather, lod, near, height);
 					highp float d = min(h.x - height, height - h.y);
 					// Ragged edges: noise eats into them and leaves wisps (where it is finer than a pixel its mean, nothing)
 					if (abs(d) < 0.2*cloudSize)
 					{
-						highp vec2 rag = (cloudMap(q) + 0.5*cloudBoil + height*vec2(-0.8, 1.1))*(0.37*cloudTileScale.w);
-						d += 0.15*cloudSize*(textureLod(cloudTile, rag, max(log2(foot*1024.*0.37*cloudTileScale.w), 0.)).w - 0.62);
+						highp vec2 rag = (cloudMap(q) + weather.drift + 0.5*cloudBoil + height*vec2(-0.8, 1.1))*(0.37*cloudTileScale.w);
+						d += 0.07*cloudSize*(textureLod(cloudTile, rag + cloudPhase[7], max(log2(foot*1024.*0.37*cloudTileScale.w), 0.)).w - 0.62);
 					}
 					// (the density grows over the first 100 m or so into the cloud: the edges are soft and let the sky through)
 					highp float inside = smoothstep(-e, e + 0.1*cloudSize, d);
-					depth += cloudCover.w*dt*inside;
-					if (firstT < 0. && depth > 0.03)
-					{
-						// the surface lies between this place and the last one
-						highp float inner = u, outer = u - dt;
-						for (int n = 0; n < 4; ++n)
-						{
-							highp float mid = 0.5*(inner + outer);
-							q = vec3(altAz.xy*mid, r0 + altAz.z*mid);
-							height = length(q) - cloudRadii.y;
-							h = cloudHeights(cloudMap(q), offset, lod, near, height);
-							if (min(h.x - height, height - h.y) > -e)
-								inner = mid;
-							else
-								outer = mid;
-						}
-						firstT = inner;
-						firstZ = height;
-						firstTop = h.x;
-						firstUnder = h.y;
-						firstLod = lod;
-						firstNear = near;
-						firstOffset = offset;
-					}
+					// Weight the lighting position by each sample's visible opacity. A single
+					// threshold crossing jumped between steps and drew rings on the bases.
+					highp float opticalDepth = cloudCover.w*weather.growth.z*dt*inside;
+					highp float weight = exp(-depth)*(1. - exp(-opticalDepth));
+					depth += opticalDepth;
+					firstWeight += weight;
+					firstT += weight*u;
+					firstZ += weight*height;
+					firstTop += weight*h.x;
+					firstUnder += weight*h.y;
+					firstLod += weight*lod;
+					firstWeather.growth += weight*weather.growth;
+					firstWeather.drift += weight*weather.drift;
 				}
 			}
 		}
@@ -976,17 +1087,16 @@ void main(void)
 		T += through;
 		thin += through*(1. - through);
 		// the light of the clouds comes from the moment nearest to the middle of the exposure that met a cloud
-		if (firstT >= 0. && abs(when) < bestMoment)
+		if (firstWeight > 1e-6 && abs(when) < bestMoment)
 		{
 			bestMoment = abs(when);
 			hitMoment = cloudMoment;
-			hitT = firstT;
-			hitZ = firstZ;
-			hitTop = firstTop;
-			hitUnder = firstUnder;
-			hitLod = firstLod;
-			hitNear = firstNear;
-			hitOffset = firstOffset;
+			hitT = firstT/firstWeight;
+			hitZ = firstZ/firstWeight;
+			hitTop = firstTop/firstWeight;
+			hitUnder = firstUnder/firstWeight;
+			hitLod = firstLod/firstWeight;
+			hitWeather = CloudWeather(firstWeather.growth/firstWeight, firstWeather.drift/firstWeight);
 		}
 	}
 	if (hitT < 0.)
@@ -1002,17 +1112,19 @@ void main(void)
 	highp vec3 p = vec3(altAz.xy*hitT, r0 + altAz.z*hitT);
 	// (over some tens of meters, a step of the tile coarser: the light spreads in the cloud, and the facets of the tile
 	// between its texels would show)
-	highp float delta = max(0.04*cloudSize, 2.5*hitT*cloudPixel);
-	// (the base goes over into the sides with the height)
-	highp float fromBelow = 1. - smoothstep(0., 0.3*cloudSize, hitZ);
+	highp float delta = max(0.08*cloudSize, 2.5*hitT*cloudPixel);
+	// Blend relative to the local base and thickness, including flattened layers.
+	highp float fromBelow = 1. - smoothstep(0.05, 0.65,
+		(hitZ - hitUnder)/max(hitTop - hitUnder, 0.1*cloudSize*cloudShape.w));
 	highp vec2 map = cloudMap(p);
-	highp float normalLod = hitLod + 1.;
-	highp float centerTop = cloudHeights(map, hitOffset, normalLod, hitNear, hitZ).x;
-	highp vec2 slope = vec2(cloudHeights(cloudMap(p + vec3(delta, 0., 0.)), hitOffset, normalLod, hitNear, hitZ).x, cloudHeights(cloudMap(p + vec3(0., delta, 0.)), hitOffset, normalLod, hitNear, hitZ).x) - centerTop;
+	// Light responds to broad billows, not the fine wisps used for the silhouette.
+	highp float normalLod = hitLod + 1.5;
+	highp float centerTop = cloudHeights(map, hitWeather, normalLod, 0., hitZ).x;
+	highp vec2 slope = vec2(cloudHeights(cloudMap(p + vec3(delta, 0., 0.)), hitWeather, normalLod, 0., hitZ).x, cloudHeights(cloudMap(p + vec3(0., delta, 0.)), hitWeather, normalLod, 0., hitZ).x) - centerTop;
 	highp vec3 normal = normalize(vec3(-slope/delta, 1.));
 
 	// The hollows between the lobes see less of the sky
-	highp float blurred = cloudHeights(map, hitOffset, hitLod + 3.5, 0., 0.).x;
+	highp float blurred = cloudHeights(map, hitWeather, hitLod + 3.5, 0., 0.).x;
 	highp float open = clamp(1. - 1.5*(blurred - hitZ)/(0.3*cloudSize), 0.35, 1.);
 
 	// The shadow from the clouds themselves and each other towards the light, in longer steps further away: scattered
@@ -1020,23 +1132,40 @@ void main(void)
 	highp float shadow = 1.;
 	// (looking towards the light we see the side in shadow, from which less of the light that went around comes)
 	highp float towardKey = smoothstep(0.3, 0.9, dot(altAz, cloudKey));
-	if (hitT*cloudPixel < 0.3 && cloudKey.z > -0.05)
+	// Fade the approximation out smoothly when it is subpixel or the key is below
+	// the horizon, rather than switching all self-shadowing on or off in one frame.
+	highp float shadowWeight = (1. - smoothstep(0.15, 0.3, hitT*cloudPixel))*smoothstep(-0.05, 0.02, cloudKey.z);
+	if (shadowWeight > 0.)
 	{
-		highp float seen = 0., reach = 0.05*cloudSize;
+		highp float seen = 0., distance = 0., stepLength = 0.025*cloudSize;
 		highp vec3 start = p + 0.03*cloudSize*mix(normal, vec3(0., 0., -1.), fromBelow);
+		// Development varies slowly. Two extra anchors let a neighbouring cloud have
+		// its own height, density and deformation without evaluating weather at every
+		// shadow sample. The six intervals span approximately 1.28 cloud sizes.
+		highp float middleDistance = 0.32*cloudSize, endDistance = 1.28*cloudSize;
+		CloudWeather middleWeather = cloudWeather(start + middleDistance*cloudKey);
+		CloudWeather endWeather = cloudWeather(start + endDistance*cloudKey);
 		for (int k = 0; k < 6; ++k)
 		{
+			highp float reach = distance + 0.5*stepLength;
+			CloudWeather weather = reach < middleDistance
+				? mixWeather(hitWeather, middleWeather, reach/middleDistance)
+				: mixWeather(middleWeather, endWeather, clamp((reach - middleDistance)/(endDistance - middleDistance), 0., 1.));
 			highp vec3 q = start + reach*cloudKey;
 			highp float height = length(q) - cloudRadii.y;
-			highp vec2 h = cloudHeights(cloudMap(q), hitOffset, hitLod + 0.7*float(k), 0., 0.);
-			// (softly at the edges, so that the shadows have no facets)
-			seen += 0.5*reach*smoothstep(-0.1*reach - 0.02, 0.4*reach + 0.05, min(h.x - height, height - h.y));
-			reach *= 1.9;
+			highp vec2 h = cloudHeights(cloudMap(q), weather, hitLod + 0.7*float(k), 0., 0.);
+			// Integrate local density over each interval, with broader filtering farther
+			// away to approximate light arriving through a volume instead of a hard face.
+			highp float inside = smoothstep(-0.1*stepLength - 0.02, 0.4*stepLength + 0.05, min(h.x - height, height - h.y));
+			seen += stepLength*weather.growth.z*inside;
+			distance += stepLength;
+			stepLength *= 1.9;
 		}
-		// (scattered many times, light gets around the shadow: a sum of ever weaker and wider passes, after Wrenninge)
+		// Several effective scattering orders keep dense regions softly illuminated.
 		highp float tau = 4.*cloudShape.z*seen/cloudSize;
 		highp float around = 1. - towardKey;
-		shadow = (exp(-tau) + around*(0.5*exp(-0.4*tau) + 0.25*exp(-0.15*tau)))/(1. + 0.75*around);
+		highp float scattered = (exp(-tau) + around*(0.5*exp(-0.4*tau) + 0.25*exp(-0.15*tau)))/(1. + 0.75*around);
+		shadow = mix(1., scattered, shadowWeight);
 	}
 	// and the shadows of the layer above and of the cirrus
 	highp float upper = otherShadow(p, cloudKey)*cirrusShadow(p, cloudKey);
@@ -1060,7 +1189,7 @@ void main(void)
 
 	// From below the line of sight meets the underside. It reflects the ground and lets through what falls on its top, less
 	// where the cloud is thick; towards the Sun that light goes on forwards
-	highp float through = 1./(1. + 6.75*cloudShape.z*max(hitTop - hitZ, 0.)/cloudSize);
+	highp float through = 1./(1. + 6.75*cloudShape.z*hitWeather.growth.z*max(hitTop - hitZ, 0.)/cloudSize);
 	// (only what goes through thin clouds keeps its way: through thick ones the light is scattered to all sides)
 	highp float forwards = 1. + 3.*exp(-(1. - sunCos)/0.06)*through*through;
 	highp vec3 base = mix(cloudBelow, cloudAbove, through) + through*cloudAboveSun*forwards*shadow + cloudCity;
@@ -1068,8 +1197,8 @@ void main(void)
 	highp float lowSun = 1. - smoothstep(0.03, 0.3, abs(cloudSun.z));
 	highp float wide = 0.25*cloudSize;
 	highp float wideLod = hitLod + 3.;
-	highp vec2 rimOut = vec2(cloudHeights(cloudMap(p + vec3(wide, 0., 0.)), hitOffset, wideLod, 0., 0.).x, cloudHeights(cloudMap(p + vec3(0., wide, 0.)), hitOffset, wideLod, 0., 0.).x)
-	                  - cloudHeights(map, hitOffset, wideLod, 0., 0.).x;
+	highp vec2 rimOut = vec2(cloudHeights(cloudMap(p + vec3(wide, 0., 0.)), hitWeather, wideLod, 0., 0.).x, cloudHeights(cloudMap(p + vec3(0., wide, 0.)), hitWeather, wideLod, 0., 0.).x)
+	                  - cloudHeights(map, hitWeather, wideLod, 0., 0.).x;
 	highp float facing = clamp(dot(normalize(vec3(-rimOut, 0.1*cloudSize)), cloudSun), 0., 1.);
 	base += sideSun*lowSun*mix(lit, 1., 0.7)*(0.2 + 0.6*facing)*(1. + 3.*exp(-(1. - sunCos)/0.15));
 	highp vec3 light = mix(side, base, fromBelow);
@@ -1385,22 +1514,22 @@ void CloudMgr::drawLayer(StelCore* core, const StelProjector& prj, int i, int ot
 	else
 		p.setUniformValue("otherRadius", QVector3D(0.f, 1.f, 1.f));
 
-	const auto turn = [](const CloudShape::Motion& m) {
-		return QVector4D(static_cast<float>(m.cosine), static_cast<float>(m.sine), static_cast<float>(m.offsetX), static_cast<float>(m.offsetY));
-	};
 	const CloudShape::Motion motion = motionAt(core, core->getJD(), i);
-	p.setUniformValue("cloudTurn", turn(motion));
+	setLayerMotion(p, "cloud", layer, motion);
 	// (the layer above in its own wind, the fronts in that of the first layer)
-	p.setUniformValue("otherTurn", turn(motionAt(core, core->getJD(), other >= 0 ? other : i)));
-	p.setUniformValue("cloudFrontTurn", turn(motionAt(core, core->getJD(), 0)));
+	if (other >= 0)
+		setLayerMotion(p, "other", layers[other], motionAt(core, core->getJD(), other));
+	setFrontMotion(p, motionAt(core, core->getJD(), 0));
 	// (the cirrus cast their shadows if they show)
 	p.setUniformValue("cirrusShade", QVector4D(isCirrusShown(core) ? static_cast<float>(cirrusOpticalDepth) : 0.f, static_cast<float>(EarthRadius + cirrusHeight),
 	                                           static_cast<float>(currentCirrusCover), 0.f));
-	p.setUniformValue("cirrusTurn", turn(motionAt(core, core->getJD(), CirrusWind)));
+	setCirrusMotion(p, "cirrusTurn", motionAt(core, core->getJD(), CirrusWind));
 	p.setUniformValue("cirrusFront", frontUniform(cirrusFront));
 	p.setUniformValue("cloudGrow", QVector2D(static_cast<float>(motion.growU), static_cast<float>(motion.growV)));
 	p.setUniformValue("cloudBoil", QVector2D(static_cast<float>(motion.boilX), static_cast<float>(motion.boilY)));
 	p.setUniformValue("cloudFrontDrift", QVector2D(static_cast<float>(motion.frontU), static_cast<float>(motion.frontV)));
+	p.setUniformValue("cloudDeform", QVector2D(static_cast<float>(motion.deformU), static_cast<float>(motion.deformV)));
+	p.setUniformValue("cloudDeformScale", static_cast<float>(1./CloudShape::DeformScale));
 	p.setUniformValue("cloudGrowScale", static_cast<float>(1./CloudShape::GrowScale));
 	p.setUniformValue("cloudGrowStrength", static_cast<float>(CloudShape::GrowStrength));
 	// The exposure, if the sky moves during it in the camera
@@ -1564,12 +1693,9 @@ void CloudMgr::drawCirrus(StelCore* core, const StelProjector& prj)
 	p.setUniformValue("cloudSouth", vec(Vec3d(std::sin(phi)*std::cos(lambda), std::sin(phi)*std::sin(lambda), -std::cos(phi))));
 	p.setUniformValue("cloudEast", vec(Vec3d(-std::sin(lambda), std::cos(lambda), 0.)));
 	p.setUniformValue("cloudUp", vec(Vec3d(std::cos(phi)*std::cos(lambda), std::cos(phi)*std::sin(lambda), std::sin(phi))));
-	const auto turn = [](const CloudShape::Motion& m) {
-		return QVector4D(static_cast<float>(m.cosine), static_cast<float>(m.sine), static_cast<float>(m.offsetX), static_cast<float>(m.offsetY));
-	};
 	const CloudShape::Motion motion = motionAt(core, core->getJD(), CirrusWind);
-	p.setUniformValue("cloudTurn", turn(motion));
-	p.setUniformValue("cloudFrontTurn", turn(motionAt(core, core->getJD(), 0)));
+	setCirrusMotion(p, "cloudTurn", motion);
+	setFrontMotion(p, motionAt(core, core->getJD(), 0));
 	bindTileTexture(2);
 	p.setUniformValue("cloudTile", 2);
 	const double r0 = EarthRadius + std::max(0., location.altitude*0.001), rc = EarthRadius + cirrusHeight;

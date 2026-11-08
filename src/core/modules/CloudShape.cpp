@@ -62,11 +62,11 @@ public:
 				                        static_cast<float>(radius0 + (radius1 - radius0)*cellRandom(i, j, layer, 3)),
 				                        static_cast<float>(cellRandom(i, j, layer, 4)), cellRandom(i, j, layer, 0) <= chance};
 	}
-	//! At the position (in cells): the largest of 1 - (d/r)^2, and the number of its sphere from 0 to 1
+	//! At the position (in cells): the largest of 1 - (d/r)^2, and a smoothly blended height seed from 0 to 1
 	double at(double x, double y, double* number = nullptr) const
 	{
 		const int cx = static_cast<int>(std::floor(x)), cy = static_cast<int>(std::floor(y));
-		double best = -1e9;
+		double best = -1e9, weightSum = 0., heightSum = 0.;
 		for (int j = -2; j <= 2; ++j)
 			for (int i = -2; i <= 2; ++i)
 			{
@@ -76,13 +76,19 @@ public:
 				const double dx = x - (cx + i + static_cast<double>(sphere.x)), dy = y - (cy + j + static_cast<double>(sphere.y));
 				const double r = static_cast<double>(sphere.radius);
 				const double s = 1. - (dx*dx + dy*dy)/(r*r);
-				if (s > best)
+				best = std::max(best, s);
+				if (number)
 				{
-					best = s;
-					if (number)
-						*number = static_cast<double>(sphere.number);
+					// Compact, smooth weights: switching the dominant body must not create a cliff
+					// in the height map. The support fits inside the neighbourhood searched above.
+					const double w = std::max(s + 0.6, 0.);
+					const double weight = w*w*w;
+					weightSum += weight;
+					heightSum += weight*static_cast<double>(sphere.number);
 				}
 			}
+		if (number)
+			*number = weightSum > 0. ? heightSum/weightSum : 0.5;
 		return best;
 	}
 	//! The height of the lobes at a place in tiles, from 0 to 1
@@ -144,22 +150,72 @@ CloudShape::Motion CloudShape::motion(double jd)
 	m.offsetX = reach(0.004, 4.3)*wave(4.3, 1.3) + reach(0.0025, 2.3)*wave(2.3, 4.1);
 	m.offsetY = reach(0.004, 3.7)*wave(3.7, 5.2) + reach(0.0025, 9.1)*wave(9.1, 0.4);
 	// the noise of growth drifts at 2.5 m/s through the clouds: they grow and dissolve in about 10 to 20 minutes
-	const double drift = std::fmod(0.0025*86400.*days/GrowScale, 1.);
-	m.growU = drift;
-	m.growV = 0.6*drift;
+	const double drift = 0.0025*86400.*days/GrowScale;
+	// Wrap each texture axis independently; wrapping before scaling made V jump.
+	m.growU = std::remainder(drift, 1.);
+	m.growV = std::remainder(0.6*drift, 1.);
+	// Broad deformation evolves more slowly than the life field, carried with each layer.
+	m.deformU = std::remainder(0.001*86400.*days/DeformScale, 1.);
+	m.deformV = std::remainder(-0.0006*86400.*days/DeformScale, 1.);
 	// the fine lobes at 1 m/s
-	m.boilX = std::fmod(0.001*86400.*days, 2.*FineScale);
-	m.boilY = -0.7*m.boilX;
+	// Bounded, continuous deformation. These coordinates feed several incommensurate
+	// texture scales, so resetting them at one texture period cannot be seamless.
+	m.boilX = 0.8*std::sin(0.001*86400.*days/0.8);
+	m.boilY = 0.7*std::sin(0.0007*86400.*days/0.7 + 1.3);
 	// the fronts change as if they drifted at 1.5 m/s across and 0.5 m/s along through the air: in a day or two
 	m.frontU = std::fmod(0.0005*86400.*days/FrontAlong, 1.);
 	m.frontV = std::fmod(0.0015*86400.*days/FrontAcross, 1.);
 	return m;
 }
 
-double CloudShape::afternoon(double jd, double longitude)
+CloudShape::Motion CloudShape::heightMotion(double jd, double x, double y, double speedRatio, double turn)
 {
-	const double hour = jd + 0.5 + longitude/360.;
-	return 0.85 + 0.15*std::cos(2.*M_PI*(hour - std::floor(hour) - 0.625));
+	Motion m = motion(jd);
+	const Motion start = motion(2451545.);
+	const double dx = (m.cosine - start.cosine)*x - (m.sine - start.sine)*y + m.offsetX - start.offsetX;
+	const double dy = (m.sine - start.sine)*x + (m.cosine - start.cosine)*y + m.offsetY - start.offsetY;
+	m.offsetX += speedRatio*(std::cos(turn)*dx - std::sin(turn)*dy) - dx;
+	m.offsetY += speedRatio*(std::sin(turn)*dx + std::cos(turn)*dy) - dy;
+	return m;
+}
+
+CloudShape::Motion CloudShape::manualMotion(double jd, double vx, double vy)
+{
+	Motion m = motion(jd);
+	const double seconds = (jd - 2451545.)*86400.;
+	m.cosine = 1.;
+	m.sine = 0.;
+	m.offsetX = -vx*seconds;
+	m.offsetY = -vy*seconds;
+	return m;
+}
+
+double CloudShape::solarHeating(double latitude, const std::array<double, 3>& sunAltAz)
+{
+	// Local axes: south, east, up. Hold declination fixed over this short interval and
+	// rotate the hour angle backwards. This captures season and polar day/night using
+	// Stellarium's current Sun, without maintaining history or changing the core date.
+	const double sinLat = std::sin(latitude), cosLat = std::cos(latitude);
+	const double sinDec = -cosLat*sunAltAz[0] + sinLat*sunAltAz[2];
+	const double mean = sinLat*sinDec;
+	double heat = 0., weights = 0.;
+	for (int i = 0; i < 12; ++i)
+	{
+		const double hoursAgo = (i + 0.5)*0.5;
+		const double angle = hoursAgo*M_PI/12.;
+		const double sine = mean + (sunAltAz[2] - mean)*std::cos(angle) - cosLat*sunAltAz[1]*std::sin(angle);
+		const double t = std::clamp((sine - 0.02)/0.63, 0., 1.);
+		const double weight = std::exp(-hoursAgo/2.);
+		heat += weight*t*t*(3. - 2.*t);
+		weights += weight;
+	}
+	return heat/weights;
+}
+
+double CloudShape::solarCoverScale(const Layer& layer, double heating)
+{
+	const double response = 0.30*(1. - 0.85*layer.flatness)/(1. + 0.4*std::max(layer.base - 2.5, 0.));
+	return 1. - response*(1. - std::clamp(heating, 0., 1.));
 }
 
 double CloudShape::frontCover(const std::vector<float>& tile, double mapX, double mapY, const Front& front, const Motion& motion)
@@ -186,14 +242,22 @@ std::vector<float> CloudShape::computeTile()
 			const double x = (u + 0.02*bendX)*Bodies, y = (v + 0.02*bendY)*Bodies;
 			double which = 0.;
 			const double body = bodies.at(x, y, &which);
-			// lobes on the bodies; their mean is taken off, so that they make the outline lumpy too
+			// Broad lobes dominate; smaller lobes only gently disturb their outline.
+			// Their mean is taken off, so that they make the outline lumpy too
 			// (only near the bodies: between them the shape falls off smoothly, so that a high cover grows the clouds rather
 			// than making specks of the lobes)
 			const double near = std::clamp((body + 0.6)/0.5, 0., 1.);
-			const double shape = body + near*near*(3. - 2.*near)*(0.6*(lobes.lobes(u, v) - 0.75) + 0.25*(small.lobes(u, v) - 0.75));
+			const double detailed = body + near*near*(3. - 2.*near)*(0.48*(lobes.lobes(u, v) - 0.75) + 0.09*(small.lobes(u, v) - 0.75));
+			// Keep a broad connected core beneath the billows. Negative detail must not
+			// carve an otherwise solid body into isolated peaks at modest coverage.
+			const double shape = std::max(detailed, 0.85*body - 0.08);
 			float* texel = tile.data() + (static_cast<std::size_t>(j)*n + static_cast<std::size_t>(i))*4;
 			texel[0] = static_cast<float>(std::clamp(shape, -0.6, 1.5));
-			texel[1] = static_cast<float>(0.2 + 0.4*which);
+			// Broad billows within each body, between the large silhouette and the fine edge
+			// lobes. Modulate height rather than adding specks to otherwise clear sky.
+			const double billow = 0.65*softNoise(u*47. + 1.7*bendX, v*47. + 1.7*bendY, 47, 9)
+			                    + 0.35*softNoise(u*103. - bendY, v*103. + bendX, 103, 10);
+			texel[1] = static_cast<float>((0.2 + 0.4*which)*(0.82 + 0.14*billow));
 			texel[2] = static_cast<float>(0.65*softNoise(u*5., v*5., 5, 6) + 0.35*softNoise(u*11., v*11., 11, 7));
 			texel[3] = static_cast<float>(fine.lobes(u, v));
 		}
@@ -204,6 +268,66 @@ double CloudShape::coverOffset(double cover, double noise)
 {
 	const double fading = std::max(0.1 - cover, 0.);
 	return 1.1*(cover - 0.45) + 2.*(noise - 0.5) - 150.*fading*fading;
+}
+
+std::array<double, 4> CloudShape::formationParameters(const Layer& layer)
+{
+	const auto smooth = [](double a, double b, double x) {
+		const double t = std::clamp((x - a)/(b - a), 0., 1.);
+		return t*t*(3. - 2.*t);
+	};
+	// Low flat layers organize into broad banks. Higher flat layers have smaller
+	// patches with a weak band structure. Blend rather than switching at a preset.
+	const double alto = smooth(2., 3.5, layer.base)*smooth(0.3, 0.6, layer.flatness);
+	const double lowX = GroupScale*(1. + 2.*layer.flatness);
+	const double lowY = GroupScale*(1. + 0.5*layer.flatness);
+	return {1./(lowX + alto*(32. - lowX)), 1./(lowY + alto*(18. - lowY)),
+	        0.95 - 0.45*std::clamp(layer.flatness/0.6, 0., 1.) + 0.25*alto, 0.28*alto};
+}
+
+std::array<double, 3> CloudShape::development(const std::vector<float>& tile, const Layer& layer,
+                                              const Motion& motion, double mapX, double mapY)
+{
+	// Groups travel with the cloud bodies; the life field evolves through them. Flattened
+	// layers form longer, more persistent patches rather than pulsing like cumulus.
+	const auto formation = formationParameters(layer);
+	const double u = mapX*formation[0], v = mapY*formation[1];
+	const double broad = readTile(tile, u, v, 2);
+	const double detail = readTile(tile, u*2.3 + 0.31, v*2.3 + 0.57, 2);
+	const double patches = 0.75*broad + 0.25*detail;
+	// Warped, locally faded bands, not uniform stripes across the whole sky.
+	const double bands = 0.5 + 0.5*std::cos(2.*M_PI*(5.*std::remainder(v, 1.) + 0.8*(broad - 0.5) + 0.35*(detail - 0.5)));
+	const double bandT = std::clamp((broad - 0.25)/0.5, 0., 1.);
+	const double bandWeight = formation[3]*bandT*bandT*(3. - 2.*bandT);
+	const double group = patches + bandWeight*(bands - patches);
+	const double grow = 0.7*readTile(tile, mapX/GrowScale + motion.growU, mapY/GrowScale + motion.growV, 2)
+	                  + 0.3*readTile(tile, mapX/GrowScale - motion.growV + 0.37, mapY/GrowScale + motion.growU + 0.19, 2);
+	const double t = std::clamp((grow - 0.25)/0.5, 0., 1.);
+	const double life = (1. - 0.65*layer.flatness)*t*t*(3. - 2.*t) + 0.65*layer.flatness*0.5;
+	return {formation[2]*(group - 0.5) + GrowStrength*(life - 0.5), 0.65 + 0.35*life, 0.45 + 0.55*life};
+}
+
+std::array<double, 3> CloudShape::cohesiveWeather(double offset, double height, double density, double flatness, double cover)
+{
+	// Cumulus dissolves by thinning as well as shrinking. Unlimited subtraction from
+	// its shape exposed separate billow tops instead of preserving a cloud body.
+	const double t = std::clamp((flatness - 0.15)/0.35, 0., 1.);
+	const double coherence = 1. - t*t*(3. - 2.*t);
+	const double u = std::clamp((offset + 1.25)/1.05, 0., 1.);
+	const double fade = u*u*(3. - 2.*u);
+	// Preserving the core must not create faint clouds in a clear weather region.
+	const double presence = std::clamp((coverOffset(cover, 0.) + 2.995)/1.61, 0., 1.);
+	return {offset + coherence*(std::max(offset, -0.20) - offset), height,
+	        density*(1. - coherence + coherence*fade)*presence*presence*(3. - 2.*presence)};
+}
+
+std::array<double, 2> CloudShape::deformation(const std::vector<float>& tile, const Layer& layer,
+                                              const Motion& motion, double mapX, double mapY)
+{
+	const double u = mapX/DeformScale + motion.deformU, v = mapY/DeformScale + motion.deformV;
+	const double strength = 0.3*layer.size*(1. - 0.4*layer.flatness);
+	return {strength*(readTile(tile, u, v, 2) - 0.5),
+	        strength*(readTile(tile, u + 0.37, v + 0.71, 2) - 0.5)};
 }
 
 double CloudShape::cirrusDensity(const std::vector<float>& tile, double mapX, double mapY, double cover)
@@ -273,21 +397,23 @@ double CloudShape::transmission(const std::vector<float>& tile, const Layer& lay
 		const double mapX = motion.cosine*scale*ex - motion.sine*scale*ey + motion.offsetX + layer.shift;
 		const double mapY = motion.sine*scale*ex + motion.cosine*scale*ey + motion.offsetY + layer.shift;
 		const double noise = 0.6*readTile(tile, mapX/CoverScaleLarge, mapY/CoverScaleLarge, 2) + 0.4*readTile(tile, mapX/CoverScaleSmall, mapY/CoverScaleSmall, 2);
-		const double tileX = mapX*layer.stretch()/(TileSize*size), tileY = mapY/(TileSize*size);
-		const double grow = readTile(tile, mapX/GrowScale + motion.growU, mapY/GrowScale + motion.growV, 2);
+		const auto drift = deformation(tile, layer, motion, mapX, mapY);
+		const double tileX = (mapX + drift[0])*layer.stretch()/(TileSize*size), tileY = (mapY + drift[1])/(TileSize*size);
+		const auto life = development(tile, layer, motion, mapX, mapY);
 		const double cover = layer.front.on ? frontCover(tile, frontMotion.cosine*scale*ex - frontMotion.sine*scale*ey + frontMotion.offsetX,
 		                                                 frontMotion.sine*scale*ex + frontMotion.cosine*scale*ey + frontMotion.offsetY, layer.front, frontMotion)
 		                                    : layer.cover;
-		const double shape = readTile(tile, tileX, tileY, 0) + std::min(coverOffset(cover, noise) + GrowStrength*(grow - 0.5), 0.45)
-		                     + 2.5*(bankMask(layer, px, py) - 1.);
-		const double height = size*layer.heightScale()*readTile(tile, tileX, tileY, 1);
-		const double round = shape/std::pow(std::fabs(shape) + 0.01, 0.3), plateau = 0.8*std::clamp(4.*shape, -1., 1.);
+		const double offset = std::min(coverOffset(cover, noise) + life[0], 0.45) + 2.5*(bankMask(layer, px, py) - 1.);
+		const auto weather = cohesiveWeather(offset, life[1], life[2], flat, cover);
+		const double shape = readTile(tile, tileX, tileY, 0) + weather[0];
+		const double height = size*layer.heightScale()*readTile(tile, tileX, tileY, 1)*weather[1];
+		const double round = shape/std::pow(std::fabs(shape) + 0.01, 0.3), plateau = 0.8*shape/std::sqrt(shape*shape + 0.0625);
 		const double topHeight = height*(round + flat*(plateau - round));
 		const double rim = 1. - std::clamp(shape/0.35, 0., 1.);
-		const double under = 0.3*height*rim*rim;
+		const double under = height*(0.025 + 0.05*readTile(tile, tileX, tileY, 2) + 0.08*rim*rim);
 		const double level = r - base;
 		const double e = std::clamp((std::min(topHeight - level, level - under) + 0.012)/(0.024 + 0.1*size), 0., 1.);
-		depth += Extinction*layer.density*ds*e*e*(3. - 2.*e);
+		depth += Extinction*layer.density*weather[2]*ds*e*e*(3. - 2.*e);
 		if (depth > 7.)
 			return 0.;
 	}
