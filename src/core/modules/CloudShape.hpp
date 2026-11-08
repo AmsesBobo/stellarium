@@ -46,7 +46,7 @@ public:
 	static constexpr int TileTexels = 1024;
 	static constexpr double TileSize = 41.6;      //!< km
 	static constexpr double BaseHeight = 1.5;     //!< km
-	static constexpr double LayerThickness = 0.8; //!< km: the highest top above the base
+	static constexpr double LayerThickness = 0.8; //!< km: the highest top above the base, at heightScale() 1
 	//! The scales (km) of the tile for the areas of clouds, in two mixed sizes that do not repeat together
 	static constexpr double CoverScaleLarge = 129.3, CoverScaleSmall = 53.7;
 	static constexpr double FineScale = 5.9;      //!< km: the size of the tile for the fine lobes
@@ -84,8 +84,9 @@ public:
 		double bankDepth = 30.;     //!< km
 		double shift = 0.;          //!< km: where the clouds of this layer lie on the map, so that two layers differ
 		Front front;                //!< the fronts, if they set the cover in place of cover
-		//! How much the flatness lowers the clouds, and stretches them along the map
-		double heightScale() const {return 1. - 0.75*flatness;}
+		//! How much the flatness lowers the clouds, and stretches them along the map. Heaped cumulus grow about as high as
+		//! they are wide; flat layers stay low
+		double heightScale() const {const double heaped = 1. - flatness; return (1. - 0.75*flatness)*(1. + 0.8*heaped*heaped);}
 		double stretch() const {return 1./(1. + 2.*flatness);}
 	};
 	//! What the bank of clouds lets stand at a place (km from the observer: x to the south, y to the east), from 0 to 1

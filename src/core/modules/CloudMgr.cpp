@@ -979,6 +979,16 @@ highp vec2 cloudTileAt(highp vec2 map)
 	return vec2(map.x*cloudShape.x, map.y)*cloudTileScale.x + cloudPhase[0];
 }
 
+// The integral of the ramp of the density at the edge of a cloud, from 0 below a to 1 above b, up to x
+highp float edgeIntegral(highp float x, highp float a, highp float b)
+{
+	return x < a ? 0. : x < b ? 0.5*(x - a)*(x - a)/(b - a) : 0.5*(b - a) + x - b;
+}
+
+// The shape S of the last place that cloudHeights() looked at: about 0.4 S (km at size 1) is the way across to the edge
+// of the cloud, where the heights tell only the way up or down (a steep side of a cloud is near though its top is high)
+highp float cloudLastShape = 0.;
+
 // The heights over the base of the top and the underside of the cloud at a place (km, the top below 0 outside the clouds),
 // from the shape at the level of detail lod with the local development parameters. near: how much the fine lobes count at the height z
 highp vec2 cloudHeights(highp vec2 map, CloudWeather weather, highp float lod, highp float near, highp float z)
@@ -996,6 +1006,7 @@ highp vec2 cloudHeights(highp vec2 map, CloudWeather weather, highp float lod, h
 		s += lobes*(0.04 + 0.10*(1. - clamp(s/0.3, 0., 1.)))*(textureLod(cloudTile, fine + cloudPhase[5], 0.).w - 0.62)
 		   + lobes*0.025*(textureLod(cloudTile, fine*2.7 + cloudPhase[6], 0.).w - 0.62);
 	}
+	cloudLastShape = s;
 	// a rounded top, or a flat one, and an underside that is flat but for its rim
 	highp float height = cloudSize*cloudShape.w*f.y*weather.growth.y;
 	highp float round = s/pow(abs(s) + 0.01, 0.3);
@@ -1015,7 +1026,8 @@ highp float billows(highp vec2 map, highp float height, highp float top, highp f
 	highp vec3 c = vec3(map, height)*cloudBillowScale.x + vec3(0., 0., cloudBillowScale.z);
 	highp float lod = max(log2(foot*cloudBillowScale.x*96.), 0.);
 	highp vec4 b = textureLod(cloudBillow, c, lod);
-	highp float up = smoothstep(0.08, 0.45, height/max(top, 0.01));
+	// (nor just above it at the thin rim of a cloud, where they would cut round dents into the flat base)
+	highp float up = smoothstep(0.08, 0.45, height/max(top, 0.01))*smoothstep(0.03, 0.12, height/cloudSize);
 	return cloudBillowScale.y*up*(1. - (0.55*b.r + 0.3*b.g + 0.15*b.b));
 }
 
@@ -1089,6 +1101,7 @@ void main(void)
 		// sunlight comes through, and outline the billows with bright rims
 		highp vec4 piece = vec4(0.), bestPiece = vec4(0.);
 		highp float pieceWeight = 0., bestPieceWeight = 0.;
+		highp float lastD = 0., lastU = -1e9; // the distance to the edge at the previous short step
 		// Through the layer, until the clouds are opaque. Long steps look for clouds;
 		// short ones integrate opacity and the representative lighting position
 		for (int k = 0; k < steps && depth < 7.; ++k)
@@ -1118,7 +1131,8 @@ void main(void)
 					highp float height = length(q) - cloudRadii.y;
 					CloudWeather weather = mixWeather(weatherStart, weatherEnd, (float(j) + 0.5)/float(CloudSubsteps));
 					highp vec2 h = cloudHeights(cloudMap(q), weather, lod, near, height);
-					highp float d = min(h.x - height, height - h.y);
+					// (the nearest surface: the top or the underside, or a side; there the billows also bite into the side of a cloud)
+					highp float d = min(min(h.x - height, height - h.y), 0.4*cloudSize*cloudLastShape);
 					// Ragged edges: noise eats into them and leaves wisps (where it is finer than a pixel its mean, nothing)
 					if (abs(d) < 0.2*cloudSize)
 					{
@@ -1128,9 +1142,14 @@ void main(void)
 					// The billows of the cauliflower top (they only take away: deeper inside, nothing to do)
 					if (d > -e && d < cloudBillowScale.y)
 						d -= billows(cloudMap(q) + weather.drift, height, h.x, foot);
-					// (the density grows over the first few tens of meters into the cloud: the edges of a cumulus are crisp; the
-					// ragged noise above still leaves soft wisps)
-					highp float inside = smoothstep(-e, e + 0.004*cloudSize, d);
+					// The density grows over the first few tens of meters into the cloud: the edges of a cumulus are crisp (the ragged
+					// noise above still leaves soft wisps). Take its mean between this short step and the last, where the distance to
+					// the edge goes from one to the other: a crisp edge that falls between them is neither lost nor shows the steps
+					highp float a = -e, b = e + 0.004*cloudSize;
+					highp float inside = clamp((d - a)/(b - a), 0., 1.);
+					if (u - lastU < 1.5*dt && abs(d - lastD) > 1e-4)
+						inside = (edgeIntegral(d, a, b) - edgeIntegral(lastD, a, b))/(d - lastD);
+					lastD = d; lastU = u;
 					// Weight the lighting position by each sample's visible opacity. A single
 					// threshold crossing jumped between steps and drew rings on the bases.
 					highp float opticalDepth = cloudCover.w*weather.growth.z*dt*inside;
@@ -1232,7 +1251,7 @@ void main(void)
 				highp float height = length(q) - cloudRadii.y;
 				// (the first steps see the fine lobes, so that each billow has a lit side and a shaded one)
 				highp vec2 h = cloudHeights(cloudMap(q), weather, point.w + 0.7*max(float(k) - 1., 0.), k < 3 ? lightNear : 0., height);
-				highp float dLight = min(h.x - height, height - h.y);
+				highp float dLight = min(min(h.x - height, height - h.y), 0.4*cloudSize*cloudLastShape);
 				// (the billows shade each other)
 				if (k < 3 && dLight < cloudBillowScale.y)
 					dLight -= billows(cloudMap(q) + weather.drift, height, h.x, stepLength);
