@@ -20,6 +20,7 @@
 #include "CloudShape.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 
@@ -256,6 +257,53 @@ double CloudShape::frontCover(const std::vector<float>& tile, double mapX, doubl
 	return front.scale*std::clamp(FrontGain*(readTile(tile, u, v, 2) - FrontMid) + front.bias, 0., FrontMax);
 }
 
+std::vector<unsigned char> CloudShape::computeBillows()
+{
+	const int n = BillowTexels;
+	std::vector<unsigned char> texels(static_cast<std::size_t>(n)*n*n*4, 255);
+	// a random point in each cell of a lattice of cells^3, repeating over the tile
+	const auto point = [](int i, int j, int k, int cells, int seed) {
+		const auto wrap = [cells](int a) {return ((a % cells) + cells) % cells;};
+		std::uint32_t h = static_cast<std::uint32_t>(wrap(i)*73856093) ^ static_cast<std::uint32_t>(wrap(j)*19349663)
+		                ^ static_cast<std::uint32_t>(wrap(k)*83492791) ^ static_cast<std::uint32_t>(seed*2654435761u);
+		std::array<double, 3> p;
+		for (double& c : p)
+		{
+			h ^= h >> 15; h *= 0x2c1b3c6dU; h ^= h >> 12; h *= 0x297a2d39U; h ^= h >> 15;
+			c = 0.1 + 0.8*static_cast<double>(h & 0xffffff)/16777216.;
+		}
+		return p;
+	};
+	const auto puffs = [&point](double x, double y, double z, int cells, int seed) {
+		const double u = x*cells, v = y*cells, w = z*cells;
+		const int i0 = static_cast<int>(std::floor(u)), j0 = static_cast<int>(std::floor(v)), k0 = static_cast<int>(std::floor(w));
+		// (a smooth minimum of the distances: where two billows meet, the crease between them is rounded)
+		double sum = 0.;
+		for (int i = i0 - 1; i <= i0 + 1; ++i)
+			for (int j = j0 - 1; j <= j0 + 1; ++j)
+				for (int k = k0 - 1; k <= k0 + 1; ++k)
+				{
+					const auto p = point(i, j, k, cells, seed);
+					const double dx = i + p[0] - u, dy = j + p[1] - v, dz = k + p[2] - w;
+					sum += std::exp(-(dx*dx + dy*dy + dz*dz)/0.06);
+				}
+		const double nearest = -0.06*std::log(std::max(sum, 1e-30));
+		// a ball of radius 0.85 cells around each point: its height over the surface
+		return std::pow(std::clamp(1. - nearest/0.72, 0., 1.), 0.7);
+	};
+	for (int z = 0; z < n; ++z)
+		for (int y = 0; y < n; ++y)
+			for (int x = 0; x < n; ++x)
+			{
+				const double u = (x + 0.5)/n, v = (y + 0.5)/n, w = (z + 0.5)/n;
+				unsigned char* t = &texels[((static_cast<std::size_t>(z)*n + y)*n + x)*4];
+				t[0] = static_cast<unsigned char>(std::lround(255.*puffs(u, v, w, BillowCellsCoarse, 1)));
+				t[1] = static_cast<unsigned char>(std::lround(255.*puffs(u, v, w, BillowCellsFine, 2)));
+				t[2] = static_cast<unsigned char>(std::lround(255.*puffs(u, v, w, BillowCellsFiner, 3)));
+			}
+	return texels;
+}
+
 std::vector<float> CloudShape::computeTile()
 {
 	const int n = TileTexels;
@@ -485,7 +533,7 @@ double CloudShape::transmission(const std::vector<float>& tile, const Layer& lay
 		const double topHeight = height*(round + flat*(plateau - round));
 		const double under = size*layer.heightScale()*(0.012 + 0.008*readTile(tile, tileX, tileY, 2));
 		const double level = r - base;
-		const double e = std::clamp((std::min(topHeight - level, level - under) + 0.012)/(0.024 + 0.1*size), 0., 1.);
+		const double e = std::clamp((std::min(topHeight - level, level - under) + 0.012)/(0.024 + 0.004*size), 0., 1.);
 		depth += Extinction*layer.density*weather[2]*ds*e*e*(3. - 2.*e);
 		if (depth > 7.)
 			return 0.;

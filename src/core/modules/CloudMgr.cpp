@@ -38,6 +38,7 @@
 #include <QSettings>
 #include <QStringList>
 #include <QOpenGLBuffer>
+#include <QOpenGLExtraFunctions>
 #include <QOpenGLFramebufferObject>
 #include <QOpenGLFramebufferObjectFormat>
 #include <QOpenGLShaderProgram>
@@ -730,6 +731,28 @@ void CloudMgr::bindTileTexture(int unit)
 	gl.glActiveTexture(GL_TEXTURE0);
 }
 
+void CloudMgr::bindBillowTexture(int unit)
+{
+	auto& gl = *QOpenGLContext::currentContext()->extraFunctions();
+	gl.glActiveTexture(GL_TEXTURE0 + static_cast<GLenum>(unit));
+	if (!billowTexture)
+	{
+		const std::vector<unsigned char> billows = CloudShape::computeBillows();
+		gl.glGenTextures(1, &billowTexture);
+		gl.glBindTexture(GL_TEXTURE_3D, billowTexture);
+		gl.glTexImage3D(GL_TEXTURE_3D, 0, GL_RGBA8, CloudShape::BillowTexels, CloudShape::BillowTexels, CloudShape::BillowTexels, 0,
+		                GL_RGBA, GL_UNSIGNED_BYTE, billows.data());
+		gl.glGenerateMipmap(GL_TEXTURE_3D);
+		gl.glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+		gl.glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		gl.glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+		gl.glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+		gl.glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_REPEAT);
+	}
+	gl.glBindTexture(GL_TEXTURE_3D, billowTexture);
+	gl.glActiveTexture(GL_TEXTURE0);
+}
+
 void CloudMgr::buildProgram(const StelProjector& projector)
 {
 	program.reset();
@@ -794,6 +817,8 @@ uniform highp vec2 cloudDeform;
 uniform highp float cloudDeformScale;
 uniform highp vec2 cloudGrow;       // the place of the noise of growth (tiles)
 uniform highp vec2 cloudBoil;       // of the fine lobes (km)
+uniform highp sampler3D cloudBillow; // the billows of the cauliflower tops (see CloudShape::computeBillows())
+uniform highp vec3 cloudBillowScale; // 1/km of their tile, how deep they eat in (km), their change (in tiles)
 uniform highp float cloudGrowScale; // 1/km
 uniform highp float cloudGrowStrength;
 uniform highp vec2 cloudSmear;      // what the wind moves the map during the exposure (km)
@@ -983,6 +1008,17 @@ highp vec2 cloudHeights(highp vec2 map, CloudWeather weather, highp float lod, h
 	return vec2(top, cloudSize*cloudShape.w*(0.012 + 0.008*f.z));
 }
 
+// How deep the billows eat into the cloud at a place of the map, at a height over the base under the top there (km).
+// None at the flat base; where they are finer than the footprint foot (km), only their mean
+highp float billows(highp vec2 map, highp float height, highp float top, highp float foot)
+{
+	highp vec3 c = vec3(map, height)*cloudBillowScale.x + vec3(0., 0., cloudBillowScale.z);
+	highp float lod = max(log2(foot*cloudBillowScale.x*96.), 0.);
+	highp vec4 b = textureLod(cloudBillow, c, lod);
+	highp float up = smoothstep(0.08, 0.45, height/max(top, 0.01));
+	return cloudBillowScale.y*up*(1. - (0.55*b.r + 0.3*b.g + 0.15*b.b));
+}
+
 // The sunlight on a side of a cloud with the Sun higher by this much (degrees) than at the base over the observer
 highp vec3 cloudSunlight(highp float offset)
 {
@@ -1048,6 +1084,11 @@ void main(void)
 		highp vec4 volume[2];
 		volume[0] = vec4(0.); volume[1] = vec4(0.);
 		highp vec2 volumeWeight = vec2(0.);
+		// The near stratum takes its place from the separate piece of cloud that weighs most in it (a billow in front
+		// of another one, or a wisp before the body): their mean would lie in the air between them, where the
+		// sunlight comes through, and outline the billows with bright rims
+		highp vec4 piece = vec4(0.), bestPiece = vec4(0.);
+		highp float pieceWeight = 0., bestPieceWeight = 0.;
 		// Through the layer, until the clouds are opaque. Long steps look for clouds;
 		// short ones integrate opacity and the representative lighting position
 		for (int k = 0; k < steps && depth < 7.; ++k)
@@ -1084,8 +1125,12 @@ void main(void)
 						highp vec2 rag = (cloudMap(q) + weather.drift + 0.5*cloudBoil + height*vec2(-0.8, 1.1))*(0.37*cloudTileScale.w);
 						d += 0.07*cloudSize*(textureLod(cloudTile, rag + cloudPhase[7], max(log2(foot*1024.*0.37*cloudTileScale.w), 0.)).w - 0.62);
 					}
-					// (the density grows over the first 100 m or so into the cloud: the edges are soft and let the sky through)
-					highp float inside = smoothstep(-e, e + 0.1*cloudSize, d);
+					// The billows of the cauliflower top (they only take away: deeper inside, nothing to do)
+					if (d > -e && d < cloudBillowScale.y)
+						d -= billows(cloudMap(q) + weather.drift, height, h.x, foot);
+					// (the density grows over the first few tens of meters into the cloud: the edges of a cumulus are crisp; the
+					// ragged noise above still leaves soft wisps)
+					highp float inside = smoothstep(-e, e + 0.004*cloudSize, d);
 					// Weight the lighting position by each sample's visible opacity. A single
 					// threshold crossing jumped between steps and drew rings on the bases.
 					highp float opticalDepth = cloudCover.w*weather.growth.z*dt*inside;
@@ -1096,6 +1141,13 @@ void main(void)
 					highp vec2 vw = weight*vec2(1. - deeper, deeper);
 					highp vec4 samplePoint = vec4(u, height, h.x, lod);
 					volume[0] += vw.x*samplePoint;
+					if (inside < 0.02)
+					{
+						if (pieceWeight > bestPieceWeight) {bestPiece = piece; bestPieceWeight = pieceWeight;}
+						piece = vec4(0.); pieceWeight = 0.;
+					}
+					piece += vw.x*samplePoint;
+					pieceWeight += vw.x;
 					volume[1] += vw.y*samplePoint;
 					volumeWeight += vw;
 					depth += opticalDepth;
@@ -1106,6 +1158,9 @@ void main(void)
 				}
 			}
 		}
+		if (pieceWeight > bestPieceWeight) {bestPiece = piece; bestPieceWeight = pieceWeight;}
+		if (bestPieceWeight > 1e-8)
+			volume[0] = bestPiece*(volumeWeight.x/bestPieceWeight);
 		// (a thick cloud is opaque: the Sun must not shine through where the way stopped)
 		highp float through = exp(-depth)*(1. - smoothstep(5., 6.9, depth));
 		T += through;
@@ -1166,6 +1221,7 @@ void main(void)
 		if (shadowWeight > 0.)
 		{
 			highp float seen = 0., distance = 0., stepLength = 0.025*cloudSize;
+			highp float lightNear = 1. - smoothstep(0.015, 0.05, max(hitT*cloudPixel, 0.012)/cloudSize);
 			for (int k = 0; k < 6; ++k)
 			{
 				highp float reach = distance + 0.5*stepLength;
@@ -1174,16 +1230,21 @@ void main(void)
 					: mixWeather(middleWeather, endWeather, clamp((reach - middleDistance)/(endDistance - middleDistance), 0., 1.));
 				highp vec3 q = start + reach*cloudKey;
 				highp float height = length(q) - cloudRadii.y;
-				highp vec2 h = cloudHeights(cloudMap(q), weather, point.w + 0.7*float(k), 0., 0.);
-				highp float inside = smoothstep(-0.1*stepLength - 0.02, 0.4*stepLength + 0.05, min(h.x - height, height - h.y));
+				// (the first steps see the fine lobes, so that each billow has a lit side and a shaded one)
+				highp vec2 h = cloudHeights(cloudMap(q), weather, point.w + 0.7*max(float(k) - 1., 0.), k < 3 ? lightNear : 0., height);
+				highp float dLight = min(h.x - height, height - h.y);
+				// (the billows shade each other)
+				if (k < 3 && dLight < cloudBillowScale.y)
+					dLight -= billows(cloudMap(q) + weather.drift, height, h.x, stepLength);
+				highp float inside = smoothstep(-0.1*stepLength - 0.01, 0.4*stepLength + 0.025, dLight);
 				seen += stepLength*weather.growth.z*inside;
 				distance += stepLength;
 				stepLength *= 1.9;
 			}
 			directTransmission = mix(T, exp(-cloudCover.w*seen), shadowWeight);
-			highp float tau = 4.*cloudShape.z*seen/cloudSize;
+			highp float tau = 16.*cloudShape.z*seen/cloudSize;
 			highp float around = 1. - towardKey;
-			highp float scattered = (exp(-tau) + around*(0.5*exp(-0.4*tau) + 0.25*exp(-0.15*tau)))/(1. + 0.75*around);
+			highp float scattered = (exp(-tau) + around*(0.1*exp(-0.6*tau) + 0.03*exp(-0.12*tau)))/(1. + 0.5*around);
 			shadow = mix(1., scattered, shadowWeight);
 		}
 		singleTransmission += contribution*directTransmission;
@@ -1194,13 +1255,13 @@ void main(void)
 		highp float broadDepth = cloudSize*cloudShape.w*field.y*hitWeather.growth.y;
 		highp float diffuseDepth = mix(max(point.z - point.y, 0.), broadDepth, 0.85);
 		highp float through = 1./(1. + 6.75*cloudShape.z*hitWeather.growth.z*diffuseDepth/cloudSize);
-		highp vec3 ambient = mix(cloudBelow, cloudAbove, through) + cloudCity;
+		highp vec3 ambient = 0.5*mix(cloudBelow, cloudAbove, through) + cloudCity;
 		highp vec3 sunlight = cloudSunlight(dot(start.xy, sunWay)*57.3/7433. + 0.35*point.y);
 		// A broad forward lobe for multiply scattered light. The narrow silver
 		// lining below uses the separately integrated incoming transmission.
 		highp float sunPhase = 0.65 + 0.35*exp(-(1. - sunCos)/0.25);
 		highp float moonPhase = 0.65 + 0.35*exp(-(1. - moonCos)/0.25);
-		highp float scatteredLight = 0.2 + 0.8*shadow;
+		highp float scatteredLight = shadow;
 		light += contribution*(ambient
 			+ sunlight*sunPhase*mix(1., scatteredLight, keyIsSun)
 			+ sideMoon*moonPhase*mix(scatteredLight, 1., keyIsSun));
@@ -1635,6 +1696,8 @@ void CloudMgr::drawLayer(StelCore* core, const StelProjector& prj, int i, int ot
 	p.setUniformValue("cloudPixel", static_cast<float>((flagHalfResolution ? 2. : 1.)/static_cast<double>(prj.getPixelPerRadAtCenter())));
 	bindTileTexture(2);
 	p.setUniformValue("cloudTile", 2);
+	bindBillowTexture(3);
+	p.setUniformValue("cloudBillow", 3);
 	p.setUniformValue("cloudTileScale", QVector4D(static_cast<float>(1./(layer.size*CloudShape::TileSize)), static_cast<float>(1./CloudShape::CoverScaleLarge),
 	                                              static_cast<float>(1./CloudShape::CoverScaleSmall), static_cast<float>(1./(layer.size*CloudShape::FineScale))));
 	p.setUniformValue("cloudSize", static_cast<float>(layer.size));
@@ -1658,6 +1721,11 @@ void CloudMgr::drawLayer(StelCore* core, const StelProjector& prj, int i, int ot
 	p.setUniformValue("cirrusFront", frontUniform(cirrusFront));
 	p.setUniformValue("cloudGrow", QVector2D(static_cast<float>(motion.growU), static_cast<float>(motion.growV)));
 	p.setUniformValue("cloudBoil", QVector2D(static_cast<float>(motion.boilX), static_cast<float>(motion.boilY)));
+	// The billows: 1/km of their tile, how deep they eat in (km, less in flat clouds), and their slow change (the third
+	// coordinate of the tile moves on as the fine lobes boil)
+	p.setUniformValue("cloudBillowScale", QVector3D(static_cast<float>(1./(layer.size*CloudShape::BillowScale)),
+	                                                static_cast<float>(CloudShape::BillowDepth*layer.size*(1. - 0.7*layer.flatness)),
+	                                                static_cast<float>(std::fmod(0.35*motion.boilX/(layer.size*CloudShape::BillowScale), 1.))));
 	p.setUniformValue("cloudFrontDrift", QVector2D(static_cast<float>(motion.frontU), static_cast<float>(motion.frontV)));
 	p.setUniformValue("cloudDeform", QVector2D(static_cast<float>(motion.deformU), static_cast<float>(motion.deformV)));
 	p.setUniformValue("cloudDeformScale", static_cast<float>(1./CloudShape::DeformScale));

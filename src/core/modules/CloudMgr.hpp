@@ -260,6 +260,9 @@ private:
 	mutable std::vector<float> tile;
 	unsigned int tileTexture = 0;
 	void bindTileTexture(int unit);
+	//! The billows of the cauliflower tops (see CloudShape::computeBillows()), a 3D texture
+	unsigned int billowTexture = 0;
+	void bindBillowTexture(int unit);
 
 	void buildProgram(const StelProjector& projector);
 	void drawQuad();

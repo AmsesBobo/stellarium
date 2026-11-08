@@ -50,7 +50,7 @@ public:
 	//! The scales (km) of the tile for the areas of clouds, in two mixed sizes that do not repeat together
 	static constexpr double CoverScaleLarge = 129.3, CoverScaleSmall = 53.7;
 	static constexpr double FineScale = 5.9;      //!< km: the size of the tile for the fine lobes
-	static constexpr double Extinction = 20.;     //!< per km in the clouds: they are opaque within a few hundred meters
+	static constexpr double Extinction = 50.;     //!< per km in the clouds: they are opaque within some 100 m, with crisp edges
 
 	//! Weather fronts, for the clouds that follow the date: long bands of clouds some hundred km wide with clear skies
 	//! between them, from the soft noise of the tile stretched along an axis of the map and bent. The wind carries them
@@ -136,6 +136,15 @@ public:
 
 	//! The tile, four values for each texel by rows
 	static std::vector<float> computeTile();
+	//! The billows of the cauliflower tops: a tileable 3D texture of BillowTexels^3 RGBA texels, each channel puffs
+	//! (balls around random points, highest at their centers: an inverted Worley noise), red with BillowCellsCoarse
+	//! cells across the tile, green with BillowCellsFine, blue with BillowCellsFiner. The shader eats them into the surface of the clouds above
+	//! their flat bases, so that each billow has its lit side and its shaded underside
+	static constexpr int BillowTexels = 96;
+	static constexpr int BillowCellsCoarse = 5, BillowCellsFine = 11, BillowCellsFiner = 23;
+	static constexpr double BillowScale = 1.8;   //!< km per tile, for clouds of size 1
+	static constexpr double BillowDepth = 0.3;   //!< how deep the billows eat into the clouds, for clouds of size 1 (km)
+	static std::vector<unsigned char> computeBillows();
 
 	//! What the shape adds with the setting cover (0 to 1) and the soft noise (from 0 to 1) at a place, before the limit of
 	//! 0.45 that keeps the clear parts of the map (-0.6) clear, with a margin for the fine lobes; below a cover of 0.1 the last clouds go away
