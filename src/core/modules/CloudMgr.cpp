@@ -1010,26 +1010,29 @@ highp float cloudSide(highp float height)
 highp vec2 cloudHeights(highp vec2 map, CloudWeather weather, highp float lod, highp float near, highp float z)
 {
 	map += weather.drift;
-	// The map bends with the height, differently from place to place, by up to some 0.15 km (at size 1): the sides of
-	// the clouds bulge, lean and break up into heaps rather than stand as walls that the 2D map draws straight up. (Only
-	// for near clouds, where the fine lobes count too; the billows' texture serves as the 3D noise)
+	// The map bends with the height, differently from place to place, by up to some 0.1 km (at size 1): the sides of the
+	// clouds bulge, lean and break up into heaps rather than stand as walls that the 2D map draws straight up. (Only for
+	// near clouds, where the fine lobes count too. Only the coarse billows: finer ones fold the map and shred the sides)
 	if (near > 0.)
 	{
 		highp float k = cloudBillowScale.x;
-		highp vec4 w = textureLod(cloudBillow, vec3(map*k + cloudBillowPhase, z*k*1.5) + vec3(0.21, 0.63, 0.4), max(lod - 2., 0.));
-		map += near*0.15*cloudSize*(w.rg - w.gb);
+		highp vec3 c = vec3(map*k + cloudBillowPhase, z*k*1.5);
+		highp float wx = textureLod(cloudBillow, c + vec3(0.21, 0.63, 0.4), max(lod - 2., 0.)).r;
+		highp float wy = textureLod(cloudBillow, c + vec3(0.57, 0.08, 0.83), max(lod - 2., 0.)).r;
+		map += near*0.19*cloudSize*vec2(wx - 0.7, wy - 0.7);
 	}
 	highp vec4 f = textureLod(cloudTile, cloudTileAt(map), lod);
 	highp float s = f.x + weather.growth.x;
-	// Fine lobes, stronger at the edge of a cloud, which they tear up. They change with the height, or the sides of the
-	// clouds would show grooves that run straight up
+	// Fine lobes, stronger at the edge of a cloud, which they tear up: a 3D noise (the billows' texture at twice its
+	// density, some 80 and 40 m at size 1, scaled to the spread of the former 2D lobes). A 2D noise shifted with the
+	// height was the same along one slanted line through the cloud, and drew streaks along it
 	if (near > 0.)
 	{
-		highp vec2 fine = (map + cloudBoil + z*vec2(1.2, -0.9))*cloudTileScale.w;
 		// (they shape the clouds, but make none in the clear sky)
 		highp float lobes = near*smoothstep(-0.15, 0.02, s);
-		s += lobes*(0.04 + 0.10*(1. - clamp(s/0.3, 0., 1.)))*(textureLod(cloudTile, fine + cloudPhase[5], 0.).w - 0.62)
-		   + lobes*0.025*(textureLod(cloudTile, fine*2.7 + cloudPhase[6], 0.).w - 0.62);
+		highp float k = 2.*cloudBillowScale.x;
+		highp vec4 b = textureLod(cloudBillow, vec3((map + cloudBoil)*k + 2.*cloudBillowPhase, z*k) + vec3(0.43, 0.17, 0.71), 0.);
+		s += lobes*(0.04 + 0.10*(1. - clamp(s/0.3, 0., 1.)))*2.3*(0.7*b.g + 0.3*b.b - 0.70) + lobes*0.025*2.3*(b.b - 0.70);
 	}
 	cloudLastShape = s;
 	// a rounded top (a dome with steep sides, not a cone), or a flat one, and an underside that is flat but for its rim
@@ -1170,10 +1173,12 @@ void main(void)
 					highp float dTop = min(h.x - height, cloudSide(height)), dBase = height - h.y;
 					// Ragged edges: noise eats into the top and the sides and leaves wisps (where it is finer than a pixel its mean,
 					// nothing). Not into the underside, which the light below must see as it is
+					// (a 3D noise, some 250 m at size 1, for the reason given in cloudHeights())
 					if (abs(dTop) < 0.2*cloudSize)
 					{
-						highp vec2 rag = (cloudMap(q) + weather.drift + 0.5*cloudBoil + height*vec2(-0.8, 1.1))*(0.37*cloudTileScale.w);
-						dTop += 0.07*cloudSize*(textureLod(cloudTile, rag + cloudPhase[7], max(log2(foot*1024.*0.37*cloudTileScale.w), 0.)).w - 0.62);
+						highp float k = 1.44*cloudBillowScale.x;
+						highp vec3 c = vec3((cloudMap(q) + weather.drift + 0.5*cloudBoil)*k + 1.44*cloudBillowPhase, height*k) + vec3(0.11, 0.59, 0.33);
+						dTop += 0.07*cloudSize*1.76*(textureLod(cloudBillow, c, max(log2(foot*k*96.), 0.)).r - 0.70);
 					}
 					// The billows of the cauliflower top (they only take away: deeper inside, nothing to do)
 					if (dTop > -e && dTop < cloudBillowScale.y)
@@ -1279,13 +1284,11 @@ void main(void)
 			highp float seen = 0., distance = 0., stepLength = 0.02*cloudSize;
 			highp float lightNear = 1. - smoothstep(0.015, 0.05, max(hitT*cloudPixel, 0.012)/cloudSize);
 			highp float lastLight = 0.03; // the distance to the edge at the last step (the start lies in the cloud)
-			// (where the long steps lie along the way differs a little from pixel to pixel: where the way leaves a cloud between
-			// two of them, the light then grows in a fine grain, not in bands that follow the edge of the cloud; the short
-			// first steps, which draw the light and shade of the billows, stay put)
-			highp float lightJitter = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233)))*43758.5453);
+			// (the steps lie at the same places for every pixel: steps that differed from pixel to pixel drew a coarse grain
+			// on the shaded sides; the many short steps and the mean density between them keep the light free of bands)
 			for (int k = 0; k < 10; ++k)
 			{
-				highp float reach = distance + mix(0.5, lightJitter, smoothstep(2.5, 4.5, float(k)))*stepLength;
+				highp float reach = distance + 0.5*stepLength;
 				CloudWeather weather = reach < middleDistance
 					? mixWeather(hitWeather, middleWeather, reach/middleDistance)
 					: mixWeather(middleWeather, endWeather, clamp((reach - middleDistance)/(endDistance - middleDistance), 0., 1.));
