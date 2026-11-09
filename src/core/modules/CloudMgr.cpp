@@ -1318,7 +1318,12 @@ void main(void)
 			// (per km of cloud, whatever its size: small clouds are not darker inside)
 			highp float tau = 20.*cloudShape.z*seen;
 			highp float around = 1. - towardKey;
-			highp float scattered = (exp(-tau) + around*(0.1*exp(-0.6*tau) + 0.03*exp(-0.12*tau)))/(1. + 0.5*around);
+			// Multiple scattering in octaves (Wrenninge's approximation, as in Hillaire's clouds): each further order of
+			// scattering sees the cloud thinner. It lights the shaded sides of a cloud and softens the line between light and
+			// shade, which a single exponential draws hard along every bulge. (Less of it looking towards the Sun: the many
+			// scatterings still go forwards, and a thick cloud before the Sun stays dark)
+			highp float octaves = mix(0.35, 1., around);
+			highp float scattered = (exp(-tau) + octaves*(0.55*exp(-0.35*tau) + 0.35*exp(-0.1*tau)))/(1. + 0.9*octaves);
 			shadow = mix(1., scattered, shadowWeight);
 		}
 		singleTransmission += contribution*directTransmission;
