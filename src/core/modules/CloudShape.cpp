@@ -309,7 +309,13 @@ std::vector<float> CloudShape::computeTile()
 	const int n = TileTexels;
 	constexpr int Bodies = 26;  // cells per tile: 1.6 km
 	const SphereLayer bodies(Bodies, 3, 0.2, 0.55, 0.85, true), lobes(78, 4, 0.45, 0.8, 1.), small(190, 5, 0.45, 0.8, 1.), fine(64, 8, 0.45, 0.8, 1.);
+	// Small cumulus of their own between the bodies, a third of their size or less: a field of cumulus comes in all
+	// sizes, with many more small clouds than large ones
+	constexpr int Cloudlets = 72;
+	const SphereLayer cloudlets(Cloudlets, 11, 0.3, 0.5, 0.2);
 	std::vector<float> tile(static_cast<std::size_t>(n)*n*4);
+	// the shapes of the bodies alone, which set how much of the map a cover fills (see below)
+	std::vector<float> bodiesOnly(static_cast<std::size_t>(n)*n), shapes(bodiesOnly.size());
 	for (int j = 0; j < n; ++j)
 		for (int i = 0; i < n; ++i)
 		{
@@ -327,14 +333,24 @@ std::vector<float> CloudShape::computeTile()
 			const double detailed = body + near*near*(3. - 2.*near)*(0.48*(lobes.lobes(u, v) - 0.75) + 0.09*(small.lobes(u, v) - 0.75));
 			// Keep a broad connected core beneath the billows. Negative detail must not
 			// carve an otherwise solid body into isolated peaks at modest coverage.
-			const double shape = std::max(detailed, 0.85*body - 0.08);
-			float* texel = tile.data() + (static_cast<std::size_t>(j)*n + static_cast<std::size_t>(i))*4;
-			texel[0] = static_cast<float>(std::clamp(shape, -0.6, 1.5));
+			const double bodyShape = std::max(detailed, 0.85*body - 0.08);
+			// (their outlines lumpy too; they fade out near a body, so that they do not stick to it as warts)
+			double whichSmall = 0.;
+			const double cloudlet = (0.9*cloudlets.at((u + 0.006*bendX)*Cloudlets, (v + 0.006*bendY)*Cloudlets, &whichSmall)
+			                         + 0.12*(small.lobes(u, v) - 0.75) - 0.08)*(1. - near);
+			const double shape = std::max(bodyShape, cloudlet);
+			const std::size_t index = static_cast<std::size_t>(j)*n + static_cast<std::size_t>(i);
+			float* texel = tile.data() + index*4;
+			shapes[index] = static_cast<float>(std::clamp(shape, -0.6, 1.5));
+			bodiesOnly[index] = static_cast<float>(std::clamp(bodyShape, -0.6, 1.5));
 			// Broad billows within each body, between the large silhouette and the fine edge
 			// lobes. Modulate height rather than adding specks to otherwise clear sky.
 			const double billow = 0.65*softNoise(u*47. + 1.7*bendX, v*47. + 1.7*bendY, 47, 9)
 			                    + 0.35*softNoise(u*103. - bendY, v*103. + bendX, 103, 10);
-			texel[1] = static_cast<float>((0.2 + 0.4*which)*(0.82 + 0.14*billow));
+			// (a small cloud is lower than a body, about as high as it is wide; its height blends smoothly into that of a body, as a jump would stand as a
+			// wall)
+			const double t = std::clamp((cloudlet - bodyShape + 0.1)/0.2, 0., 1.), toSmall = t*t*(3. - 2.*t);
+			texel[1] = static_cast<float>(((0.2 + 0.4*which) + toSmall*((0.06 + 0.1*whichSmall) - (0.2 + 0.4*which)))*(0.82 + 0.14*billow));
 			texel[2] = static_cast<float>(0.65*softNoise(u*5., v*5., 5, 6) + 0.35*softNoise(u*11., v*11., 11, 7));
 			texel[3] = static_cast<float>(fine.lobes(u, v));
 		}
@@ -343,45 +359,62 @@ std::vector<float> CloudShape::computeTile()
 	// unlike inflating every sphere it does not grow every cloud indiscriminately.
 	// All operations wrap, so the procedural tile remains seamless.
 	constexpr int JoinRadius = 6;
-	std::vector<float> dilated(static_cast<std::size_t>(n)*n), added(dilated.size());
 	const auto pixel = [n](int x, int y) {
 		return static_cast<std::size_t>(wrap(y, n))*n + wrap(x, n);
 	};
-	for (int y = 0; y < n; ++y) for (int x = 0; x < n; ++x)
+	const auto close = [n, &pixel](std::vector<float>& shape) {
+		std::vector<float> dilated(shape.size()), added(shape.size());
+		for (int y = 0; y < n; ++y) for (int x = 0; x < n; ++x)
+		{
+			float value = -0.6f;
+			for (int dy = -JoinRadius; dy <= JoinRadius; ++dy)
+				for (int dx = -JoinRadius; dx <= JoinRadius; ++dx)
+					if (dx*dx + dy*dy <= JoinRadius*JoinRadius)
+						value = std::max(value, shape[pixel(x + dx, y + dy)]);
+			dilated[pixel(x, y)] = value;
+		}
+		for (int y = 0; y < n; ++y) for (int x = 0; x < n; ++x)
+		{
+			float value = 1.5f;
+			for (int dy = -JoinRadius; dy <= JoinRadius; ++dy)
+				for (int dx = -JoinRadius; dx <= JoinRadius; ++dx)
+					if (dx*dx + dy*dy <= JoinRadius*JoinRadius)
+						value = std::min(value, dilated[pixel(x + dx, y + dy)]);
+			added[pixel(x, y)] = std::max(value - shape[pixel(x, y)], 0.f);
+		}
+		// Smooth only the added connections, retaining the original wispy detail.
+		// A separable binomial kernel avoids hard ridges from the closing operation.
+		constexpr float weights[5] = {1.f, 4.f, 6.f, 4.f, 1.f};
+		for (int y = 0; y < n; ++y) for (int x = 0; x < n; ++x)
+		{
+			float sum = 0.f;
+			for (int dx = -2; dx <= 2; ++dx)
+				sum += weights[dx + 2]*added[pixel(x + dx, y)];
+			dilated[pixel(x, y)] = sum/16.f;
+		}
+		for (int y = 0; y < n; ++y) for (int x = 0; x < n; ++x)
+		{
+			float sum = 0.f;
+			for (int dy = -2; dy <= 2; ++dy)
+				sum += weights[dy + 2]*dilated[pixel(x, y + dy)];
+			float& value = shape[pixel(x, y)];
+			value = std::min(value + 0.95f*sum/16.f, 1.5f);
+		}
+	};
+	close(shapes);
+	close(bodiesOnly);
+	// The small clouds must not add to the cover: a cover fills as much of the map as with the bodies alone, which then
+	// give room to the small clouds. Each shape value is mapped to the one of the same rank among the bodies alone (a
+	// monotonic mapping, which keeps every outline)
+	std::vector<float> sortedShapes(shapes), sortedBodies(bodiesOnly);
+	std::sort(sortedShapes.begin(), sortedShapes.end());
+	std::sort(sortedBodies.begin(), sortedBodies.end());
+	for (std::size_t k = 0; k < shapes.size(); ++k)
 	{
-		float value = -0.6f;
-		for (int dy = -JoinRadius; dy <= JoinRadius; ++dy)
-			for (int dx = -JoinRadius; dx <= JoinRadius; ++dx)
-				if (dx*dx + dy*dy <= JoinRadius*JoinRadius)
-					value = std::max(value, tile[4*pixel(x + dx, y + dy)]);
-		dilated[pixel(x, y)] = value;
-	}
-	for (int y = 0; y < n; ++y) for (int x = 0; x < n; ++x)
-	{
-		float value = 1.5f;
-		for (int dy = -JoinRadius; dy <= JoinRadius; ++dy)
-			for (int dx = -JoinRadius; dx <= JoinRadius; ++dx)
-				if (dx*dx + dy*dy <= JoinRadius*JoinRadius)
-					value = std::min(value, dilated[pixel(x + dx, y + dy)]);
-		added[pixel(x, y)] = std::max(value - tile[4*pixel(x, y)], 0.f);
-	}
-	// Smooth only the added connections, retaining the original wispy detail.
-	// A separable binomial kernel avoids hard ridges from the closing operation.
-	constexpr float weights[5] = {1.f, 4.f, 6.f, 4.f, 1.f};
-	for (int y = 0; y < n; ++y) for (int x = 0; x < n; ++x)
-	{
-		float sum = 0.f;
-		for (int dx = -2; dx <= 2; ++dx)
-			sum += weights[dx + 2]*added[pixel(x + dx, y)];
-		dilated[pixel(x, y)] = sum/16.f;
-	}
-	for (int y = 0; y < n; ++y) for (int x = 0; x < n; ++x)
-	{
-		float sum = 0.f;
-		for (int dy = -2; dy <= 2; ++dy)
-			sum += weights[dy + 2]*dilated[pixel(x, y + dy)];
-		float& shape = tile[4*pixel(x, y)];
-		shape = std::min(shape + 0.95f*sum/16.f, 1.5f);
+		const auto rank = static_cast<std::size_t>(std::upper_bound(sortedShapes.begin(), sortedShapes.end(), shapes[k]) - sortedShapes.begin());
+		const auto first = static_cast<std::size_t>(std::lower_bound(sortedShapes.begin(), sortedShapes.end(), shapes[k]) - sortedShapes.begin());
+		// (ties, as at the clamp, take the middle of their ranks)
+		tile[4*k] = sortedBodies[std::min((first + rank)/2, sortedBodies.size() - 1)];
 	}
 	return tile;
 }
