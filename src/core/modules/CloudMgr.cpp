@@ -1137,9 +1137,15 @@ void main(void)
 			CloudWeather weatherEnd = cloudWeather(vec3(altAz.xy*(t + ds), r0 + altAz.z*(t + ds)));
 			CloudWeather weatherStart = k == 0 ? cloudWeather(vec3(altAz.xy*t, r0 + altAz.z*t)) : lastWeather;
 			lastWeather = weatherEnd;
-			highp vec4 blurred = textureLod(cloudTile, cloudTileAt(middleMap + 0.5*(weatherStart.drift + weatherEnd.drift)), look);
+			highp vec2 lookAt = cloudTileAt(middleMap + 0.5*(weatherStart.drift + weatherEnd.drift));
+			highp vec4 blurred = textureLod(cloudTile, lookAt, look);
+			// (and a wider look, for what lies a little beyond: the map bends with the height (see cloudHeights()), small
+			// clouds have steep sides and the fine lobes add to the shape, so that a cloud may stand where the first look
+			// saw none. A step that skips a cloud cuts it: bands across the sides and sheared slabs, under a low Sun)
+			blurred = max(blurred, textureLod(cloudTile, lookAt, look + 1.5));
 			highp float shape = blurred.x + 0.5*(weatherStart.growth.x + weatherEnd.growth.x);
-			if (max(weatherStart.growth.z, weatherEnd.growth.z) > 1e-5 && (t > 30. || shape > -0.13 && length(middle) - cloudRadii.y - 0.5*ds*altAz.z < cloudSize*cloudShape.w*blurred.y*pow(max(shape + 0.5, 0.), 0.7) + 0.05 + smear))
+			highp float reach = cloudSize*cloudShape.w*(blurred.y*pow(max(shape + 0.5, 0.), 0.7) + 0.15);
+			if (max(weatherStart.growth.z, weatherEnd.growth.z) > 1e-5 && (t > 30. || shape > -0.7 && length(middle) - cloudRadii.y - 0.5*ds*altAz.z < reach + 0.05 + smear))
 			{
 				// (the shape is no blurrier than a pixel, or a tenth of a step: the steps are short enough for far clouds)
 				highp float foot = max(max(t*cloudPixel, 0.1*ds), smear);
