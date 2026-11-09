@@ -1068,7 +1068,9 @@ void main(void)
 	highp float r0 = cloudRadii.x;
 	highp float b = r0*altAz.z;
 	highp float t0 = shellDistance(b, cloudRadii.z), t1 = shellDistance(b, cloudRadii.w);
-	int steps = int(clamp(ceil((t1 - t0)/0.12), 1., 24.));
+	// (a long, low way through the layer, toward the horizon, gets up to 64 steps: with fewer, each one grows to several
+	// km, longer than a cloud, and the far clouds fall apart in stripes; most ways stop early, in the first clouds)
+	int steps = int(clamp(ceil((t1 - t0)/0.12), 1., 64.));
 	highp float ds = (t1 - t0)/float(steps);
 
 	// The exposure: the moments that the camera averages, as many as the movement needs on the screen here
@@ -1118,8 +1120,8 @@ void main(void)
 			highp float shape = blurred.x + 0.5*(weatherStart.growth.x + weatherEnd.growth.x);
 			if (max(weatherStart.growth.z, weatherEnd.growth.z) > 1e-5 && (t > 30. || shape > -0.13 && length(middle) - cloudRadii.y - 0.5*ds*altAz.z < cloudSize*cloudShape.w*blurred.y*pow(max(shape + 0.5, 0.), 0.7) + 0.05 + smear))
 			{
-				// (far away a step passes over whole clouds: they blur together rather than glitter)
-				highp float foot = max(max(t*cloudPixel, ds*mix(0.1, 0.6, smoothstep(20., 60., t))), smear);
+				// (the shape is no blurrier than a pixel, or a tenth of a step: the steps are short enough for far clouds)
+				highp float foot = max(max(t*cloudPixel, 0.1*ds), smear);
 				highp float lod = max(log2(foot/cloudCover.z), 0.);
 				highp float near = 1. - smoothstep(0.015, 0.05, foot/cloudSize);
 				highp float e = max(0.012, foot);
