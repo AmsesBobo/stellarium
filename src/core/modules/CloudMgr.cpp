@@ -468,7 +468,7 @@ struct CloudType
 	double base, size, density, flatness, cover;
 };
 constexpr CloudType CloudTypes[] = {
-	{1.2, 0.8, 1., 0., 0.25},    // cumulus humilis: fair weather heaps, white in the sunlight
+	{1.2, 0.45, 1., 0., 0.25},   // cumulus humilis: fair weather heaps, white in the sunlight, most well under 1 km across
 	{1.0, 1.2, 0.9, 0.4, 0.6},   // stratocumulus: large flat masses close together, grey below
 	{3.5, 0.4, 0.6, 0.6, 0.55},  // altocumulus: small, thin flat elements higher up
 };
@@ -986,8 +986,19 @@ highp float edgeIntegral(highp float x, highp float a, highp float b)
 }
 
 // The shape S of the last place that cloudHeights() looked at: about 0.4 S (km at size 1) is the way across to the edge
-// of the cloud, where the heights tell only the way up or down (a steep side of a cloud is near though its top is high)
-highp float cloudLastShape = 0.;
+// of the cloud, where the heights tell only the way up or down (a steep side of a cloud is near though its top is high);
+// and the full height of the cloud there (km)
+highp float cloudLastShape = 0., cloudLastHeight = 0.;
+
+// The way across to the side of a cloud at a height over its base (km), from the last look of cloudHeights(). A cumulus
+// bulges out above its base, which is smaller than its waist: from below, its sunlit sides hide much of the grey base,
+// and a field of them looks white rather than like a grey ceiling. Flat clouds are much less drawn in
+highp float cloudSide(highp float height)
+{
+	highp float drawnIn = 0.45*cloudSize*(1. - cloudShape.y);
+	return 0.4*cloudSize*cloudLastShape - drawnIn*(1. - smoothstep(0., 0.6, height/max(cloudLastHeight, 0.01)));
+}
+
 
 // The heights over the base of the top and the underside of the cloud at a place (km, the top below 0 outside the clouds),
 // from the shape at the level of detail lod with the local development parameters. near: how much the fine lobes count at the height z
@@ -1009,6 +1020,7 @@ highp vec2 cloudHeights(highp vec2 map, CloudWeather weather, highp float lod, h
 	cloudLastShape = s;
 	// a rounded top (a dome with steep sides, not a cone), or a flat one, and an underside that is flat but for its rim
 	highp float height = cloudSize*cloudShape.w*f.y*weather.growth.y;
+	cloudLastHeight = height;
 	highp float round = s/pow(abs(s) + 0.01, 0.55);
 	// Smooth shoulders retain relief in stratocumulus and altocumulus instead of
 	// clipping their tops into plates. Keep the CPU transmission model in sync.
@@ -1026,9 +1038,9 @@ highp float billows(highp vec2 map, highp float height, highp float top, highp f
 	highp vec3 c = vec3(map, height)*cloudBillowScale.x + vec3(0., 0., cloudBillowScale.z);
 	highp float lod = max(log2(foot*cloudBillowScale.x*96.), 0.);
 	highp vec4 b = textureLod(cloudBillow, c, lod);
-	// (nor just above it at the thin rim of a cloud, where they would cut round dents into the flat base)
-	highp float up = smoothstep(0.08, 0.45, height/max(top, 0.01))*smoothstep(0.03, 0.12, height/cloudSize);
-	return cloudBillowScale.y*up*(1. - (0.55*b.r + 0.3*b.g + 0.15*b.b));
+	// (they eat into the sides of a cloud all the way down to its base, or its lowest part would stick out as a ledge; the
+	// underside itself stays flat, as the billows only take away from the top and the sides)
+	return cloudBillowScale.y*(1. - (0.55*b.r + 0.3*b.g + 0.15*b.b));
 }
 
 // The sunlight on a side of a cloud with the Sun higher by this much (degrees) than at the base over the observer
@@ -1135,7 +1147,7 @@ void main(void)
 					highp vec2 h = cloudHeights(cloudMap(q), weather, lod, near, height);
 					// (the nearest surface: the top, or a side; there the billows bite in, also into the side of a cloud. The underside
 					// stays flat: holes in it would let the low Sun light up round patches)
-					highp float dTop = min(h.x - height, 0.4*cloudSize*cloudLastShape), dBase = height - h.y;
+					highp float dTop = min(h.x - height, cloudSide(height)), dBase = height - h.y;
 					// Ragged edges: noise eats into the top and the sides and leaves wisps (where it is finer than a pixel its mean,
 					// nothing). Not into the underside, which the light below must see as it is
 					if (abs(dTop) < 0.2*cloudSize)
@@ -1261,13 +1273,14 @@ void main(void)
 				highp float height = length(q) - cloudRadii.y;
 				// (the first steps see the fine lobes, so that each billow has a lit side and a shaded one)
 				highp vec2 h = cloudHeights(cloudMap(q), weather, point.w + 0.45*max(float(k) - 1., 0.), k < 4 ? lightNear : 0., height);
-				highp float dLight = min(h.x - height, 0.4*cloudSize*cloudLastShape);
+				highp float dLight = min(h.x - height, cloudSide(height));
 				// (the billows shade each other)
 				if (k < 4 && dLight < cloudBillowScale.y)
 					dLight -= billows(cloudMap(q) + weather.drift, height, h.x, stepLength);
 				// (the base a little lower than for the eye: the samples that make a base visible lie partly in its soft lower
-				// edge, and a low Sun must not reach them by grazing just under the flat base)
-				dLight = min(dLight, height - h.y + 0.02);
+				// edge, and a low Sun must not reach them by grazing just under the flat base. Not at the sides, though, whose
+				// lowest few tens of meters would then lie in shade as a pale band along the base)
+				dLight = min(dLight, height - h.y + 0.02*smoothstep(0.02, 0.08, dLight));
 				// (the mean density from the last step to this one, where the distance to the edge goes from one to the other:
 				// the share of the way that lies in the cloud grows smoothly as the edge moves)
 				highp float la = -0.01, lb = 0.025 + 0.1*stepLength;
@@ -1279,7 +1292,8 @@ void main(void)
 				stepLength *= 1.45;
 			}
 			directTransmission = mix(T, exp(-cloudCover.w*seen), shadowWeight);
-			highp float tau = 16.*cloudShape.z*seen/cloudSize;
+			// (per km of cloud, whatever its size: small clouds are not darker inside)
+			highp float tau = 20.*cloudShape.z*seen;
 			highp float around = 1. - towardKey;
 			highp float scattered = (exp(-tau) + around*(0.1*exp(-0.6*tau) + 0.03*exp(-0.12*tau)))/(1. + 0.5*around);
 			shadow = mix(1., scattered, shadowWeight);
@@ -1291,7 +1305,7 @@ void main(void)
 		highp vec4 field = textureLod(cloudTile, cloudTileAt(cloudMap(start) + hitWeather.drift), max(point.w + 3., 4.));
 		highp float broadDepth = cloudSize*cloudShape.w*field.y*hitWeather.growth.y;
 		highp float diffuseDepth = mix(max(point.z - point.y, 0.), broadDepth, 0.85);
-		highp float through = 1./(1. + 6.75*cloudShape.z*hitWeather.growth.z*diffuseDepth/cloudSize);
+		highp float through = 1./(1. + 8.4*cloudShape.z*hitWeather.growth.z*diffuseDepth);
 		highp vec3 ambient = 0.5*mix(cloudBelow, cloudAbove, through) + cloudCity;
 		highp vec3 sunlight = cloudSunlight(dot(start.xy, sunWay)*57.3/7433. + 0.35*point.y);
 		// A broad forward lobe for multiply scattered light. The narrow silver

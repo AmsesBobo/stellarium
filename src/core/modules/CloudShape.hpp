@@ -84,9 +84,15 @@ public:
 		double bankDepth = 30.;     //!< km
 		double shift = 0.;          //!< km: where the clouds of this layer lie on the map, so that two layers differ
 		Front front;                //!< the fronts, if they set the cover in place of cover
-		//! How much the flatness lowers the clouds, and stretches them along the map. Heaped cumulus grow about as high as
-		//! they are wide; flat layers stay low
-		double heightScale() const {const double heaped = 1. - flatness; return (1. - 0.75*flatness)*(1. + 0.8*heaped*heaped);}
+		//! How much the flatness lowers the clouds, and stretches them along the map, as a factor to the size. Heaped cumulus
+		//! grow about as high as they are wide; flat layers stay low. The height of a heaped cloud comes from how deep the
+		//! air overturns more than from how wide the cloud is: small cumulus are not thin plates, and their height follows
+		//! the size only weakly (as its 0.3rd power for cumulus; flat clouds as before)
+		double heightScale() const
+		{
+			const double heaped = 1. - flatness;
+			return (1. - 0.75*flatness)*(1. + 0.8*heaped*heaped)*std::pow(std::max(size, 0.05), -0.7*heaped*heaped);
+		}
 		double stretch() const {return 1./(1. + 2.*flatness);}
 	};
 	//! What the bank of clouds lets stand at a place (km from the observer: x to the south, y to the east), from 0 to 1
