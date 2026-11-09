@@ -1005,6 +1005,15 @@ highp float cloudSide(highp float height)
 highp vec2 cloudHeights(highp vec2 map, CloudWeather weather, highp float lod, highp float near, highp float z)
 {
 	map += weather.drift;
+	// The map bends with the height, differently from place to place, by up to some 0.15 km (at size 1): the sides of
+	// the clouds bulge, lean and break up into heaps rather than stand as walls that the 2D map draws straight up. (Only
+	// for near clouds, where the fine lobes count too; the billows' texture serves as the 3D noise)
+	if (near > 0.)
+	{
+		highp float k = cloudBillowScale.x;
+		highp vec4 w = textureLod(cloudBillow, vec3(map*k, z*k*1.5) + vec3(0.21, 0.63, 0.4), max(lod - 2., 0.));
+		map += near*0.15*cloudSize*(w.rg - w.gb);
+	}
 	highp vec4 f = textureLod(cloudTile, cloudTileAt(map), lod);
 	highp float s = f.x + weather.growth.x;
 	// Fine lobes, stronger at the edge of a cloud, which they tear up. They change with the height, or the sides of the
