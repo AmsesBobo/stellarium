@@ -961,7 +961,7 @@ highp float otherShadow(highp vec3 p, highp vec3 key)
 	highp vec4 f = textureLod(cloudTile, vec2((map.x + weather.drift.x)*otherShape.x, map.y + weather.drift.y)*otherRadius.z + otherPhase[0], 1.5);
 	highp float s = f.x + weather.growth.x;
 	highp float height = otherRadius.y*otherShape.w*f.y*weather.growth.y;
-	highp float round = s/pow(abs(s) + 0.01, 0.3);
+	highp float round = s/pow(abs(s) + 0.01, 0.55);
 	highp float plateau = 0.8*s/sqrt(s*s + 0.0625);
 	highp float top = height*mix(round, plateau, otherShape.y);
 	highp float under = otherRadius.y*otherShape.w*(0.012 + 0.008*f.z);
@@ -1007,9 +1007,9 @@ highp vec2 cloudHeights(highp vec2 map, CloudWeather weather, highp float lod, h
 		   + lobes*0.025*(textureLod(cloudTile, fine*2.7 + cloudPhase[6], 0.).w - 0.62);
 	}
 	cloudLastShape = s;
-	// a rounded top, or a flat one, and an underside that is flat but for its rim
+	// a rounded top (a dome with steep sides, not a cone), or a flat one, and an underside that is flat but for its rim
 	highp float height = cloudSize*cloudShape.w*f.y*weather.growth.y;
-	highp float round = s/pow(abs(s) + 0.01, 0.3);
+	highp float round = s/pow(abs(s) + 0.01, 0.55);
 	// Smooth shoulders retain relief in stratocumulus and altocumulus instead of
 	// clipping their tops into plates. Keep the CPU transmission model in sync.
 	highp float plateau = 0.8*s/sqrt(s*s + 0.0625);
@@ -1131,17 +1131,20 @@ void main(void)
 					highp float height = length(q) - cloudRadii.y;
 					CloudWeather weather = mixWeather(weatherStart, weatherEnd, (float(j) + 0.5)/float(CloudSubsteps));
 					highp vec2 h = cloudHeights(cloudMap(q), weather, lod, near, height);
-					// (the nearest surface: the top or the underside, or a side; there the billows also bite into the side of a cloud)
-					highp float d = min(min(h.x - height, height - h.y), 0.4*cloudSize*cloudLastShape);
-					// Ragged edges: noise eats into them and leaves wisps (where it is finer than a pixel its mean, nothing)
-					if (abs(d) < 0.2*cloudSize)
+					// (the nearest surface: the top, or a side; there the billows bite in, also into the side of a cloud. The underside
+					// stays flat: holes in it would let the low Sun light up round patches)
+					highp float dTop = min(h.x - height, 0.4*cloudSize*cloudLastShape), dBase = height - h.y;
+					// Ragged edges: noise eats into the top and the sides and leaves wisps (where it is finer than a pixel its mean,
+					// nothing). Not into the underside, which the light below must see as it is
+					if (abs(dTop) < 0.2*cloudSize)
 					{
 						highp vec2 rag = (cloudMap(q) + weather.drift + 0.5*cloudBoil + height*vec2(-0.8, 1.1))*(0.37*cloudTileScale.w);
-						d += 0.07*cloudSize*(textureLod(cloudTile, rag + cloudPhase[7], max(log2(foot*1024.*0.37*cloudTileScale.w), 0.)).w - 0.62);
+						dTop += 0.07*cloudSize*(textureLod(cloudTile, rag + cloudPhase[7], max(log2(foot*1024.*0.37*cloudTileScale.w), 0.)).w - 0.62);
 					}
 					// The billows of the cauliflower top (they only take away: deeper inside, nothing to do)
-					if (d > -e && d < cloudBillowScale.y)
-						d -= billows(cloudMap(q) + weather.drift, height, h.x, foot);
+					if (dTop > -e && dTop < cloudBillowScale.y)
+						dTop -= billows(cloudMap(q) + weather.drift, height, h.x, foot);
+					highp float d = min(dTop, dBase);
 					// The density grows over the first few tens of meters into the cloud: the edges of a cumulus are crisp (the ragged
 					// noise above still leaves soft wisps). Take its mean between this short step and the last, where the distance to
 					// the edge goes from one to the other: a crisp edge that falls between them is neither lost nor shows the steps
@@ -1239,26 +1242,39 @@ void main(void)
 		highp float directTransmission = T;
 		if (shadowWeight > 0.)
 		{
-			highp float seen = 0., distance = 0., stepLength = 0.025*cloudSize;
+			highp float seen = 0., distance = 0., stepLength = 0.02*cloudSize;
 			highp float lightNear = 1. - smoothstep(0.015, 0.05, max(hitT*cloudPixel, 0.012)/cloudSize);
-			for (int k = 0; k < 6; ++k)
+			highp float lastLight = 0.03; // the distance to the edge at the last step (the start lies in the cloud)
+			// (where the long steps lie along the way differs a little from pixel to pixel: where the way leaves a cloud between
+			// two of them, the light then grows in a fine grain, not in bands that follow the edge of the cloud; the short
+			// first steps, which draw the light and shade of the billows, stay put)
+			highp float lightJitter = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233)))*43758.5453);
+			for (int k = 0; k < 10; ++k)
 			{
-				highp float reach = distance + 0.5*stepLength;
+				highp float reach = distance + mix(0.5, lightJitter, smoothstep(2.5, 4.5, float(k)))*stepLength;
 				CloudWeather weather = reach < middleDistance
 					? mixWeather(hitWeather, middleWeather, reach/middleDistance)
 					: mixWeather(middleWeather, endWeather, clamp((reach - middleDistance)/(endDistance - middleDistance), 0., 1.));
 				highp vec3 q = start + reach*cloudKey;
 				highp float height = length(q) - cloudRadii.y;
 				// (the first steps see the fine lobes, so that each billow has a lit side and a shaded one)
-				highp vec2 h = cloudHeights(cloudMap(q), weather, point.w + 0.7*max(float(k) - 1., 0.), k < 3 ? lightNear : 0., height);
-				highp float dLight = min(min(h.x - height, height - h.y), 0.4*cloudSize*cloudLastShape);
+				highp vec2 h = cloudHeights(cloudMap(q), weather, point.w + 0.45*max(float(k) - 1., 0.), k < 4 ? lightNear : 0., height);
+				highp float dLight = min(h.x - height, 0.4*cloudSize*cloudLastShape);
 				// (the billows shade each other)
-				if (k < 3 && dLight < cloudBillowScale.y)
+				if (k < 4 && dLight < cloudBillowScale.y)
 					dLight -= billows(cloudMap(q) + weather.drift, height, h.x, stepLength);
-				highp float inside = smoothstep(-0.1*stepLength - 0.01, 0.4*stepLength + 0.025, dLight);
+				// (the base a little lower than for the eye: the samples that make a base visible lie partly in its soft lower
+				// edge, and a low Sun must not reach them by grazing just under the flat base)
+				dLight = min(dLight, height - h.y + 0.02);
+				// (the mean density from the last step to this one, where the distance to the edge goes from one to the other:
+				// the share of the way that lies in the cloud grows smoothly as the edge moves)
+				highp float la = -0.01, lb = 0.025 + 0.1*stepLength;
+				highp float inside = abs(dLight - lastLight) > 1e-4 ? (edgeIntegral(dLight, la, lb) - edgeIntegral(lastLight, la, lb))/(dLight - lastLight)
+				                                                    : clamp((dLight - la)/(lb - la), 0., 1.);
+				lastLight = dLight;
 				seen += stepLength*weather.growth.z*inside;
 				distance += stepLength;
-				stepLength *= 1.9;
+				stepLength *= 1.45;
 			}
 			directTransmission = mix(T, exp(-cloudCover.w*seen), shadowWeight);
 			highp float tau = 16.*cloudShape.z*seen/cloudSize;

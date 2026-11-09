@@ -529,7 +529,7 @@ double CloudShape::transmission(const std::vector<float>& tile, const Layer& lay
 		const auto weather = cohesiveWeather(offset, life[1], life[2], flat, cover);
 		const double shape = readTile(tile, tileX, tileY, 0) + weather[0];
 		const double height = size*layer.heightScale()*readTile(tile, tileX, tileY, 1)*weather[1];
-		const double round = shape/std::pow(std::fabs(shape) + 0.01, 0.3), plateau = 0.8*shape/std::sqrt(shape*shape + 0.0625);
+		const double round = shape/std::pow(std::fabs(shape) + 0.01, 0.55), plateau = 0.8*shape/std::sqrt(shape*shape + 0.0625);
 		const double topHeight = height*(round + flat*(plateau - round));
 		const double under = size*layer.heightScale()*(0.012 + 0.008*readTile(tile, tileX, tileY, 2));
 		const double level = r - base;
