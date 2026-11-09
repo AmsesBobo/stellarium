@@ -464,15 +464,15 @@ std::array<double, 3> CloudShape::development(const std::vector<float>& tile, co
 
 std::array<double, 3> CloudShape::cohesiveWeather(double offset, double height, double density, double flatness, double cover)
 {
-	// Cumulus dissolves by thinning as well as shrinking. Unlimited subtraction from
-	// its shape exposed separate billow tops instead of preserving a cloud body.
+	// Cumulus get fewer and smaller at a low cover, down to a few percent of the sky, and keep their density (thin
+	// clouds look fibrous); only the last few dissolve by thinning. As in the shader of CloudMgr
 	const double t = std::clamp((flatness - 0.15)/0.35, 0., 1.);
 	const double coherence = 1. - t*t*(3. - 2.*t);
-	const double u = std::clamp((offset + 1.25)/1.05, 0., 1.);
+	const double u = std::clamp((offset + 1.25)/0.4, 0., 1.);
 	const double fade = u*u*(3. - 2.*u);
 	// Preserving the core must not create faint clouds in a clear weather region.
 	const double presence = std::clamp((coverOffset(cover, 0.) + 2.995)/1.61, 0., 1.);
-	return {offset + coherence*(std::max(offset, -0.20) - offset), height,
+	return {offset + coherence*(std::max(offset, -0.85) - offset), height,
 	        density*(1. - coherence + coherence*fade)*presence*presence*(3. - 2.*presence)};
 }
 

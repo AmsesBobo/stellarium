@@ -158,6 +158,9 @@ void setLayerMotion(QOpenGLShaderProgram& p, const char* prefix, const CloudShap
 		texturePhase(x*formation[0]*2.3, y*formation[1]*2.3)
 	};
 	p.setUniformValueArray((name + "Phase").constData(), phases, 10);
+	// (the 3D billows move with the clouds, or the clouds would slide through them)
+	if (name == "cloud")
+		p.setUniformValue("cloudBillowPhase", texturePhase(x/(layer.size*CloudShape::BillowScale), y/(layer.size*CloudShape::BillowScale)));
 }
 
 void setFrontMotion(QOpenGLShaderProgram& p, const CloudShape::Motion& motion)
@@ -819,6 +822,7 @@ uniform highp vec2 cloudGrow;       // the place of the noise of growth (tiles)
 uniform highp vec2 cloudBoil;       // of the fine lobes (km)
 uniform highp sampler3D cloudBillow; // the billows of the cauliflower tops (see CloudShape::computeBillows())
 uniform highp vec3 cloudBillowScale; // 1/km of their tile, how deep they eat in (km), their change (in tiles)
+uniform highp vec2 cloudBillowPhase; // where the wind has carried them (in tiles; see setLayerMotion())
 uniform highp float cloudGrowScale; // 1/km
 uniform highp float cloudGrowStrength;
 uniform highp vec2 cloudSmear;      // what the wind moves the map during the exposure (km)
@@ -934,12 +938,13 @@ CloudWeather cloudWeatherAt(highp vec3 p, highp vec2 map, highp vec4 cover, high
 	highp vec2 uv = map*cloudDeformScale + phases[8] + cloudDeform;
 	highp vec2 drift = 0.3*size*(1. - 0.4*shape.y)*
 		(vec2(textureLod(cloudTile, uv, 2.).z, textureLod(cloudTile, uv + vec2(0.37, 0.71), 2.).z) - 0.5);
-	// At low coverage, fade the cloud body rather than eroding it down to detached
-	// billow tops. Flat layers retain their more broken structure. See cohesiveWeather().
+	// At a low cover the cumulus get fewer and smaller, down to a few percent of the sky, and keep their density: thin,
+	// half transparent clouds let the eye far in and look fibrous. Only the last few dissolve by thinning. Flat layers
+	// retain their more broken structure. See cohesiveWeather().
 	highp float coherence = 1. - smoothstep(0.15, 0.5, shape.y);
-	highp float fade = smoothstep(-1.25, -0.20, offset);
+	highp float fade = smoothstep(-1.25, -0.85, offset);
 	highp float density = (0.45 + 0.55*life)*mix(1., fade, coherence)*presence;
-	offset = mix(offset, max(offset, -0.20), coherence);
+	offset = mix(offset, max(offset, -0.85), coherence);
 	return CloudWeather(vec3(offset, 0.65 + 0.35*life, density), drift);
 }
 
@@ -1011,7 +1016,7 @@ highp vec2 cloudHeights(highp vec2 map, CloudWeather weather, highp float lod, h
 	if (near > 0.)
 	{
 		highp float k = cloudBillowScale.x;
-		highp vec4 w = textureLod(cloudBillow, vec3(map*k, z*k*1.5) + vec3(0.21, 0.63, 0.4), max(lod - 2., 0.));
+		highp vec4 w = textureLod(cloudBillow, vec3(map*k + cloudBillowPhase, z*k*1.5) + vec3(0.21, 0.63, 0.4), max(lod - 2., 0.));
 		map += near*0.15*cloudSize*(w.rg - w.gb);
 	}
 	highp vec4 f = textureLod(cloudTile, cloudTileAt(map), lod);
@@ -1044,7 +1049,7 @@ highp vec2 cloudHeights(highp vec2 map, CloudWeather weather, highp float lod, h
 // None at the flat base; where they are finer than the footprint foot (km), only their mean
 highp float billows(highp vec2 map, highp float height, highp float top, highp float foot)
 {
-	highp vec3 c = vec3(map, height)*cloudBillowScale.x + vec3(0., 0., cloudBillowScale.z);
+	highp vec3 c = vec3(map, height)*cloudBillowScale.x + vec3(cloudBillowPhase, cloudBillowScale.z);
 	highp float lod = max(log2(foot*cloudBillowScale.x*96.), 0.);
 	highp vec4 b = textureLod(cloudBillow, c, lod);
 	// (they eat into the sides of a cloud all the way down to its base, or its lowest part would stick out as a ledge; the
