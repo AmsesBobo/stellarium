@@ -1184,10 +1184,16 @@ void main(void)
 					if (dTop > -e && dTop < cloudBillowScale.y)
 						dTop -= billows(cloudMap(q) + weather.drift, height, h.x, foot);
 					highp float d = min(dTop, dBase);
-					// The density grows over the first few tens of meters into the cloud: the edges of a cumulus are crisp (the ragged
-					// noise above still leaves soft wisps). Take its mean between this short step and the last, where the distance to
+					// The density grows over the first tens of meters into the cloud (see soft below). Take its mean between this short step and the last, where the distance to
 					// the edge goes from one to the other: a crisp edge that falls between them is neither lost nor shows the steps
-					highp float a = -e, b = e + 0.004*cloudSize;
+					// How soft the edge is: crisp at the rising tops, softer and a little transparent low on the sides and at
+					// the rim of the base, where the cloud mixes with the dry air around it, and in patches that vary from place
+					// to place (one edge as crisp as every other looks like the surface of a solid)
+					highp float low = 1. - smoothstep(0.15, 0.7, height/max(cloudLastHeight, 0.01));
+					highp float vary = textureLod(cloudBillow, vec3((cloudMap(q) + weather.drift)*0.5*cloudBillowScale.x + 0.5*cloudBillowPhase,
+					                                               height*0.5*cloudBillowScale.x) + vec3(0.7, 0.3, 0.2), 0.).r;
+					highp float soft = mix(0.004, 0.12, max(low, 0.7*smoothstep(0.55, 0.85, vary)));
+					highp float a = -e, b = e + soft*cloudSize;
 					highp float inside = clamp((d - a)/(b - a), 0., 1.);
 					if (u - lastU < 1.5*dt && abs(d - lastD) > 1e-4)
 						inside = (edgeIntegral(d, a, b) - edgeIntegral(lastD, a, b))/(d - lastD);
