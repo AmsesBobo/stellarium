@@ -148,6 +148,35 @@ int main()
 	}
 	require(typeDifference > 1., "Cloud types have indistinguishable grouping");
 
+
+	// Group evolution must be continuous when the stored deformation phase wraps,
+	// even with local growth held fixed. It should reorganize low clouds over hours.
+	for (const auto& kind : {cumulus, stratocumulus, altocumulus})
+	{
+		double groupChange = 0.;
+		auto start = now, evolved = now;
+		evolved.deformU += 0.19; evolved.deformV -= 0.11;
+		for (int i = 0; i < 128; ++i)
+		{
+			const double x = i*1.31 - 70., y = i*1.79 - 90.;
+			const auto a = CloudShape::development(tile, kind, start, x, y);
+			const auto b = CloudShape::development(tile, kind, evolved, x, y);
+			groupChange += std::abs(a[0] - b[0]);
+			for (int axis = 0; axis < 2; ++axis)
+			{
+				auto left = now, right = now;
+				if (axis == 0) {left.deformU = 0.5 - 1e-8; right.deformU = -0.5 + 1e-8;}
+				else {left.deformV = 0.5 - 1e-8; right.deformV = -0.5 + 1e-8;}
+				const auto c = CloudShape::development(tile, kind, left, x, y);
+				const auto d = CloudShape::development(tile, kind, right, x, y);
+				for (int channel = 0; channel < 3; ++channel)
+					require(std::abs(c[channel] - d[channel]) < 1e-6, "Bank evolution jumps at phase wrap");
+			}
+		}
+		require(kind.flatness >= 0.6 ? groupChange == 0. : groupChange > 0.1,
+		        "Bank evolution affects wrong cloud types or remains static");
+	}
+
 	// Automatic cumulus coverage is reduced without changing the solar cycle or
 	// the established sheet-cloud presets. This multiplier is shared with the GPU
 	// through Front::scale, and is not used by manual coverage.
@@ -157,8 +186,8 @@ int main()
 	{
 		const double solar = CloudShape::solarCoverScale(automatic, heat);
 		const double weather = CloudShape::weatherCoverScale(automatic, heat);
-		require(std::abs(weather - 0.6*solar) < 1e-12, "Automatic cumulus reduction is inconsistent");
-		require(CloudShape::FrontMax*weather <= 0.54 + 1e-12, "Automatic cumulus exceeds coverage ceiling");
+		require(std::abs(weather - 0.7*solar) < 1e-12, "Automatic cumulus reduction is inconsistent");
+		require(CloudShape::FrontMax*weather <= 0.63 + 1e-12, "Automatic cumulus exceeds coverage ceiling");
 		for (double flat : {0.4, 0.6, 1.})
 		{
 			auto sheet = automatic; sheet.flatness = flat;

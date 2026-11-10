@@ -904,11 +904,15 @@ CloudWeather cloudWeatherAt(highp vec3 p, highp vec2 map, highp vec4 cover, high
 	highp vec2 growthMap = map*cloudGrowScale + phases[3];
 	highp float grow = 0.7*textureLod(cloudTile, growthMap + cloudGrow, 2.).z
 	                 + 0.3*textureLod(cloudTile, growthMap + vec2(-cloudGrow.y, cloudGrow.x) + vec2(0.37, 0.19), 2.).z;
-	highp float life = mix(smoothstep(0.25, 0.75, grow), 0.5, 0.65*shape.y);
-	highp vec2 groupUV = map*formation.xy + phases[4];
+	// Match CloudShape::development(): slow bank evolution in the moving air mass.
+	highp float lowFormation = 1. - smoothstep(0.4, 0.6, shape.y);
+	highp vec2 groupDrift = 0.045*lowFormation*(1. - 0.5*shape.y)*sin(6.28318530718*cloudDeform + vec2(0., 1.1));
+	highp vec2 groupUV = map*formation.xy + phases[4] + groupDrift;
 	highp float broad = textureLod(cloudTile, groupUV, 2.).z;
-	highp float detail = textureLod(cloudTile, map*formation.xy*2.3 + phases[9] + vec2(0.31, 0.57), 2.).z;
+	highp float detail = textureLod(cloudTile, map*formation.xy*2.3 + phases[9] + 2.3*groupDrift + vec2(0.31, 0.57), 2.).z;
 	highp float patches = 0.75*broad + 0.25*detail;
+	highp float coordinated = mix(grow, patches, 0.1*lowFormation);
+	highp float life = mix(smoothstep(0.25, 0.75, coordinated), 0.5, 0.65*shape.y);
 	highp float bands = 0.5 + 0.5*cos(6.28318530718*(5.*fract(groupUV.y) + 0.8*(broad - 0.5) + 0.35*(detail - 0.5)));
 	highp float group = mix(patches, bands, formation.w*smoothstep(0.25, 0.75, broad));
 	highp float offset = cover.x + cover.y*noise;

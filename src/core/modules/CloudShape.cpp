@@ -259,7 +259,7 @@ double CloudShape::weatherCoverScale(const Layer& layer, double heating)
 	// Blend continuously for custom layers, preserving stratocumulus/altocumulus.
 	const double cumulus = (1. - smooth(0.15, 0.4, layer.flatness))
 	                     * (1. - smooth(2.5, 3.5, layer.base));
-	return solarCoverScale(layer, heating)*(1. - 0.4*cumulus);
+	return solarCoverScale(layer, heating)*(1. - 0.3*cumulus);
 }
 
 double CloudShape::frontCover(const std::vector<float>& tile, double mapX, double mapY, const Front& front, const Motion& motion)
@@ -463,7 +463,14 @@ std::array<double, 3> CloudShape::development(const std::vector<float>& tile, co
 	// Groups travel with the cloud bodies; the life field evolves through them. Flattened
 	// layers form longer, more persistent patches rather than pulsing like cumulus.
 	const auto formation = formationParameters(layer);
-	const double u = mapX*formation[0], v = mapY*formation[1];
+	// Slowly migrating favourable regions let banks reorganize relative to their
+	// advected bodies. Sines of wrapped phases are continuous across date scrubbing.
+	// Keep the established high-cloud formations unchanged.
+	const double flatT = std::clamp((layer.flatness - 0.4)/0.2, 0., 1.);
+	const double low = 1. - flatT*flatT*(3. - 2.*flatT);
+	const double amplitude = 0.045*low*(1. - 0.5*layer.flatness);
+	const double u = mapX*formation[0] + amplitude*std::sin(2.*M_PI*motion.deformU);
+	const double v = mapY*formation[1] + amplitude*std::sin(2.*M_PI*motion.deformV + 1.1);
 	const double broad = readTile(tile, u, v, 2);
 	const double detail = readTile(tile, u*2.3 + 0.31, v*2.3 + 0.57, 2);
 	const double patches = 0.75*broad + 0.25*detail;
@@ -474,7 +481,10 @@ std::array<double, 3> CloudShape::development(const std::vector<float>& tile, co
 	const double group = patches + bandWeight*(bands - patches);
 	const double grow = 0.7*readTile(tile, mapX/GrowScale + motion.growU, mapY/GrowScale + motion.growV, 2)
 	                  + 0.3*readTile(tile, mapX/GrowScale - motion.growV + 0.37, mapY/GrowScale + motion.growU + 0.19, 2);
-	const double t = std::clamp((grow - 0.25)/0.5, 0., 1.);
+	// Shared moisture proxy coordinates growth within a group while retaining
+	// local turnover. This is a visual model, not a thermodynamic calculation.
+	const double coordinated = grow + 0.1*low*(patches - grow);
+	const double t = std::clamp((coordinated - 0.25)/0.5, 0., 1.);
 	const double life = (1. - 0.65*layer.flatness)*t*t*(3. - 2.*t) + 0.65*layer.flatness*0.5;
 	const auto smooth = [](double a, double b, double x) {
 		const double t = std::clamp((x - a)/(b - a), 0., 1.);
