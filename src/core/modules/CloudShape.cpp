@@ -248,6 +248,20 @@ double CloudShape::solarCoverScale(const Layer& layer, double heating)
 	return 1. - response*(1. - std::clamp(heating, 0., 1.));
 }
 
+double CloudShape::weatherCoverScale(const Layer& layer, double heating)
+{
+	const auto smooth = [](double a, double b, double x) {
+		const double t = std::clamp((x - a)/(b - a), 0., 1.);
+		return t*t*(3. - 2.*t);
+	};
+	// Fair-weather heaps leave more open sky than sheet-like cloud banks.
+	// Scale coverage, not density: individual clouds should remain substantial.
+	// Blend continuously for custom layers, preserving stratocumulus/altocumulus.
+	const double cumulus = (1. - smooth(0.15, 0.4, layer.flatness))
+	                     * (1. - smooth(2.5, 3.5, layer.base));
+	return solarCoverScale(layer, heating)*(1. - 0.4*cumulus);
+}
+
 double CloudShape::frontCover(const std::vector<float>& tile, double mapX, double mapY, const Front& front, const Motion& motion)
 {
 	// as in the shader of CloudMgr
@@ -437,7 +451,10 @@ std::array<double, 4> CloudShape::formationParameters(const Layer& layer)
 	const double lowX = GroupScale*(1. + 2.*layer.flatness);
 	const double lowY = GroupScale*(1. + 0.5*layer.flatness);
 	return {1./(lowX + alto*(32. - lowX)), 1./(lowY + alto*(18. - lowY)),
-	        0.95 - 0.45*std::clamp(layer.flatness/0.6, 0., 1.) + 0.25*alto, 0.28*alto};
+	        // A little more contrast between low-cloud banks and their clear gaps.
+	        // Keep the altocumulus formation parameters exactly as before.
+	        0.95 - 0.45*std::clamp(layer.flatness/0.6, 0., 1.) + 0.25*alto
+	        + 0.25*(1. - smooth(0.4, 0.6, layer.flatness)), 0.28*alto};
 }
 
 std::array<double, 3> CloudShape::development(const std::vector<float>& tile, const Layer& layer,
@@ -459,7 +476,16 @@ std::array<double, 3> CloudShape::development(const std::vector<float>& tile, co
 	                  + 0.3*readTile(tile, mapX/GrowScale - motion.growV + 0.37, mapY/GrowScale + motion.growU + 0.19, 2);
 	const double t = std::clamp((grow - 0.25)/0.5, 0., 1.);
 	const double life = (1. - 0.65*layer.flatness)*t*t*(3. - 2.*t) + 0.65*layer.flatness*0.5;
-	return {formation[2]*(group - 0.5) + GrowStrength*(life - 0.5), 0.65 + 0.35*life, 0.45 + 0.55*life};
+	const auto smooth = [](double a, double b, double x) {
+		const double t = std::clamp((x - a)/(b - a), 0., 1.);
+		return t*t*(3. - 2.*t);
+	};
+	// Keep CPU star/planet transmission aligned with the GPU population mask.
+	const double population = layer.front.on ? (1. - smooth(0.15, 0.4, layer.flatness))
+		* (1. - smooth(2.5, 3.5, layer.base)) : 0.;
+	const double occupied = 1. + population*(smooth(0.45, 0.57, patches) - 1.);
+	return {formation[2]*(group - 0.5) + GrowStrength*(life - 0.5), 0.65 + 0.35*life,
+	        (0.45 + 0.55*life)*occupied};
 }
 
 std::array<double, 3> CloudShape::cohesiveWeather(double offset, double height, double density, double flatness, double cover)

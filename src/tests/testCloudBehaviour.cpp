@@ -148,11 +148,68 @@ int main()
 	}
 	require(typeDifference > 1., "Cloud types have indistinguishable grouping");
 
-	// At standard cumulus coverage, loss of development must thin the whole body
-	// instead of eroding its shape below the connected core. Clear skies stay clear.
+	// Automatic cumulus coverage is reduced without changing the solar cycle or
+	// the established sheet-cloud presets. This multiplier is shared with the GPU
+	// through Front::scale, and is not used by manual coverage.
+	CloudShape::Layer automatic;
+	automatic.base = 1.2; automatic.flatness = 0.;
+	for (double heat : {0., 0.5, 1.})
+	{
+		const double solar = CloudShape::solarCoverScale(automatic, heat);
+		const double weather = CloudShape::weatherCoverScale(automatic, heat);
+		require(std::abs(weather - 0.6*solar) < 1e-12, "Automatic cumulus reduction is inconsistent");
+		require(CloudShape::FrontMax*weather <= 0.54 + 1e-12, "Automatic cumulus exceeds coverage ceiling");
+		for (double flat : {0.4, 0.6, 1.})
+		{
+			auto sheet = automatic; sheet.flatness = flat;
+			require(CloudShape::weatherCoverScale(sheet, heat) == CloudShape::solarCoverScale(sheet, heat),
+			        "Automatic sheet-cloud coverage changed");
+		}
+	}
+	for (double flat : {0.15, 0.4})
+	{
+		automatic.flatness = flat - 1e-6;
+		const double left = CloudShape::weatherCoverScale(automatic, 0.5);
+		automatic.flatness = flat + 1e-6;
+		require(std::abs(left - CloudShape::weatherCoverScale(automatic, 0.5)) < 1e-6,
+		        "Automatic coverage jumps between cloud types");
+	}
+
+	// Date weather selects occupied regions, leaving real clear gaps while keeping
+	// full density within selected groups. Manual and sheet-cloud weather is unchanged.
+	CloudShape::Layer populationLayer;
+	populationLayer.base = 1.2; populationLayer.flatness = 0.;
+	int emptyGroups = 0, fullGroups = 0;
+	for (int i = 0; i < 1024; ++i)
+	{
+		const double x = i*1.17 - 500., y = i*3.19 - 1200.;
+		populationLayer.front.on = false;
+		const auto manual = CloudShape::development(tile, populationLayer, now, x, y);
+		populationLayer.front.on = true;
+		const auto dated = CloudShape::development(tile, populationLayer, now, x, y);
+		require(dated[0] == manual[0] && dated[1] == manual[1], "Population mask changes body shape or height");
+		require(dated[2] >= 0. && dated[2] <= manual[2], "Population mask amplifies density");
+		emptyGroups += dated[2] == 0.; fullGroups += dated[2] == manual[2];
+		for (double flat : {0.4, 0.6})
+		{
+			auto sheet = populationLayer; sheet.flatness = flat;
+			const auto automatic = CloudShape::development(tile, sheet, now, x, y);
+			sheet.front.on = false;
+			require(automatic == CloudShape::development(tile, sheet, now, x, y), "Population mask changes sheet clouds");
+		}
+	}
+	require(emptyGroups > 100 && fullGroups > 20, "Automatic cumulus lack clear gaps or intact groups");
+
+	// Cumulus shrink at low coverage while retaining density. Only the last
+	// remnants thin out; the retained core must never leak into clear skies.
 	const auto mature = CloudShape::cohesiveWeather(-0.20, 0.8, 0.7, 0., 0.25);
 	const auto fading = CloudShape::cohesiveWeather(-0.8, 0.8, 0.7, 0., 0.25);
-	require(std::abs(mature[0] - fading[0]) < 1e-12 && fading[2] < mature[2], "Fading cumulus fragments rather than thinning");
+	require(fading[0] < mature[0] && std::abs(fading[2] - mature[2]) < 1e-12,
+	        "Small cumulus lose density before shrinking");
+	const auto remnant = CloudShape::cohesiveWeather(-1., 0.8, 0.7, 0., 0.25);
+	const auto dissolving = CloudShape::cohesiveWeather(-1.2, 0.8, 0.7, 0., 0.25);
+	require(std::abs(remnant[0] - dissolving[0]) < 1e-12 && dissolving[2] < remnant[2],
+	        "Last cumulus remnants do not dissolve smoothly");
 	for (double offset : {-2., -1.25, -0.8, -0.35, -0.20, 0., 0.45})
 	{
 		const auto clear = CloudShape::cohesiveWeather(offset, 0.8, 0.7, 0., 0.);

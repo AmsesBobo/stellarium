@@ -643,7 +643,7 @@ void CloudMgr::update(double)
 		fronts[i].on = flagFollowDate;
 		fronts[i].shift = layers[i].base > 2.5 ? 180. : 0.;
 		fronts[i].bias = layers[i].base > 2.5 ? -0.1 : 0.;
-		fronts[i].scale = CloudShape::solarCoverScale(layers[i], heating);
+		fronts[i].scale = CloudShape::weatherCoverScale(layers[i], heating);
 	}
 	cirrusFront.on = flagFollowDate;
 	cirrusFront.shift = 420.;
@@ -920,6 +920,12 @@ CloudWeather cloudWeatherAt(highp vec3 p, highp vec2 map, highp vec4 cover, high
 		offset = 1.1*(c - 0.45) + 2.*(noise - 0.5) - 150.*fading*fading;
 	}
 	highp float presence = smoothstep(-2.995, -1.385, offset - 2.*noise);
+	// Automatic fair-weather cumulus occupy selected regions of the bank, not
+	// every seed at a reduced radius. The stable group field travels with the
+	// bodies; a soft boundary avoids popping as the weather moves.
+	highp float population = front.x > 0. ? (1. - smoothstep(0.15, 0.4, shape.y))
+		* (1. - smoothstep(6373.5, 6374.5, radius)) : 0.;
+	presence *= mix(1., smoothstep(0.45, 0.57, patches), population);
 	offset = min(offset + formation.z*(group - 0.5) + cloudGrowStrength*(life - 0.5), 0.45);
 	// A bank: the clouds only stand in a sector of the sky at a distance from the observer (see CloudShape::bankMask())
 	if (bank.w >= 0.)
@@ -1010,10 +1016,22 @@ highp float cloudLastShape = 0., cloudLastHeight = 0.;
 // and a field of them looks white rather than like a grey ceiling. Flat clouds are much less drawn in
 highp float cloudSide(highp float height)
 {
-	highp float drawnIn = 0.45*cloudSize*(1. - cloudShape.y);
+	// A thin cloudlet must not lose its entire base to a size-based taper.
+	// Preserve the established high, flat cloud profile (altocumulus).
+	highp float lowCloud = 1. - smoothstep(0.4, 0.6, cloudShape.y);
+	highp float drawnIn = mix(0.45*cloudSize, min(0.45*cloudSize, 0.85*cloudLastHeight), lowCloud)*(1. - cloudShape.y);
 	return 0.4*cloudSize*cloudLastShape - drawnIn*(1. - smoothstep(0., 0.6, height/max(cloudLastHeight, 0.01)));
 }
 
+
+// Lower clouds need a broad base, with rounding confined to its rim. Rounding
+// over the full body height turns every element into a similarly inflated pillow.
+highp float baseRounding()
+{
+	highp float original = min(0.8*cloudSize, (0.8 + 0.7*(1. - cloudShape.y))*cloudLastHeight);
+	highp float roundingScale = mix(0.7, 0.9, clamp(cloudShape.y/0.4, 0., 1.));
+	return mix(original, roundingScale*original, 1. - smoothstep(0.4, 0.6, cloudShape.y));
+}
 
 // The heights over the base of the top and the underside of the cloud at a place (km, the top below 0 outside the clouds),
 // from the shape at the level of detail lod with the local development parameters. near: how much the fine lobes count at the height z
@@ -1067,7 +1085,11 @@ highp float billows(highp vec2 map, highp float height, highp float top, highp f
 	highp vec4 b = textureLod(cloudBillow, c, lod);
 	// (they eat into the sides of a cloud all the way down to its base, or its lowest part would stick out as a ledge; the
 	// underside itself stays flat, as the billows only take away from the top and the sides)
-	return cloudBillowScale.y*(1. - (0.55*b.r + 0.3*b.g + 0.15*b.b));
+	// Keep relief proportional to the local body, especially for small cloudlets.
+	// Otherwise the same erosion that details a large cloud can hollow out a small one.
+	highp float lowCloud = 1. - smoothstep(0.4, 0.6, cloudShape.y);
+	highp float depth = mix(cloudBillowScale.y, min(cloudBillowScale.y, 0.85*cloudLastHeight), lowCloud);
+	return depth*(1. - (0.55*b.r + 0.3*b.g + 0.15*b.b));
 }
 
 // The sunlight on a side of a cloud with the Sun higher by this much (degrees) than at the base over the observer
@@ -1120,8 +1142,8 @@ void main(void)
 	highp float bestMoment = 2., T = 0., thin = 0.;
 	highp float hitT = -1.;
 	CloudWeather hitWeather = CloudWeather(vec3(0.), vec2(0.));
-	highp vec4 hitVolume[2];
-	highp vec2 hitVolumeWeight = vec2(0.);
+	highp vec4 hitVolume[4];
+	highp vec4 hitVolumeWeight = vec4(0.);
 	// the steps between two moments blur the surface, so that they do not show
 	highp float smear = spread/float(samples);
 	highp float look = log2((1.5*ds + smear)/cloudCover.z);
@@ -1137,11 +1159,15 @@ void main(void)
 		highp vec4 volume[2];
 		volume[0] = vec4(0.); volume[1] = vec4(0.);
 		highp vec2 volumeWeight = vec2(0.);
-		// The near stratum takes its place from the separate piece of cloud that weighs most in it (a billow in front
-		// of another one, or a wisp before the body): their mean would lie in the air between them, where the
-		// sunlight comes through, and outline the billows with bright rims
-		highp vec4 piece = vec4(0.), bestPiece = vec4(0.);
-		highp float pieceWeight = 0., bestPieceWeight = 0.;
+		// Keep separate lighting positions for the two strongest connected pieces
+		// in each optical-depth stratum. A centroid between clouds lies in clear
+		// air; selecting only one piece makes illumination jump when ranks swap.
+		highp vec4 piece[2], bestPiece[2], secondPiece[2];
+		for (int v = 0; v < 2; ++v)
+		{
+			piece[v] = vec4(0.); bestPiece[v] = vec4(0.); secondPiece[v] = vec4(0.);
+		}
+		highp vec2 pieceWeight = vec2(0.), bestPieceWeight = vec2(0.), secondPieceWeight = vec2(0.);
 		highp float lastD = 0., lastU = -1e9; // the distance to the edge at the previous short step
 		// Through the layer, until the clouds are opaque. Long steps look for clouds;
 		// short ones integrate opacity and the representative lighting position
@@ -1194,7 +1220,7 @@ void main(void)
 					// (they fade out deeper inside: cut off at once, they left a hollow shell in the cloud)
 					if (dTop > -e && dTop < 1.5*cloudBillowScale.y)
 						dTop -= (1. - smoothstep(cloudBillowScale.y, 1.5*cloudBillowScale.y, dTop))*billows(cloudMap(q) + weather.drift, height, h.x, foot);
-					highp float d = smoothMin(dTop, dBase, min(0.8*cloudSize, (0.8 + 0.7*(1. - cloudShape.y))*cloudLastHeight));  // (the rim of the flat base rounded, less in thin clouds)
+					highp float d = smoothMin(dTop, dBase, baseRounding());  // (the rim of the flat base rounded, less in thin clouds)
 					// The density grows over the first tens of meters into the cloud (see soft below). Take its mean between this short step and the last, where the distance to
 					// the edge goes from one to the other: a crisp edge that falls between them is neither lost nor shows the steps
 					// How soft the edge is: crisp at the rising tops, softer and a little transparent low on the sides and at
@@ -1208,6 +1234,9 @@ void main(void)
 					highp float inside = clamp((d - a)/(b - a), 0., 1.);
 					if (u - lastU < 1.5*dt && abs(d - lastD) > 1e-4)
 						inside = (edgeIntegral(d, a, b) - edgeIntegral(lastD, a, b))/(d - lastD);
+					// A skipped coarse step is clear space too. Do not join the
+					// pieces on either side when choosing a lighting position.
+					bool skippedGap = u - lastU >= 1.5*dt;
 					lastD = d; lastU = u;
 					// Weight the lighting position by each sample's visible opacity. A single
 					// threshold crossing jumped between steps and drew rings on the bases.
@@ -1218,15 +1247,25 @@ void main(void)
 					highp float deeper = smoothstep(0.2, 1.8, depth + 0.5*opticalDepth);
 					highp vec2 vw = weight*vec2(1. - deeper, deeper);
 					highp vec4 samplePoint = vec4(u, height, h.x, lod);
-					volume[0] += vw.x*samplePoint;
-					if (inside < 0.02)
+					for (int v = 0; v < 2; ++v)
 					{
-						if (pieceWeight > bestPieceWeight) {bestPiece = piece; bestPieceWeight = pieceWeight;}
-						piece = vec4(0.); pieceWeight = 0.;
+						volume[v] += vw[v]*samplePoint;
+						if (inside < 0.02 || (skippedGap && cloudShape.y < 0.6))
+						{
+							if (pieceWeight[v] > bestPieceWeight[v])
+							{
+								secondPiece[v] = bestPiece[v]; secondPieceWeight[v] = bestPieceWeight[v];
+								bestPiece[v] = piece[v]; bestPieceWeight[v] = pieceWeight[v];
+							}
+							else if (pieceWeight[v] > secondPieceWeight[v])
+							{
+								secondPiece[v] = piece[v]; secondPieceWeight[v] = pieceWeight[v];
+							}
+							piece[v] = vec4(0.); pieceWeight[v] = 0.;
+						}
+						piece[v] += vw[v]*samplePoint;
+						pieceWeight[v] += vw[v];
 					}
-					piece += vw.x*samplePoint;
-					pieceWeight += vw.x;
-					volume[1] += vw.y*samplePoint;
 					volumeWeight += vw;
 					depth += opticalDepth;
 					firstWeight += weight;
@@ -1236,9 +1275,23 @@ void main(void)
 				}
 			}
 		}
-		if (pieceWeight > bestPieceWeight) {bestPiece = piece; bestPieceWeight = pieceWeight;}
-		if (bestPieceWeight > 1e-8)
-			volume[0] = bestPiece*(volumeWeight.x/bestPieceWeight);
+		for (int v = 0; v < 2; ++v)
+		{
+			if (pieceWeight[v] > bestPieceWeight[v])
+			{
+				secondPiece[v] = bestPiece[v]; secondPieceWeight[v] = bestPieceWeight[v];
+				bestPiece[v] = piece[v]; bestPieceWeight[v] = pieceWeight[v];
+			}
+			else if (pieceWeight[v] > secondPieceWeight[v])
+			{
+				secondPiece[v] = piece[v]; secondPieceWeight[v] = pieceWeight[v];
+			}
+		}
+		// Blend radiance, never positions, as the leading pieces exchange rank.
+		// At equal weights the blend is symmetric; a minor wisp does not move
+		// the body's lighting position or require an extra shadow ray.
+		highp float splitLight = 1. - smoothstep(0.4, 0.6, cloudShape.y);
+		highp vec2 pieceBlend = splitLight*0.5*smoothstep(vec2(0.35), vec2(1.), secondPieceWeight/max(bestPieceWeight, vec2(1e-8)));
 		// (a thick cloud is opaque: the Sun must not shine through where the way stopped)
 		highp float through = exp(-depth)*(1. - smoothstep(5., 6.9, depth));
 		T += through;
@@ -1250,9 +1303,15 @@ void main(void)
 			hitMoment = cloudMoment;
 			hitT = firstT/firstWeight;
 			hitWeather = CloudWeather(firstWeather.growth/firstWeight, firstWeather.drift/firstWeight);
-			hitVolume[0] = volume[0]/max(volumeWeight.x, 1e-8);
-			hitVolume[1] = volume[1]/max(volumeWeight.y, 1e-8);
-			hitVolumeWeight = volumeWeight/firstWeight;
+			for (int v = 0; v < 2; ++v)
+			{
+				hitVolume[v] = bestPieceWeight[v] > 1e-8 ? bestPiece[v]/bestPieceWeight[v] : volume[v]/max(volumeWeight[v], 1e-8);
+				if (v == 1)
+					hitVolume[v] = mix(volume[v]/max(volumeWeight[v], 1e-8), hitVolume[v], splitLight);
+				hitVolume[v + 2] = secondPiece[v]/max(secondPieceWeight[v], 1e-8);
+				hitVolumeWeight[v] = volumeWeight[v]*(1. - pieceBlend[v])/firstWeight;
+				hitVolumeWeight[v + 2] = volumeWeight[v]*pieceBlend[v]/firstWeight;
+			}
 		}
 	}
 	if (hitT < 0.)
@@ -1264,7 +1323,8 @@ void main(void)
 	thin /= float(samples);
 	cloudMoment = hitMoment;
 
-	// Integrate scattering from two opacity-weighted parts of the visible volume.
+	// Integrate scattering from two opacity-weighted strata, splitting each
+	// stratum into separate light rays when two connected pieces compete.
 	// There is no surface normal and no separate side/underside material.
 	highp vec3 p = vec3(altAz.xy*hitT, r0 + altAz.z*hitT);
 	highp float sunCos = dot(altAz, cloudSun), moonCos = dot(altAz, cloudMoon);
@@ -1286,7 +1346,7 @@ void main(void)
 	// Single scattering must include extinction on the incoming light path.
 	// Accumulate it with the same visible-volume weights as the diffuse light.
 	highp float singleTransmission = 0.;
-	for (int v = 0; v < 2; ++v)
+	for (int v = 0; v < 4; ++v)
 	{
 		highp float contribution = hitVolumeWeight[v];
 		if (contribution < 1e-6) continue;
@@ -1320,7 +1380,7 @@ void main(void)
 				// (the base a little lower than for the eye: the samples that make a base visible lie partly in its soft lower
 				// edge, and a low Sun must not reach them by grazing just under the flat base. Not at the sides, though, whose
 				// lowest few tens of meters would then lie in shade as a pale band along the base)
-				dLight = smoothMin(dLight, height - h.y + 0.02*smoothstep(0.02, 0.08, dLight), min(0.8*cloudSize, (0.8 + 0.7*(1. - cloudShape.y))*cloudLastHeight));
+				dLight = smoothMin(dLight, height - h.y + 0.02*smoothstep(0.02, 0.08, dLight), baseRounding());
 				// (the mean density from the last step to this one, where the distance to the edge goes from one to the other:
 				// the share of the way that lies in the cloud grows smoothly as the edge moves)
 				highp float la = -0.01, lb = 0.025 + 0.1*stepLength;

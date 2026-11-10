@@ -128,6 +128,8 @@ public:
 	static double solarHeating(double latitude, const std::array<double, 3>& sunAltAz);
 	//! Weaker solar response for flattened and elevated layers; does not clear the night sky.
 	static double solarCoverScale(const Layer& layer, double heating);
+	//! Automatic weather coverage, including sparser low cumulus. Manual cover is unaffected.
+	static double weatherCoverScale(const Layer& layer, double heating);
 
 	//! Cirrus: thin fibrous clouds of ice, high up. Their fibres lie along an axis of the map, from the soft noise of the
 	//! tile in three sizes stretched along it, in patches that the cover sets. The constants are shared with the shader.
