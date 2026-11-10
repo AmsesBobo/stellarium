@@ -976,29 +976,51 @@ CloudWeather cloudWeather(highp vec3 p)
 	return cloudWeatherAt(p, cloudMap(p), cloudCover, cloudFront, cloudRadii.y, cloudBank, cloudShape, cloudSize, cloudFormation, cloudPhase);
 }
 
-// The light that the layer above lets through to a place, towards the light key: one look at the middle of its clouds
-highp float otherShadow(highp vec3 p, highp vec3 key)
+// Filter the upper layer's transmission over the receiving footprint. Filtering
+// shape alone and exponentiating afterwards makes dense edges almost binary.
+highp float otherShadow(highp vec3 p, highp vec3 key, highp float foot)
 {
 	if (otherRadius.x <= 0. || key.z < 0.02)
 		return 1.;
 	highp float middle = 0.12*otherRadius.y*otherShape.w;
 	highp float r = length(p);
-	highp vec3 q = p + key*(otherRadius.x + middle - r)/max(dot(p/r, key), 0.02);
+	// For intersecting layers start at the receiver, never project backwards.
+	highp float target = max(r, otherRadius.x + middle);
+	highp float b = dot(p, key), c = (target - r)*(target + r);
+	highp float distance = c/(b + sqrt(b*b + c));
+	highp vec3 q = p + key*distance;
 	highp vec2 map = cloudMapAt(q, otherRadius.x, otherShift, otherTurn);
 	CloudWeather weather = cloudWeatherAt(q, map, otherCover, otherFront, otherRadius.x, otherBank, otherShape, otherRadius.y, otherFormation, otherPhase);
-	highp vec4 f = textureLod(cloudTile, vec2((map.x + weather.drift.x)*otherShape.x, map.y + weather.drift.y)*otherRadius.z + otherPhase[0], 1.5);
-	highp float s = f.x + weather.growth.x;
-	highp float height = otherRadius.y*otherShape.w*f.y*weather.growth.y;
-	highp float round = s/pow(abs(s) + 0.01, 0.55);
-	highp float plateau = 0.8*s/sqrt(s*s + 0.0625);
-	highp float top = height*mix(round, plateau, otherShape.y);
-	highp float under = otherRadius.y*otherShape.w*(0.012 + 0.008*f.z);
-	// Optical thickness, including the oblique path through the upper layer. Unlike
-	// a linear density subtraction this stays nonnegative even for dense clouds.
 	highp float slant = 1./max(dot(q/length(q), key), 0.05);
-	highp float tau = otherCover.w*weather.growth.z*max(top - under, 0.)*slant;
-	highp float transmission = 0.15 + 0.85*exp(-tau);
-	return mix(1., transmission, smoothstep(0.02, 0.08, key.z));
+	// Approximate the solar/lunar angular radius (0.27 degrees), the pixel
+	// footprint, and unresolved soft cloud edges. Bound the grazing footprint.
+	highp float radius = max(max(foot, 0.0047*distance), 0.06*otherRadius.y);
+	highp float along = min(slant, 6.);
+	highp vec2 axis = key.xy/max(length(key.xy), 1e-5);
+	if (length(key.xy) < 1e-5) axis = vec2(1., 0.);
+	highp vec2 across = vec2(-axis.y, axis.x);
+	highp float lod = max(1.5, log2(max(radius*otherRadius.z*1024., 1.)));
+	highp float transmission = 0.;
+	for (int tap = 0; tap < 5; ++tap)
+	{
+		highp vec2 offset = tap == 0 ? vec2(0.) : tap == 1 ? axis*along : tap == 2 ? -axis*along : tap == 3 ? across : -across;
+		highp vec2 uv = map + weather.drift + radius*offset;
+		highp vec4 f = textureLod(cloudTile, vec2(uv.x*otherShape.x, uv.y)*otherRadius.z + otherPhase[0], lod);
+		highp float s = f.x + weather.growth.x;
+		highp float height = otherRadius.y*otherShape.w*f.y*weather.growth.y;
+		highp float round = s/pow(abs(s) + 0.01, 0.55);
+		highp float plateau = 0.8*s/sqrt(s*s + 0.0625);
+		highp float top = height*mix(round, plateau, otherShape.y);
+		highp float under = max(otherRadius.y*otherShape.w*(0.012 + 0.008*f.z), r - otherRadius.x);
+		highp float tau = otherCover.w*weather.growth.z*max(top - under, 0.)*slant;
+		// Fractional edge coverage keeps an optically thick cloud's filtered
+		// silhouette soft, rather than turning every partly covered tap opaque.
+		highp float edge = max(0.05, radius/(0.4*otherRadius.y));
+		highp float covered = smoothstep(-edge, edge, s);
+		highp float through = 1. - covered*(1. - exp(-tau));
+		transmission += (tap == 0 ? 1./3. : 1./6.)*through;
+	}
+	return mix(1., 0.15 + 0.85*transmission, smoothstep(0.02, 0.08, key.z));
 }
 
 // Where a place of the map lies on the tile of the shapes, which flat clouds stretch
@@ -1348,7 +1370,7 @@ void main(void)
 	highp float keyIsSun = step(0.5, dot(cloudKey, cloudSun));
 	highp float towardKey = smoothstep(0.3, 0.9, dot(altAz, cloudKey));
 	highp float shadowWeight = (1. - smoothstep(0.15, 0.3, hitT*cloudPixel))*smoothstep(-0.05, 0.02, cloudKey.z);
-	highp float upper = otherShadow(p, cloudKey)*cirrusShadow(p, cloudKey);
+
 	// Weather varies much more slowly than density. Share two weather anchors
 	// between the light rays; each stratum still samples its own cloud geometry.
 	highp float middleDistance = 0.32*cloudSize, endDistance = 1.28*cloudSize;
@@ -1362,7 +1384,7 @@ void main(void)
 	highp vec3 light = vec3(0.);
 	// Single scattering must include extinction on the incoming light path.
 	// Accumulate it with the same visible-volume weights as the diffuse light.
-	highp float singleTransmission = 0.;
+	highp float singleTransmission = 0., upperTransmission = 0.;
 	for (int v = 0; v < 4; ++v)
 	{
 		highp float contribution = hitVolumeWeight[v];
@@ -1420,7 +1442,11 @@ void main(void)
 			highp float scattered = (exp(-tau) + octaves*(0.55*exp(-0.35*tau) + 0.35*exp(-0.1*tau)))/(1. + 0.9*octaves);
 			shadow = mix(1., scattered, shadowWeight);
 		}
-		singleTransmission += contribution*directTransmission;
+		// Each contributing piece receives its own upper-layer shadow. A shared
+		// centroid can lie in clear air and paint unrelated hard patches on it.
+		highp float upper = otherShadow(start, cloudKey, point.x*cloudPixel)*cirrusShadow(start, cloudKey);
+		singleTransmission += contribution*directTransmission*upper;
+		upperTransmission += contribution*upper;
 		shadow *= upper;
 		// Broad diffuse transport retains depth without tracing each rounded top
 		// onto the base. Direct light is determined by the density light march.
@@ -1444,8 +1470,8 @@ void main(void)
 	// (the edges light up only within some 20 degrees of them: further away the bodies of the clouds outshine them)
 	// The non-key source has no separate light march. Its forward contribution
 	// uses view transmission; the dominant source uses the sampled incoming path.
-	highp vec3 silver = mix(T, singleTransmission, keyIsSun)*silverSun*(0.2775/pow(1.7225 - 1.7*sunCos, 1.5))*smoothstep(0.88, 0.985, sunCos)
-	                  + mix(singleTransmission, T, keyIsSun)*silverMoon*(0.2775/pow(1.7225 - 1.7*moonCos, 1.5))*smoothstep(0.88, 0.985, moonCos);
+	highp vec3 silver = mix(T*upperTransmission, singleTransmission, keyIsSun)*silverSun*(0.2775/pow(1.7225 - 1.7*sunCos, 1.5))*smoothstep(0.88, 0.985, sunCos)
+	                  + mix(singleTransmission, T*upperTransmission, keyIsSun)*silverMoon*(0.2775/pow(1.7225 - 1.7*moonCos, 1.5))*smoothstep(0.88, 0.985, moonCos);
 	// The thin parts send back less light than the body of a cloud, which has more orders of scattering: away from the
 	// light the edges fade into the sky rather than outline the clouds
 	highp float forwardLight = max(smoothstep(0.88, 0.985, sunCos), smoothstep(0.88, 0.985, moonCos));
@@ -1453,7 +1479,7 @@ void main(void)
 	// Keep the partial-transmission edge envelope, but attenuate it by the
 	// incoming path above. Previously shadowed billows could glow as bright
 	// contours solely because their view transmission happened to be near 0.5.
-	light += silver*thin*upper;
+	light += silver*thin;
 
 	// The way through the air dims the cloud and adds the light of the air (Rayleigh phase function)
 	highp vec3 way = exp(-airExtinction*hitT);
