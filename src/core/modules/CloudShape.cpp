@@ -523,18 +523,23 @@ std::array<double, 2> CloudShape::deformation(const std::vector<float>& tile, co
 
 double CloudShape::cirrusDensity(const std::vector<float>& tile, double mapX, double mapY, double cover)
 {
+	if (cover <= 0.) return 0.;
 	// as in the shader of CloudMgr, at the full detail of the tile
+	const auto smooth = [](double a, double b, double x) {
+		const double t = std::clamp((x - a)/(b - a), 0., 1.);
+		return t*t*(3. - 2.*t);
+	};
 	const double x = CirrusAxisCos*mapX - CirrusAxisSin*mapY + CirrusBend*(readTile(tile, mapX/CirrusBendScale + 0.5, mapY/CirrusBendScale + 0.5, 2) - 0.5);
-	const double y = CirrusAxisSin*mapX + CirrusAxisCos*mapY + CirrusBend*(readTile(tile, mapX/CirrusBendScale + 0.25, mapY/CirrusBendScale + 0.25, 2) - 0.5);
+	double y = CirrusAxisSin*mapX + CirrusAxisCos*mapY + CirrusBend*(readTile(tile, mapX/CirrusBendScale + 0.25, mapY/CirrusBendScale + 0.25, 2) - 0.5);
 	const double patch = readTile(tile, mapX/CirrusPatchScale, mapY/CirrusPatchScale, 2);
-	const double area = std::clamp((patch - 0.85 + 0.9*cover)/0.2, 0., 1.);
-	const double offsets[3][2] = {{0., 0.}, {0.37, 0.71}, {0.13, 0.29}};
-	const double weights[3] = {0.5, 0.3, 0.2};
-	double fibres = 0.;
-	for (int i = 0; i < 3; ++i)
-		fibres += weights[i]*readTile(tile, x/CirrusScaleX[i] + offsets[i][0], y/CirrusScaleY[i] + offsets[i][1], 2);
-	const double t = std::clamp((fibres + 0.3*(area - 0.5) - 0.4)/0.28, 0., 1.);
-	return area*t*t*(3. - 2.*t);
+	const double area = smooth(0., 1., (patch - 0.85 + 0.9*cover)/0.2);
+	const double tuft = readTile(tile, x/CirrusScaleX[0], y/CirrusScaleY[0], 2);
+	const double envelope = readTile(tile, x/CirrusScaleX[0] + 0.23, y/CirrusScaleY[0] + 0.61, 2);
+	y += 1.4*(tuft - 0.5);
+	const double strands = readTile(tile, x/CirrusScaleX[1] + 0.37, y/CirrusScaleY[1] + 0.71, 2);
+	const double fine = readTile(tile, x/CirrusScaleX[2] + 0.13, y/CirrusScaleY[2] + 0.29, 2);
+	const double wisps = smooth(0.38, 0.72, 0.7*strands + 0.3*fine);
+	return std::clamp(1.6*area*smooth(0.3, 0.7, envelope)*(0.85*wisps + 0.15*smooth(0.52, 0.8, tuft)), 0., 1.);
 }
 
 double CloudShape::bankMask(const Layer& layer, double x, double y)

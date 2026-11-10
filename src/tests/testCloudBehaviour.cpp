@@ -248,5 +248,28 @@ int main()
 		require(std::abs(a[0]-b[0]) < 3e-6 && std::abs(a[2]-b[2]) < 3e-6, "Coherent fading is discontinuous");
 	}
 
+
+	// Cirrus remain filamentary even at maximum cover; increasing cover cannot
+	// remove an existing wisp. Clear weather must never dim stars or the Sun.
+	int cirrusGaps = 0, cirrusBodies = 0;
+	for (int i = 0; i < 4096; ++i)
+	{
+		const double x = i*1.731 - 3500., y = i*3.719 - 7500.;
+		double previous = 0.;
+		for (double cover : {0., 0.2, 0.4, 0.6, 0.8, 1.})
+		{
+			const double d = CloudShape::cirrusDensity(tile, x, y, cover);
+			require(std::isfinite(d) && d >= previous && d <= 1., "Cirrus coverage is unbounded or non-monotonic");
+			if (cover == 0.) require(d == 0., "Clear cirrus weather attenuates the sky");
+			require(d == CloudShape::cirrusDensity(tile, x, y, cover), "Cirrus replay is not deterministic");
+			previous = d;
+		}
+		cirrusGaps += previous < 0.02;
+		cirrusBodies += previous > 0.3;
+		const double next = CloudShape::cirrusDensity(tile, x + 1e-5, y - 1e-5, 1.);
+		require(std::abs(previous - next) < 0.003, "Cirrus contains a hard spatial seam");
+	}
+	require(cirrusGaps > 100 && cirrusBodies > 100, "Cirrus loses its gaps or its substantial wisps");
+
 	std::puts("Cloud behaviour: continuous motion, deterministic replay, distinct formations, coherent groups, solar response, smooth deformation and transmission PASS");
 }

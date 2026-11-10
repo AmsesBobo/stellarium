@@ -93,15 +93,28 @@ highp float cirrusNoise(highp vec2 uv, highp float lod)
 // CloudShape::cirrusDensity()
 highp float cirrusDensity(highp vec2 map, highp float foot, highp float cover)
 {
+	if (cover <= 0.) return 0.;
 	highp vec2 m = vec2(0.819*map.x - 0.574*map.y, 0.574*map.x + 0.819*map.y);
-	// the fibres bend
-	m += 9.*vec2(cirrusNoise(map/60. + cirrusTexturePhase[0] + 0.5, max(log2(foot*1024./60.), 0.)), cirrusNoise(map/60. + cirrusTexturePhase[0] + 0.25, max(log2(foot*1024./60.), 0.))) - 4.5;
+	// A weak shared bend gives a prevailing direction without combing every
+	// filament into the same large wave. Local tufts steer their own fine fibres.
+	m += 2.4*(vec2(cirrusNoise(map/60. + cirrusTexturePhase[0] + 0.5, max(log2(foot*1024./60.), 0.)),
+	               cirrusNoise(map/60. + cirrusTexturePhase[0] + 0.25, max(log2(foot*1024./60.), 0.))) - 0.5);
 	highp float patch = cirrusNoise(map/190. + cirrusTexturePhase[1], max(log2(foot*1024./190.), 0.));
-	highp float area = clamp((patch - 0.85 + 0.9*cover)/0.2, 0., 1.);
-	highp float fibres = 0.5*cirrusNoise(vec2(m.x/40., m.y/10.) + cirrusTexturePhase[2], max(log2(foot*1024./10.), 0.))
-	                   + 0.3*cirrusNoise(vec2(m.x/12. + 0.37, m.y/3. + 0.71) + cirrusTexturePhase[3], max(log2(foot*1024./3.), 0.))
-	                   + 0.2*cirrusNoise(vec2(m.x/4. + 0.13, m.y/0.9 + 0.29) + cirrusTexturePhase[4], max(log2(foot*1024./0.9), 0.));
-	return area*smoothstep(0.4, 0.68, fibres + 0.3*(area - 0.5));
+	highp float area = smoothstep(0., 1., clamp((patch - 0.85 + 0.9*cover)/0.2, 0., 1.));
+	highp vec2 tuftUV = vec2(m.x/32., m.y/18.) + cirrusTexturePhase[2];
+	highp float tuftLod = max(log2(foot*1024./18.), 0.);
+	highp float tuft = cirrusNoise(tuftUV, tuftLod);
+	// A second envelope breaks long ribbons into unequal, tapering wisps.
+	highp float envelope = cirrusNoise(tuftUV + vec2(0.23, 0.61), tuftLod);
+	m.y += 1.4*(tuft - 0.5);
+	highp float strands = cirrusNoise(vec2(m.x/18. + 0.37, m.y/2.6 + 0.71) + cirrusTexturePhase[3], max(log2(foot*1024./2.6), 0.));
+	highp float fine = cirrusNoise(vec2(m.x/6. + 0.13, m.y/0.55 + 0.29) + cirrusTexturePhase[4], max(log2(foot*1024./0.55), 0.));
+	highp float wisps = smoothstep(0.38, 0.72, 0.7*strands + 0.3*fine);
+	highp float taper = smoothstep(0.3, 0.7, envelope);
+	highp float head = smoothstep(0.52, 0.8, tuft);
+	// Increasing cover adds patches, rather than filling the spaces between
+	// all their fibres with a uniform veil. Density stays in [0,1].
+	return clamp(1.6*area*taper*(0.85*wisps + 0.15*head), 0., 1.);
 }
 )";
 }
