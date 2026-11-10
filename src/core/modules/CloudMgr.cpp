@@ -984,6 +984,16 @@ highp vec2 cloudTileAt(highp vec2 map)
 	return vec2(map.x*cloudShape.x, map.y)*cloudTileScale.x + cloudPhase[0];
 }
 
+// A smooth minimum of two distances to the surface, which rounds the edge where they meet over some k (km). With a plain
+// minimum a cloud was a column with a lid and a flat base with a sharp rim: seen slantwise from below, the rims stood
+// out as bright ovals and contours, most where one cloud stands before another. (k must stay below the thickness of the
+// cloud, or a thin one is eaten away)
+highp float smoothMin(highp float a, highp float b, highp float k)
+{
+	highp float h = max(k - abs(a - b), 0.)/max(k, 1e-5);
+	return min(a, b) - 0.25*h*h*k;
+}
+
 // The integral of the ramp of the density at the edge of a cloud, from 0 below a to 1 above b, up to x
 highp float edgeIntegral(highp float x, highp float a, highp float b)
 {
@@ -1170,7 +1180,7 @@ void main(void)
 					highp vec2 h = cloudHeights(cloudMap(q), weather, lod, near, height);
 					// (the nearest surface: the top, or a side; there the billows bite in, also into the side of a cloud. The underside
 					// stays flat: holes in it would let the low Sun light up round patches)
-					highp float dTop = min(h.x - height, cloudSide(height)), dBase = height - h.y;
+					highp float dTop = smoothMin(h.x - height, cloudSide(height), min(0.3*cloudSize, 0.4*cloudLastHeight)), dBase = height - h.y;
 					// Ragged edges: noise eats into the top and the sides and leaves wisps (where it is finer than a pixel its mean,
 					// nothing). Not into the underside, which the light below must see as it is
 					// (a 3D noise, some 250 m at size 1, for the reason given in cloudHeights())
@@ -1181,9 +1191,10 @@ void main(void)
 						dTop += 0.07*cloudSize*1.76*(textureLod(cloudBillow, c, max(log2(foot*k*96.), 0.)).r - 0.70);
 					}
 					// The billows of the cauliflower top (they only take away: deeper inside, nothing to do)
-					if (dTop > -e && dTop < cloudBillowScale.y)
-						dTop -= billows(cloudMap(q) + weather.drift, height, h.x, foot);
-					highp float d = min(dTop, dBase);
+					// (they fade out deeper inside: cut off at once, they left a hollow shell in the cloud)
+					if (dTop > -e && dTop < 1.5*cloudBillowScale.y)
+						dTop -= (1. - smoothstep(cloudBillowScale.y, 1.5*cloudBillowScale.y, dTop))*billows(cloudMap(q) + weather.drift, height, h.x, foot);
+					highp float d = smoothMin(dTop, dBase, min(0.8*cloudSize, (0.8 + 0.7*(1. - cloudShape.y))*cloudLastHeight));  // (the rim of the flat base rounded, less in thin clouds)
 					// The density grows over the first tens of meters into the cloud (see soft below). Take its mean between this short step and the last, where the distance to
 					// the edge goes from one to the other: a crisp edge that falls between them is neither lost nor shows the steps
 					// How soft the edge is: crisp at the rising tops, softer and a little transparent low on the sides and at
@@ -1302,14 +1313,14 @@ void main(void)
 				highp float height = length(q) - cloudRadii.y;
 				// (the first steps see the fine lobes, so that each billow has a lit side and a shaded one)
 				highp vec2 h = cloudHeights(cloudMap(q), weather, point.w + 0.45*max(float(k) - 1., 0.), k < 4 ? lightNear : 0., height);
-				highp float dLight = min(h.x - height, cloudSide(height));
+				highp float dLight = smoothMin(h.x - height, cloudSide(height), min(0.3*cloudSize, 0.4*cloudLastHeight));
 				// (the billows shade each other)
-				if (k < 4 && dLight < cloudBillowScale.y)
-					dLight -= billows(cloudMap(q) + weather.drift, height, h.x, stepLength);
+				if (k < 4 && dLight < 1.5*cloudBillowScale.y)
+					dLight -= (1. - smoothstep(cloudBillowScale.y, 1.5*cloudBillowScale.y, dLight))*billows(cloudMap(q) + weather.drift, height, h.x, stepLength);
 				// (the base a little lower than for the eye: the samples that make a base visible lie partly in its soft lower
 				// edge, and a low Sun must not reach them by grazing just under the flat base. Not at the sides, though, whose
 				// lowest few tens of meters would then lie in shade as a pale band along the base)
-				dLight = min(dLight, height - h.y + 0.02*smoothstep(0.02, 0.08, dLight));
+				dLight = smoothMin(dLight, height - h.y + 0.02*smoothstep(0.02, 0.08, dLight), min(0.8*cloudSize, (0.8 + 0.7*(1. - cloudShape.y))*cloudLastHeight));
 				// (the mean density from the last step to this one, where the distance to the edge goes from one to the other:
 				// the share of the way that lies in the cloud grows smoothly as the edge moves)
 				highp float la = -0.01, lb = 0.025 + 0.1*stepLength;
