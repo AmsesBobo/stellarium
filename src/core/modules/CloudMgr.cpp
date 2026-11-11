@@ -960,7 +960,7 @@ CloudWeather cloudWeatherAt(highp vec3 p, highp vec2 map, highp vec4 cover, high
 		offset += 2.5*(m - 1.);
 	}
 	highp vec2 uv = map*cloudDeformScale + phases[8] + cloudDeform;
-	highp vec2 drift = 0.3*size*(1. - 0.4*shape.y)*
+	highp vec2 drift = 1.6*size*(1. - 0.4*shape.y)*
 		(vec2(textureLod(cloudTile, uv, 2.).z, textureLod(cloudTile, uv + vec2(0.37, 0.71), 2.).z) - 0.5);
 	// At a low cover the cumulus get fewer and smaller, down to a few percent of the sky, and keep their density: thin,
 	// half transparent clouds let the eye far in and look fibrous. Only the last few dissolve by thinning. Flat layers
@@ -1136,15 +1136,15 @@ highp float cloudDepth(highp vec2 map, highp float z, CloudWeather weather, high
 	highp float cell = 1.;
 	if (alto > 0.)
 	{
-		// (the broad noises of the map shift the cells about, by more than a tile over some km: the tile of the billows
-		// repeats every km or so, and a regular field of cloudlets showed that as rows towards the horizon. The shift
-		// also draws the cells out here and crowds them there, as in a real field)
-		// (a blurred look at them: gently, or the cells smear into streaks)
-		highp vec2 shift = 1.1*textureLod(cloudTile, cloudTileAt(map), max(lod, 5.)).zw;
+		// (the cells are the bodies of the map, at a few times their scale: some 700 irregular ones before they repeat,
+		// every few km. The cells of the billows repeat after 25, every km or so, which showed as straight rows of
+		// cloudlets towards the horizon. Whole multiples of the place on the tile, so that the wind carries them on;
+		// more across than along, against the stretch of the flat layers)
 		highp float thick = clamp(s, 0., 1.);
-		// (cells in two sizes, the small ones on and between the large ones: cloudlets of many sizes and lumpy outlines)
-		highp vec4 cells = textureLod(cloudBillow, vec3(c.xy + shift + vec2(0.13, 0.57), 0.4), noiseLod);
-		cell = smoothstep(0.3 - 0.25*thick, 0.9 - 0.25*thick, 0.62*cells.r + 0.38*cells.g + 0.3*(towers - 0.5));
+		highp float bodies = textureLod(cloudTile, vec2(6., 3.)*cloudTileAt(map) + vec2(0.31, 0.67), lod + 2.).x;
+		// (and small ones on and between them: cloudlets of many sizes and lumpy outlines)
+		highp float small = textureLod(cloudBillow, vec3(c.xy + vec2(0.13, 0.57), 0.4), noiseLod).g;
+		cell = smoothstep(-0.55 - 0.25*thick, 0.3 - 0.25*thick, bodies + 0.3*(small - 0.7) + 0.3*(towers - 0.5));
 		s -= 0.5*alto*(1. - cell);
 		heaped = max(heaped, 0.7*alto);
 	}
