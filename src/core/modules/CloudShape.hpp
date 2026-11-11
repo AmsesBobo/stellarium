@@ -92,7 +92,7 @@ public:
 		double heightScale() const
 		{
 			const double heaped = 1. - flatness;
-			return (1. - 0.75*flatness)*(1. + 0.8*heaped*heaped)*std::pow(std::max(size, 0.05), -0.7*heaped*heaped);
+			return (1. - 0.75*flatness)*(1. + 0.15*heaped*heaped)*std::pow(std::max(size, 0.05), -0.7*heaped*heaped);
 		}
 		//! A bank shares its broad depth; individual seed heights leave only weak relief.
 		double bodyHeight(double seedHeight, double environment) const
@@ -104,6 +104,9 @@ public:
 		double profileFlatness() const {return flatness + 2.*(bodyScale() - 1.)*(0.95 - flatness);}
 		double profileWidth() const {return 0.0625*(1. - 0.84*2.*(bodyScale() - 1.));}
 		double stretch() const {return 1./(1. + 2.*flatness);}
+		//! The size of the tile of the billows (km). The billows of a cumulus are some tens to a few hundred meters across
+		//! whatever the size of the cloud: they grow only weakly with it, or large clouds would be smooth lumps
+		double billowTile() const {return BillowScale*0.61*std::pow(std::max(size, 0.05), 0.4);}
 		//! Broader footprints for stratocumulus without increasing vertical depth.
 		double bodyScale() const
 		{
@@ -166,11 +169,14 @@ public:
 	static std::vector<float> computeTile();
 	//! The billows of the cauliflower tops: a tileable 3D texture of BillowTexels^3 RGBA texels, each channel puffs
 	//! (balls around random points, highest at their centers: an inverted Worley noise), red with BillowCellsCoarse
-	//! cells across the tile, green with BillowCellsFine, blue with BillowCellsFiner. The shader eats them into the surface of the clouds above
-	//! their flat bases, so that each billow has its lit side and its shaded underside
+	//! cells across the tile, green with BillowCellsFine, blue with BillowCellsFiner; alpha holds broad, smooth lumps (a
+	//! Perlin-Worley noise with BillowCellsLumps cells). The shader takes them away from the density of the clouds above
+	//! their flat bases: what is left are the billows, each with its lit side and its shaded underside
 	static constexpr int BillowTexels = 96;
 	static constexpr int BillowCellsCoarse = 5, BillowCellsFine = 11, BillowCellsFiner = 23;
-	static constexpr double BillowScale = 1.8;   //!< km per tile, for clouds of size 1
+	static constexpr int BillowCellsLumps = 3;   //!< the cells of the broad lumps of the alpha channel
+	static constexpr double BillowScale = 1.8;   //!< km per tile, for clouds of size 1 (see Layer::billowTile())
+	static constexpr double BillowRise = 0.0012; //!< km/s: how fast the billows rise through a cloud
 	static constexpr double BillowDepth = 0.3;   //!< how deep the billows eat into the clouds, for clouds of size 1 (km)
 	static std::vector<unsigned char> computeBillows();
 
@@ -181,6 +187,7 @@ public:
 	static constexpr double GrowStrength = 0.75;
 	static constexpr double DeformScale = 37.;   //!< km per tile: slow, broad deformation
 	static constexpr double GroupScale = 61.;    //!< km per tile: groups several cloud bodies across
+	static constexpr double CumulusGroupScale = 23.; //!< the same for heaped cumulus: groups some 2 to 5 km across
 	//! Inverse group scales (1/km), coverage contrast and strength of broken bands.
 	//! Continuous in height and flatness, including custom cloud settings.
 	static std::array<double, 4> formationParameters(const Layer& layer);

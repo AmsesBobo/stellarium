@@ -305,12 +305,37 @@ std::vector<unsigned char> CloudShape::computeBillows()
 		// a ball of radius 0.85 cells around each point: its height over the surface
 		return std::pow(std::clamp(1. - nearest/0.72, 0., 1.), 0.7);
 	};
+	// A smooth gradient noise (Perlin's) that repeats over the tile, from about -1 to 1
+	const auto gradientNoise = [&point](double x, double y, double z, int cells, int seed) {
+		const double u = x*cells, v = y*cells, w = z*cells;
+		const int i0 = static_cast<int>(std::floor(u)), j0 = static_cast<int>(std::floor(v)), k0 = static_cast<int>(std::floor(w));
+		const double fu = u - i0, fv = v - j0, fw = w - k0;
+		const auto fade = [](double t) {return t*t*t*(t*(t*6. - 15.) + 10.);};
+		const double a = fade(fu), b = fade(fv), c = fade(fw);
+		double sum = 0.;
+		for (int i = 0; i <= 1; ++i)
+			for (int j = 0; j <= 1; ++j)
+				for (int k = 0; k <= 1; ++k)
+				{
+					// (the random point of the cell, from 0.1 to 0.9, as a gradient)
+					const auto p = point(i0 + i, j0 + j, k0 + k, cells, seed);
+					const double dot = (p[0] - 0.5)*(fu - i) + (p[1] - 0.5)*(fv - j) + (p[2] - 0.5)*(fw - k);
+					sum += (i ? a : 1. - a)*(j ? b : 1. - b)*(k ? c : 1. - c)*dot;
+				}
+		return 3.6*sum;
+	};
 	for (int z = 0; z < n; ++z)
 		for (int y = 0; y < n; ++y)
 			for (int x = 0; x < n; ++x)
 			{
 				const double u = (x + 0.5)/n, v = (y + 0.5)/n, w = (z + 0.5)/n;
 				unsigned char* t = &texels[((static_cast<std::size_t>(z)*n + y)*n + x)*4];
+				// The broad lumps: a smooth noise in three sizes, made billowy by large puffs (a Perlin-Worley noise, as
+				// in Schneider's clouds of Horizon Zero Dawn), from 0 to 1 with a mean near 0.5
+				const double smoothLumps = 0.55*gradientNoise(u, v, w, BillowCellsLumps, 5) + 0.3*gradientNoise(u, v, w, 2*BillowCellsLumps, 6)
+				                         + 0.15*gradientNoise(u, v, w, 4*BillowCellsLumps, 7);
+				const double lumps = 0.5 + 0.5*smoothLumps + 0.45*(puffs(u, v, w, BillowCellsLumps, 4) - 0.62);
+				t[3] = static_cast<unsigned char>(std::lround(255.*std::clamp(lumps, 0., 1.)));
 				t[0] = static_cast<unsigned char>(std::lround(255.*puffs(u, v, w, BillowCellsCoarse, 1)));
 				t[1] = static_cast<unsigned char>(std::lround(255.*puffs(u, v, w, BillowCellsFine, 2)));
 				t[2] = static_cast<unsigned char>(std::lround(255.*puffs(u, v, w, BillowCellsFiner, 3)));
@@ -476,13 +501,17 @@ std::array<double, 4> CloudShape::formationParameters(const Layer& layer)
 	// patches with a weak band structure. Blend rather than switching at a preset.
 	const double alto = smooth(2., 3.5, layer.base)*smooth(0.3, 0.6, layer.flatness);
 	const double stratiform = smooth(0.15, 0.35, layer.flatness)*(1. - smooth(0.45, 0.6, layer.flatness));
-	const double lowX = GroupScale*(1. + 2.*layer.flatness);
-	const double lowY = GroupScale*(1. + 0.5*layer.flatness);
+	// Heaped cumulus stand in groups a few km across, with open sky between them: from below one sees a few
+	// large clouds, many small ones and gaps, not an even field. Flat layers keep their broad banks.
+	const double heaped = 1. - smooth(0.1, 0.35, layer.flatness);
+	const double group = GroupScale + heaped*(CumulusGroupScale - GroupScale);
+	const double lowX = group*(1. + 2.*layer.flatness);
+	const double lowY = group*(1. + 0.5*layer.flatness);
 	return {1./(lowX + alto*(32. - lowX)), 1./(lowY + alto*(18. - lowY)),
 	        // A little more contrast between low-cloud banks and their clear gaps.
 	        // Keep the altocumulus formation parameters exactly as before.
 	        0.95 - 0.45*std::clamp(layer.flatness/0.6, 0., 1.) + 0.25*alto
-	        + 0.25*(1. - smooth(0.4, 0.6, layer.flatness)), 0.28*alto + 0.16*stratiform};
+	        + 0.25*(1. - smooth(0.4, 0.6, layer.flatness)) + 0.6*heaped, 0.28*alto + 0.16*stratiform};
 }
 
 std::array<double, 3> CloudShape::development(const std::vector<float>& tile, const Layer& layer,
