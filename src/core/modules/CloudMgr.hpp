@@ -248,6 +248,7 @@ private:
 	//! The layer i as it is drawn at this moment
 	CloudShape::Layer currentLayer(int i) const;
 	bool flagHalfResolution = true;
+	int lowResDivisor = 2;  //!< by how much the low resolution is lower than that of the screen, along each side: 2 to 4
 	QString weatherInfo;
 	double currentCovers[LayerCount] = {0.2, 0.2};  //!< the cover at this moment, over the observer
 	CloudShape::Front fronts[LayerCount];           //!< the fronts of the layers, if the date sets the cover

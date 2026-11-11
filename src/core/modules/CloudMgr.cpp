@@ -251,6 +251,8 @@ void CloudMgr::init()
 	}
 	edited = 0;
 	setFlagHalfResolution(conf->value("clouds/flag_half_resolution", true).toBool());
+	// (no setting in the dialog yet: 2, 3 or 4 in the configuration file)
+	lowResDivisor = std::clamp(conf->value("clouds/low_resolution_divisor", 2).toInt(), 2, 4);
 	setFlagCirrus(conf->value("clouds/flag_cirrus", false).toBool());
 	setFlagManualWind(conf->value("clouds/flag_manual_wind", false).toBool());
 	setCirrusCover(conf->value("clouds/cirrus_cover", 0.4).toDouble());
@@ -737,7 +739,7 @@ void CloudMgr::bindTileTexture(int unit)
 			tile = CloudShape::computeTile();
 		gl.glGenTextures(1, &tileTexture);
 		gl.glBindTexture(GL_TEXTURE_2D, tileTexture);
-		gl.glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, CloudShape::TileTexels, CloudShape::TileTexels, 0, GL_RGBA, GL_FLOAT, tile.data());
+		gl.glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, CloudShape::TileTexels, CloudShape::TileTexels, 0, GL_RGBA, GL_FLOAT, tile.data());
 		gl.glGenerateMipmap(GL_TEXTURE_2D);
 		gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
 		gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -1264,8 +1266,10 @@ void main(void)
 		highp float when = (float(moment) + jitter)/float(samples) - 0.5;
 		cloudMoment = cloudSmear*when;
 		highp float depth = 0.;
-		CloudWeather lastWeather = CloudWeather(vec3(0.), vec2(0.));
+		CloudWeather weatherFrom = CloudWeather(vec3(0.), vec2(0.)), weatherTo = CloudWeather(vec3(0.), vec2(0.));
+		int stride = int(clamp(floor(0.5/ds), 1., 4.)), phase = 0;
 		highp float lastD = -10., lastU = -1e9;  // the depth in the cloud at the last short step, and where that was
+		highp float lastSeen = -1.;              // the cloud on the way of the light at the last place that looked for it (km)
 		// Through the layer, until the clouds are opaque. Long steps look for clouds, short ones go through them
 		for (int k = 0; k < steps && depth < 7.; ++k)
 		{
@@ -1274,11 +1278,19 @@ void main(void)
 			highp vec2 middleMap = cloudMap(middle);
 			// A blurred look at the map tells whether a cloud may lie in this step, and how high it may reach
 			// (the weather of the end of this step, against the one at its start: the clouds must not jump between steps)
-			CloudWeather weatherEnd = cloudWeather(vec3(altAz.xy*(t + ds), r0 + altAz.z*(t + ds)));
-			CloudWeather weatherStart = lastWeather;
+			// (the weather changes over a km or more: it is looked up every half km or so of the way, and goes evenly in
+			// between. Looked up at every step, it cost more than the clouds themselves towards the horizon)
 			if (k == 0)
-				weatherStart = cloudWeather(vec3(altAz.xy*t, r0 + altAz.z*t));
-			lastWeather = weatherEnd;
+				weatherTo = cloudWeather(vec3(altAz.xy*t, r0 + altAz.z*t));
+			if (phase == 0)
+			{
+				weatherFrom = weatherTo;
+				highp float ahead = t + float(stride)*ds;
+				weatherTo = cloudWeather(vec3(altAz.xy*ahead, r0 + altAz.z*ahead));
+			}
+			CloudWeather weatherStart = mixWeather(weatherFrom, weatherTo, float(phase)/float(stride));
+			CloudWeather weatherEnd = mixWeather(weatherFrom, weatherTo, float(phase + 1)/float(stride));
+			phase = phase + 1 == stride ? 0 : phase + 1;
 			highp vec2 lookAt = cloudTileAt(middleMap + 0.5*(weatherStart.drift + weatherEnd.drift));
 			highp vec4 blurred = textureLod(cloudTile, lookAt, look);
 			// (and a wider look, for what lies a little beyond: a step that skips a cloud cuts it)
@@ -1294,6 +1306,21 @@ void main(void)
 			highp float lod = max(log2(foot/cloudCover.z), 0.);
 			// (far away, where a pixel is wider than a billow, the light comes without a way of its own through the cloud)
 			highp float marched = keyUp*(1. - smoothstep(0.15, 0.3, t*cloudPixel));
+			// A second, closer look before the short steps: a few places along this step, with the map a little blurred.
+			// Most of the steps that pass the first look hold no cloud after all, and the short steps through them cost
+			// more than those through the clouds
+			int probes = int(clamp(ceil(ds/0.04), 3., 6.));
+			bool found = false;
+			for (int i = 0; i < probes && !found; ++i)
+			{
+				highp float u = t + (float(i) + 0.5)*ds/float(probes);
+				CloudWeather weather = mixWeather(weatherStart, weatherEnd, (float(i) + 0.5)/float(probes));
+				highp vec4 f = cloudBodySample(textureLod(cloudTile, cloudTileAt(cloudMap(vec3(altAz.xy*u, r0 + altAz.z*u)) + weather.drift), lod + 2.),
+				                               cloudShape.y, cloudRadii.y - cloudRadii.x);
+				found = f.x + weather.growth.x > -0.45;
+			}
+			if (!found)
+				continue;
 			highp float dt = ds/float(CloudSubsteps);
 			for (int j = 0; j < CloudSubsteps && depth < 7.; ++j)
 			{
@@ -1317,7 +1344,9 @@ void main(void)
 				// for all of it the light jumped as the part moved through the surface from pixel to pixel, which drew fine
 				// stripes across the cloud. Each part takes the mean density along it, and the light of the middle of what
 				// lies in the cloud of it, which moves evenly with the edge. Then the steps need no grain to hide them
-				int parts = follows && depth < 4. ? 2 : 1;
+				// (in one part: the short steps are fine enough since there are 12 of them. More parts near the surface, each
+				// with a light of its own, cost much and showed no difference)
+				int parts = 1;
 				for (int part = 0; part < parts && depth < 7.; ++part)
 				{
 					highp float da = mix(d0, d, float(part)/float(parts)), db = mix(d0, d, float(part + 1)/float(parts));
@@ -1338,15 +1367,23 @@ void main(void)
 					// (the steps lie at the same places for every pixel: steps that differ from pixel to pixel make grain)
 					highp float above = max(top - heightHere, 0.);
 					highp float seen = 0.6*above;
-					if (marched > 0.)
+					// (the way of the light costs most of the time of the clouds. It is left out where it shows least: for the
+					// thin shreds around a cloud, which are lit all through, and deep in the cloud, behind what hides it
+					// almost wholly, where the last light found goes on)
+					bool deep = depth > 3.4 && lastSeen >= 0.;
+					if (deep)
+						seen = lastSeen;
+					else if (opticalDepth < 0.02)
+						seen = 0.;
+					else if (marched > 0.)
 					{
 						highp float way = 0., stepLength = 0.035*cloudSize + 0.5*foot;
 						highp float lastLight = dHere;
 						seen = 0.;
-						for (int l = 0; l < 6; ++l)
+						for (int l = 0; l < 4; ++l)
 						{
 							highp vec3 g = here + (way + stepLength)*cloudKey;
-							highp float dLight = cloudDepth(cloudMap(g), length(g) - cloudRadii.y, weather, lod + 0.5*float(l), foot + 0.3*stepLength, false);
+							highp float dLight = cloudDepth(cloudMap(g), length(g) - cloudRadii.y, weather, lod + 0.8*float(l), foot + 0.3*stepLength, false);
 							// (the light sees a softer cloud, the softer the longer its step: with the mean density between its
 							// places the shade then changes smoothly from place to place, where single looks at a crisp cloud drew
 							// the outline of the cloud into its shade six times over, as contours)
@@ -1354,10 +1391,12 @@ void main(void)
 							seen += stepLength*edgeMean(lastLight, dLight, -0.25*width, 0.75*width);
 							lastLight = dLight;
 							way += stepLength;
-							stepLength *= 1.6;
+							stepLength *= 2.3;
 						}
 						seen = mix(0.6*above, seen, marched);
 					}
+					if (!deep && opticalDepth >= 0.02)
+						lastSeen = seen;
 					// The light of the Sun or the Moon in the cloud, in two parts that add up to no more than what falls on it:
 					// droplets of water take no light away, they only send it on, and mostly forwards.
 					// First the beam and the first few scatterings, which still know where the light came from: in octaves
@@ -1830,7 +1869,7 @@ void CloudMgr::drawLayer(StelCore* core, const StelProjector& prj, int i, int ot
 	const double base = EarthRadius + layer.base, top = base + CloudShape::LayerThickness*layer.size*layer.heightScale();
 	p.setUniformValue("cloudRadii", QVector4D(static_cast<float>(r0), static_cast<float>(base), static_cast<float>((base - r0)*(base + r0)),
 	                                          static_cast<float>((top - r0)*(top + r0))));
-	p.setUniformValue("cloudPixel", static_cast<float>((flagHalfResolution ? 2. : 1.)/static_cast<double>(prj.getPixelPerRadAtCenter())));
+	p.setUniformValue("cloudPixel", static_cast<float>((flagHalfResolution ? static_cast<double>(lowResDivisor) : 1.)/static_cast<double>(prj.getPixelPerRadAtCenter())));
 	bindTileTexture(2);
 	p.setUniformValue("cloudTile", 2);
 	bindBillowTexture(3);
@@ -2141,7 +2180,7 @@ void main()
 	gl.glGetIntegerv(GL_FRAMEBUFFER_BINDING, &previousBuffer);
 	GLint viewport[4];
 	gl.glGetIntegerv(GL_VIEWPORT, viewport);
-	const QSize size(std::max(1, (viewport[2] + 1)/2), std::max(1, (viewport[3] + 1)/2));
+	const QSize size(std::max(1, (viewport[2] + lowResDivisor - 1)/lowResDivisor), std::max(1, (viewport[3] + lowResDivisor - 1)/lowResDivisor));
 	if (!lowResBuffer || lowResBuffer->size() != size)
 	{
 		QOpenGLFramebufferObjectFormat format;
