@@ -1115,6 +1115,12 @@ highp float cloudDepth(highp vec2 map, highp float z, CloudWeather weather, high
 	// (the places in the tile of the billows are whole multiples of c only: the wind carries c on by whole tiles)
 	highp float towers = textureLod(cloudBillow, vec3(c.xy + vec2(0.37, 0.11), 0.21), noiseLod).a;
 	s += heaped*(0.16*(towers - 0.5) + 0.06);
+	// The rim of a cloud is torn: bays, tongues and shreds of some tens to a few hundred meters, different at each
+	// height, where the dry air mixes in. The billows move the outline in and out, only near it: the middle of the cloud
+	// keeps its thickness
+	highp vec4 n = textureLod(cloudBillow, c, noiseLod);
+	highp float rim = 1. - smoothstep(0.08, 0.5, s);
+	s += heaped*rim*(0.2*(n.r - 0.7) + 0.22*(n.g - 0.7) + 0.32*(n.a - 0.5));
 	// (between the rolls the layer thins out and breaks up)
 	s -= 0.1*rolls*smoothstep(0.62, 0.3, towers);
 	highp float height = cloudSize*cloudShape.w*f.y*weather.growth.y;
@@ -1129,8 +1135,7 @@ highp float cloudDepth(highp vec2 map, highp float z, CloudWeather weather, high
 	highp float upper = min((top - z)/(0.75*max(top, 0.) + 0.03*cloudSize), 1.);
 	highp float cover = min(lower, upper);
 	if (cover > 0.)
-		cover = lower*upper*mix(1., clamp((s + 0.05)/0.25, 0., 1.), 0.7);
-	highp vec4 n = textureLod(cloudBillow, c, noiseLod);
+		cover = lower*upper*mix(1., clamp((s + 0.05)/0.35, 0., 1.), 0.85);
 	highp float billow = smoothstep(0.4, 0.9, 0.27*n.a + 0.45*n.r + 0.28*n.g);
 	highp float erosion = mix(0.5, 0.85, heaped);
 	highp float d = cover - erosion*(1. - billow);
@@ -1140,8 +1145,8 @@ highp float cloudDepth(highp vec2 map, highp float z, CloudWeather weather, high
 	{
 		highp vec4 m = textureLod(cloudBillow, 3.*c + vec3(0.43, 0.17, 0.71), noiseLod + 0.6);
 		highp float shown = 1. - smoothstep(1.5, 2.5, noiseLod);
-		cloudVeilHere = 0.07*heaped*shown*smoothstep(-0.3, 0., d)*smoothstep(0.6, 0.95, m.b)*smoothstep(0.35, 0.75, n.a);
-		d -= 0.34*(1. - (0.6*m.r + 0.4*m.g))*shown;
+		cloudVeilHere = 0.1*heaped*shown*smoothstep(-0.3, 0., d)*smoothstep(0.6, 0.95, m.b)*smoothstep(0.35, 0.75, n.a);
+		d -= mix(0.34, 0.5, rim)*(1. - (0.6*m.r + 0.4*m.g))*shown;
 	}
 	// (soft edges; a little softer low on the sides of a heaped cloud than at its rising top)
 	cloudSoftHere = mix(0.24, 0.07, (1. - flatness)*smoothstep(0.15, 0.6, z/max(top, 0.01)));
