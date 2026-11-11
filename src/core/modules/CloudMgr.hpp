@@ -79,7 +79,7 @@ class CloudMgr : public StelModule
 	Q_PROPERTY(double bankDistance READ getBankDistance WRITE setBankDistance NOTIFY bankDistanceChanged)
 	//! The depth of the bank away from the observer (km)
 	Q_PROPERTY(double bankDepth READ getBankDepth WRITE setBankDepth NOTIFY bankDepthChanged)
-	//! The type of the clouds: 0 custom, 1 cumulus, 2 stratocumulus, 3 altocumulus. A type sets the base, size, density,
+	//! The type of the clouds: 0 custom, 1 cumulus, 2 stratocumulus, 3 altocumulus, 4 altocumulus floccus. A type sets the base, size, density,
 	//! flatness and cover; any change of the first four of them makes the type custom again
 	Q_PROPERTY(int type READ getType WRITE setType NOTIFY typeChanged)
 	//! Let the clouds only stand in a bank: a sector of the sky at a distance, for the clouds of a photograph
@@ -129,7 +129,7 @@ public:
 	double getBankDepth() const {return layers[edited].bankDepth;}
 	bool getFlagBank() const {return layers[edited].bank;}
 	int getType() const;
-	static constexpr int TypeCustom = 0, TypeCumulus = 1, TypeStratocumulus = 2, TypeAltocumulus = 3;
+	static constexpr int TypeCustom = 0, TypeCumulus = 1, TypeStratocumulus = 2, TypeAltocumulus = 3, TypeFloccus = 4;
 	bool getFlagHalfResolution() const {return flagHalfResolution;}
 	bool getFlagCirrus() const {return flagCirrus;}
 	bool getFlagManualWind() const {return flagManualWind;}

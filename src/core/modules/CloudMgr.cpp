@@ -486,14 +486,15 @@ struct CloudType
 constexpr CloudType CloudTypes[] = {
 	{1.2, 0.45, 1., 0., 0.25},   // cumulus humilis: fair weather heaps, white in the sunlight, most well under 1 km across
 	{1.0, 1.2, 0.9, 0.4, 0.6},   // stratocumulus: large flat masses close together, grey below
-	{3.5, 0.4, 0.6, 0.6, 0.55},  // altocumulus: small, thin flat elements higher up
+	{3.5, 0.4, 0.3, 0.6, 0.4},   // altocumulus: sheets of small, thin cloudlets higher up, with open sky between the sheets
+	{3.5, 0.7, 0.35, 0.1, 0.15}, // altocumulus floccus: a few ragged, fuzzy tufts higher up
 };
 }
 
 int CloudMgr::getType() const
 {
 	const auto near = [](double a, double b) {return std::fabs(a - b) < 0.005;};
-	for (int i = 0; i < 3; ++i)
+	for (int i = 0; i < 4; ++i)
 	{
 		const CloudType& t = CloudTypes[i];
 		if (near(layers[edited].base, t.base) && near(layers[edited].size, t.size) && near(layers[edited].density, t.density) && near(layers[edited].flatness, t.flatness))
@@ -504,7 +505,7 @@ int CloudMgr::getType() const
 
 void CloudMgr::setType(int type)
 {
-	if (type < TypeCumulus || type > TypeAltocumulus || type == getType())
+	if (type < TypeCumulus || type > TypeFloccus || type == getType())
 		return;
 	const CloudType& t = CloudTypes[type - 1];
 	setBaseHeight(t.base);
@@ -983,8 +984,17 @@ CloudWeather cloudWeather(highp vec3 p)
 
 // The bank skeleton shares the texture with the other shapes, but excludes
 // independent cloudlets. Broad depth follows the bank, not each ellipsoidal seed.
-highp vec4 cloudBodySample(highp vec4 f, highp float flatness)
+// How much a layer is altocumulus, from the height of its base over the ground (km) and its flatness (as in
+// CloudShape::formationParameters())
+highp float cloudAlto(highp float base, highp float flatness)
 {
+	return smoothstep(2., 3.5, base)*smoothstep(0.3, 0.6, flatness);
+}
+
+highp vec4 cloudBodySample(highp vec4 f, highp float flatness, highp float base)
+{
+	// (altocumulus is a sheet some km across, which the weather alone lays out; the shader breaks it up in cloudlets)
+	f.x = mix(f.x, 0.6, cloudAlto(base, flatness));
 	highp float bank = smoothstep(0.15, 0.35, flatness)*(1. - smoothstep(0.45, 0.6, flatness));
 	// (only partly the continuous bank, CloudShape::BankShare: the masses of a stratocumulus keep outlines and gaps of their own)
 	f.x = mix(f.x, f.w, 0.4*bank);
@@ -1036,7 +1046,7 @@ highp float otherShadow(highp vec3 p, highp vec3 key, highp float foot)
 	{
 		highp vec2 offset = tap == 0 ? vec2(0.) : tap == 1 ? axis*along : tap == 2 ? -axis*along : tap == 3 ? across : -across;
 		highp vec2 uv = map + weather.drift + radius*offset;
-		highp vec4 f = cloudBodySample(textureLod(cloudTile, vec2(uv.x*otherShape.x, uv.y)*otherRadius.z + otherPhase[0], lod), otherShape.y);
+		highp vec4 f = cloudBodySample(textureLod(cloudTile, vec2(uv.x*otherShape.x, uv.y)*otherRadius.z + otherPhase[0], lod), otherShape.y, otherRadius.x - cloudRadii.x);
 		highp float s = f.x + weather.growth.x;
 		highp float height = otherRadius.y*otherShape.w*f.y*weather.growth.y;
 		highp float round = s/pow(abs(s) + 0.01, 0.55);
@@ -1092,7 +1102,7 @@ highp float edgeMean(highp float d0, highp float d1, highp float a, highp float 
 highp float cloudDepth(highp vec2 map, highp float z, CloudWeather weather, highp float lod, highp float foot, bool fine)
 {
 	map += weather.drift;
-	highp vec4 f = cloudBodySample(textureLod(cloudTile, cloudTileAt(map), lod), cloudShape.y);
+	highp vec4 f = cloudBodySample(textureLod(cloudTile, cloudTileAt(map), lod), cloudShape.y, cloudRadii.y - cloudRadii.x);
 	highp float s = f.x + weather.growth.x;
 	cloudTopHere = 0.;
 	cloudVeilHere = 0.;
@@ -1115,28 +1125,52 @@ highp float cloudDepth(highp vec2 map, highp float z, CloudWeather weather, high
 	// (the places in the tile of the billows are whole multiples of c only: the wind carries c on by whole tiles)
 	highp float towers = textureLod(cloudBillow, vec3(c.xy + vec2(0.37, 0.11), 0.21), noiseLod).a;
 	s += heaped*(0.16*(towers - 0.5) + 0.06);
+	// Altocumulus: a sheet that has broken up into small rounded cloudlets, side by side like the cells of a honeycomb,
+	// with lanes of sky between them (each cell is a small overturning of the air: it rises and condenses in the middle
+	// and sinks, clear, around it). The cells are those of the coarse billows, on one level: where the sheet is thick
+	// they touch and only thin lanes are left, towards its rim they stand apart and get smaller
+	highp float alto = cloudAlto(cloudRadii.y - cloudRadii.x, cloudShape.y);
+	// Floccus: heaped clouds at the level of altocumulus. No rising air from the ground feeds them through a flat base:
+	// they are tufts, ragged below and fuzzy all around, which dissolve into shreds
+	highp float floccus = smoothstep(2., 3.5, cloudRadii.y - cloudRadii.x)*(1. - smoothstep(0.1, 0.3, cloudShape.y));
+	highp float cell = 1.;
+	if (alto > 0.)
+	{
+		// (the broad noises of the map shift the cells about, by more than a tile over some km: the tile of the billows
+		// repeats every km or so, and a regular field of cloudlets showed that as rows towards the horizon. The shift
+		// also draws the cells out here and crowds them there, as in a real field)
+		// (a blurred look at them: gently, or the cells smear into streaks)
+		highp vec2 shift = 1.1*textureLod(cloudTile, cloudTileAt(map), max(lod, 5.)).zw;
+		highp float thick = clamp(s, 0., 1.);
+		// (cells in two sizes, the small ones on and between the large ones: cloudlets of many sizes and lumpy outlines)
+		highp vec4 cells = textureLod(cloudBillow, vec3(c.xy + shift + vec2(0.13, 0.57), 0.4), noiseLod);
+		cell = smoothstep(0.3 - 0.25*thick, 0.9 - 0.25*thick, 0.62*cells.r + 0.38*cells.g + 0.3*(towers - 0.5));
+		s -= 0.5*alto*(1. - cell);
+		heaped = max(heaped, 0.7*alto);
+	}
 	// The rim of a cloud is torn: bays, tongues and shreds of some tens to a few hundred meters, different at each
 	// height, where the dry air mixes in. The billows move the outline in and out, only near it: the middle of the cloud
 	// keeps its thickness
 	highp vec4 n = textureLod(cloudBillow, c, noiseLod);
 	highp float rim = 1. - smoothstep(0.08, 0.5, s);
-	s += heaped*rim*(0.2*(n.r - 0.7) + 0.22*(n.b - 0.58) + 0.32*(n.a - 0.5));
+	s += heaped*rim*(0.2*(1. - floccus)*(n.r - 0.7) + 0.22*(n.b - 0.58) + 0.32*(n.a - 0.5));
 	// (between the rolls the layer thins out and breaks up)
 	s -= 0.1*rolls*smoothstep(0.62, 0.3, towers);
 	highp float height = cloudSize*cloudShape.w*f.y*weather.growth.y;
 	highp float round = s/pow(abs(s) + 0.01, 0.55);
 	highp float plateau = 0.8*s/sqrt(s*s + cloudPlateauWidth(cloudShape.y));
-	highp float top = height*mix(round, plateau, flatness)*(1. + 0.9*lumps*(towers - 0.5));
+	highp float top = height*mix(round, plateau, flatness)*(1. + 0.9*lumps*(towers - 0.5))*mix(1., 0.12 + 1.2*cell*cell, alto);
 	cloudTopHere = max(top, 0.);
 	// How much of the noise stands: all of it in the middle of the cloud, less towards the top (over the upper part of
 	// the cloud: a dome) and nothing at the level of the base, which is flat and sets in within a few meters
 	// (below 0 under the base, above the top and outside the cloud, so that the depth is continuous)
-	highp float lower = min(z/(0.008 + 0.022*cloudSize), 1.);
+	highp float lower = min(z/(0.008 + 0.022*cloudSize + 0.5*floccus*max(top, 0.)), 1.);
 	highp float upper = min((top - z)/(0.75*max(top, 0.) + 0.03*cloudSize), 1.);
 	highp float cover = min(lower, upper);
 	if (cover > 0.)
 		cover = lower*upper*mix(1., clamp((s + 0.05)/0.35, 0., 1.), 0.85);
-	highp float billow = smoothstep(0.4, 0.9, 0.27*n.a + 0.45*n.r + 0.28*n.g);
+	// (the tufts of floccus are woolly, not bubbly: broad lumps and threads in place of the balls)
+	highp float billow = smoothstep(0.4, 0.9, mix(0.27*n.a + 0.45*n.r + 0.28*n.g, 0.62*n.a + 0.3*n.b + 0.08*n.r + 0.07, floccus));
 	highp float erosion = mix(0.5, 0.85, heaped);
 	highp float d = cover - erosion*(1. - billow);
 	// (the finest billows, only where the edge is, and only where a pixel shows them)
@@ -1146,11 +1180,12 @@ highp float cloudDepth(highp vec2 map, highp float z, CloudWeather weather, high
 	{
 		highp vec4 m = textureLod(cloudBillow, 3.*c + vec3(0.43, 0.17, 0.71), noiseLod + 0.6);
 		highp float shown = 1. - smoothstep(1.5, 2.5, noiseLod);
-		cloudVeilHere = 0.1*heaped*shown*smoothstep(-0.3, 0., d)*smoothstep(0.62, 0.92, 0.6*n.b + 0.4*m.b)*smoothstep(0.35, 0.75, n.a);
-		d -= mix(0.34, 0.5, rim)*(1. - (0.6*m.r + 0.4*m.g))*shown;
+		cloudVeilHere = (0.1 + 0.2*floccus)*heaped*shown*smoothstep(-0.3, 0., d)*smoothstep(0.62, 0.92, 0.6*n.b + 0.4*m.b)*smoothstep(0.35, 0.75, n.a);
+		d -= mix(0.34, 0.5, rim)*(1. - 0.75*floccus)*(1. - (0.6*m.r + 0.4*m.g))*shown;
 	}
 	// (soft edges; a little softer low on the sides of a heaped cloud than at its rising top)
-	cloudSoftHere = mix(0.24, 0.07, (1. - flatness)*smoothstep(0.15, 0.6, z/max(top, 0.01)));
+	// (cloudlets of altocumulus and tufts of floccus are fuzzy all around)
+	cloudSoftHere = mix(mix(0.24, 0.07, (1. - flatness)*smoothstep(0.15, 0.6, z/max(top, 0.01))), mix(0.34, 0.55, floccus), max(0.8*alto, floccus));
 	return d;
 }
 
@@ -1246,7 +1281,7 @@ void main(void)
 			highp vec2 lookAt = cloudTileAt(middleMap + 0.5*(weatherStart.drift + weatherEnd.drift));
 			highp vec4 blurred = textureLod(cloudTile, lookAt, look);
 			// (and a wider look, for what lies a little beyond: a step that skips a cloud cuts it)
-			blurred = cloudBodySample(max(blurred, textureLod(cloudTile, lookAt, look + 1.5)), cloudShape.y);
+			blurred = cloudBodySample(max(blurred, textureLod(cloudTile, lookAt, look + 1.5)), cloudShape.y, cloudRadii.y - cloudRadii.x);
 			highp float shape = blurred.x + 0.5*(weatherStart.growth.x + weatherEnd.growth.x);
 			// (the towers reach up to 1.6 times the height of the map)
 			highp float reach = 1.6*cloudSize*cloudShape.w*(blurred.y*pow(max(shape + 0.5, 0.), 0.7) + 0.1);

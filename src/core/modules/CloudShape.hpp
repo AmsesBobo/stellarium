@@ -106,7 +106,12 @@ public:
 		double stretch() const {return 1./(1. + 2.*flatness);}
 		//! The size of the tile of the billows (km). The billows of a cumulus are some tens to a few hundred meters across
 		//! whatever the size of the cloud: they grow only weakly with it, or large clouds would be smooth lumps
-		double billowTile() const {return BillowScale*0.61*std::pow(std::max(size, 0.05), 0.4);}
+		//! (the coarse billows are the cloudlets of altocumulus, which are broader: some 250 m)
+		double billowTile() const
+		{
+			const double alto = std::clamp((base - 2.)/1.5, 0., 1.)*std::clamp((flatness - 0.3)/0.3, 0., 1.);
+			return BillowScale*0.61*std::pow(std::max(size, 0.05), 0.4)*(1. + 0.6*alto);
+		}
 		//! Broader footprints for stratocumulus without increasing vertical depth.
 		double bodyScale() const
 		{
