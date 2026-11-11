@@ -187,6 +187,10 @@ public:
 	static constexpr double GrowStrength = 0.75;
 	static constexpr double DeformScale = 37.;   //!< km per tile: slow, broad deformation
 	static constexpr double GroupScale = 61.;    //!< km per tile: groups several cloud bodies across
+	//! How much of the outline of a stratocumulus comes from the continuous bank (channel 3 of the tile), the rest from
+	//! the bodies (channel 0): with all of it the layer is one carpet, with part of it broad masses with gaps between them.
+	//! The same number stands in cloudBodySample() of the shader of CloudMgr
+	static constexpr double BankShare = 0.4;
 	static constexpr double CumulusGroupScale = 23.; //!< the same for heaped cumulus: groups some 2 to 5 km across
 	//! Inverse group scales (1/km), coverage contrast and strength of broken bands.
 	//! Continuous in height and flatness, including custom cloud settings.
