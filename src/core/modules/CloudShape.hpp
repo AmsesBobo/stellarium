@@ -179,12 +179,11 @@ public:
 	//! Perlin-Worley noise with BillowCellsLumps cells). The shader takes them away from the density of the clouds above
 	//! their flat bases: what is left are the billows, each with its lit side and its shaded underside
 	static constexpr int BillowTexels = 96;
-	static constexpr int BillowCellsCoarse = 5, BillowCellsFine = 11, BillowCellsFiner = 23;
+	static constexpr int BillowCellsCoarse = 5, BillowCellsFine = 11;
 	static constexpr int BillowCellsLumps = 3;   //!< the cells of the broad lumps of the alpha channel
 	static constexpr int BillowCellsWisps = 6;   //!< the cells of the coarsest wisps of the blue channel
 	static constexpr double BillowScale = 1.8;   //!< km per tile, for clouds of size 1 (see Layer::billowTile())
 	static constexpr double BillowRise = 0.0012; //!< km/s: how fast the billows rise through a cloud
-	static constexpr double BillowDepth = 0.3;   //!< how deep the billows eat into the clouds, for clouds of size 1 (km)
 	static std::vector<unsigned char> computeBillows();
 
 	//! What the shape adds with the setting cover (0 to 1) and the soft noise (from 0 to 1) at a place, before the limit of
@@ -198,6 +197,11 @@ public:
 	//! the bodies (channel 0): with all of it the layer is one carpet, with part of it broad masses with gaps between them.
 	//! The same number stands in cloudBodySample() of the shader of CloudMgr
 	static constexpr double BankShare = 0.4;
+	//! Numbers that stand in the shader of CloudMgr too (cloudBodySample(), cloudDepth(), cloudWeatherAt()) and must be
+	//! changed there with them: the shape of an altocumulus sheet before it breaks up, how much the lanes between its
+	//! cloudlets take away, by how much of the size of the clouds the slow deformation shifts them (km), and how much of
+	//! a cloud the billows take away on average (the shader has the billows themselves)
+	static constexpr double AltoSheet = 0.6, AltoGap = 0.5, DeformStrength = 1.6, MeanErosion = 0.56;
 	static constexpr double CumulusGroupScale = 23.; //!< the same for heaped cumulus: groups some 2 to 5 km across
 	//! Inverse group scales (1/km), coverage contrast and strength of broken bands.
 	//! Continuous in height and flatness, including custom cloud settings.

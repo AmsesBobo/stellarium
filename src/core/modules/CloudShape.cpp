@@ -585,7 +585,7 @@ std::array<double, 2> CloudShape::deformation(const std::vector<float>& tile, co
 	const double u = mapX/DeformScale + motion.deformU, v = mapY/DeformScale + motion.deformV;
 	// (by about a body: the bodies of the map lie in the cells of a grid, each at a random place of its own, and with
 	// a small shift the grid showed as rows of clouds towards the horizon)
-	const double strength = 1.6*layer.size*(1. - 0.4*layer.flatness);
+	const double strength = DeformStrength*layer.size*(1. - 0.4*layer.flatness);
 	return {strength*(readTile(tile, u, v, 2) - 0.5),
 	        strength*(readTile(tile, u + 0.37, v + 0.71, 2) - 0.5)};
 }
@@ -643,6 +643,13 @@ double CloudShape::transmission(const std::vector<float>& tile, const Layer& lay
 	const double z = altAz[2] < 0.008 ? 0.008*std::exp(altAz[2]/0.008 - 1.) : altAz[2];
 	const double size = layer.size, flat = layer.flatness;
 	const double base = EarthRadius + layer.base, top = base + LayerThickness*size*layer.heightScale();
+	const auto smooth = [](double a, double b, double x) {
+		const double t = std::clamp((x - a)/(b - a), 0., 1.);
+		return t*t*(3. - 2.*t);
+	};
+	// (altocumulus and floccus: as cloudAlto() and floccus in the shader)
+	const double alto = smooth(2., 3.5, layer.base)*smooth(0.3, 0.6, flat);
+	const double floccus = smooth(2., 3.5, layer.base)*(1. - smooth(0.1, 0.3, flat));
 	const double b = observerRadius*z;
 	const auto shell = [b, observerRadius](double r) {
 		const double c = (r - observerRadius)*(r + observerRadius);
@@ -670,16 +677,35 @@ double CloudShape::transmission(const std::vector<float>& tile, const Layer& lay
 		                                    : layer.cover;
 		const double offset = std::min(coverOffset(cover, noise) + life[0], 0.45) + 2.5*(bankMask(layer, px, py) - 1.);
 		const auto weather = cohesiveWeather(offset, life[1], life[2], flat, cover);
+		// The shape as in cloudDepth() of the shader of CloudMgr, with the mean of the billows in place of the billows
+		// themselves: what is drawn over the clouds (the glare of the Sun and the Moon) is dimmed by a cloud about as wide
+		// and as thick as the one in the picture, without its lumps
 		const double bank = 2.*(layer.bodyScale() - 1.);
 		const double body = readTile(tile, tileX, tileY, 0);
-		const double shape = body + BankShare*bank*(readTile(tile, tileX, tileY, 3) - body) + weather[0];
+		double shape = body + BankShare*bank*(readTile(tile, tileX, tileY, 3) - body);
+		shape += alto*(AltoSheet - shape) + weather[0];
+		const double heaped = std::max({1. - layer.profileFlatness(), 0.9*bank, 0.7*alto});
+		shape += 0.06*heaped;
+		// (the cloudlets of altocumulus: the bodies of the map at a few times their scale)
+		double cell = 1.;
+		if (alto > 0.)
+		{
+			const double thick = std::clamp(shape, 0., 1.);
+			cell = smooth(-0.55 - 0.25*thick, 0.3 - 0.25*thick, readTile(tile, 6.*tileX + 0.31, 3.*tileY + 0.67, 0));
+			shape -= AltoGap*alto*(1. - cell);
+		}
 		const double h = readTile(tile, tileX, tileY, 1);
 		const double height = size*layer.heightScale()*layer.bodyHeight(h, readTile(tile, tileX, tileY, 2))*weather[1];
 		const double round = shape/std::pow(std::fabs(shape) + 0.01, 0.55), plateau = 0.8*shape/std::sqrt(shape*shape + layer.profileWidth());
-		const double topHeight = height*(round + layer.profileFlatness()*(plateau - round));
-		const double under = size*layer.heightScale()*(0.012 + 0.008*readTile(tile, tileX, tileY, 2));
+		const double topHeight = height*(round + layer.profileFlatness()*(plateau - round))*(1. + alto*(0.12 + 1.2*cell*cell - 1.));
 		const double level = r - base;
-		const double e = std::clamp((std::min(topHeight - level, level - under) + 0.012)/(0.024 + 0.004*size), 0., 1.);
+		// (how much of the noise stands, and what the billows take away of it on average)
+		const double lower = std::min(level/(0.008 + 0.022*size + 0.5*floccus*std::max(topHeight, 0.)), 1.);
+		const double upper = std::min((topHeight - level)/(0.75*std::max(topHeight, 0.) + 0.03*size), 1.);
+		double inside = std::min(lower, upper);
+		if (inside > 0.)
+			inside = lower*upper*(0.15 + 0.85*std::clamp((shape + 0.05)/0.35, 0., 1.));
+		const double e = std::clamp((inside - MeanErosion*(0.5 + 0.35*heaped))/0.2, 0., 1.);
 		depth += Extinction*layer.density*weather[2]*ds*e*e*(3. - 2.*e);
 		if (depth > 7.)
 			return 0.;

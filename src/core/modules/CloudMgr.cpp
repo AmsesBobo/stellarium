@@ -833,7 +833,6 @@ uniform highp vec2 otherPhase[10];
 uniform highp vec2 cloudDeform;
 uniform highp float cloudDeformScale;
 uniform highp vec2 cloudGrow;       // the place of the noise of growth (tiles)
-uniform highp vec2 cloudBoil;       // of the fine lobes (km)
 uniform highp sampler3D cloudBillow; // the billows of the cauliflower tops (see CloudShape::computeBillows())
 uniform highp vec3 cloudBillowScale; // 1/km of their tile, how deep they eat in (km), their change (in tiles)
 uniform highp vec2 cloudBillowPhase; // where the wind has carried them (in tiles; see setLayerMotion())
@@ -960,6 +959,7 @@ CloudWeather cloudWeatherAt(highp vec3 p, highp vec2 map, highp vec4 cover, high
 		offset += 2.5*(m - 1.);
 	}
 	highp vec2 uv = map*cloudDeformScale + phases[8] + cloudDeform;
+	// (1.6: CloudShape::DeformStrength)
 	highp vec2 drift = 1.6*size*(1. - 0.4*shape.y)*
 		(vec2(textureLod(cloudTile, uv, 2.).z, textureLod(cloudTile, uv + vec2(0.37, 0.71), 2.).z) - 0.5);
 	// At a low cover the cumulus get fewer and smaller, down to a few percent of the sky, and keep their density: thin,
@@ -994,6 +994,7 @@ highp float cloudAlto(highp float base, highp float flatness)
 highp vec4 cloudBodySample(highp vec4 f, highp float flatness, highp float base)
 {
 	// (altocumulus is a sheet some km across, which the weather alone lays out; the shader breaks it up in cloudlets)
+	// (0.6: CloudShape::AltoSheet)
 	f.x = mix(f.x, 0.6, cloudAlto(base, flatness));
 	highp float bank = smoothstep(0.15, 0.35, flatness)*(1. - smoothstep(0.45, 0.6, flatness));
 	// (only partly the continuous bank, CloudShape::BankShare: the masses of a stratocumulus keep outlines and gaps of their own)
@@ -1145,7 +1146,7 @@ highp float cloudDepth(highp vec2 map, highp float z, CloudWeather weather, high
 		// (and small ones on and between them: cloudlets of many sizes and lumpy outlines)
 		highp float small = textureLod(cloudBillow, vec3(c.xy + vec2(0.13, 0.57), 0.4), noiseLod).g;
 		cell = smoothstep(-0.55 - 0.25*thick, 0.3 - 0.25*thick, bodies + 0.3*(small - 0.7) + 0.3*(towers - 0.5));
-		s -= 0.5*alto*(1. - cell);
+		s -= 0.5*alto*(1. - cell);   // (0.5: CloudShape::AltoGap)
 		heaped = max(heaped, 0.7*alto);
 	}
 	// The rim of a cloud is torn: bays, tongues and shreds of some tens to a few hundred meters, different at each
@@ -1856,13 +1857,12 @@ void CloudMgr::drawLayer(StelCore* core, const StelProjector& prj, int i, int ot
 	setCirrusMotion(p, "cirrusTurn", motionAt(core, core->getJD(), CirrusWind));
 	p.setUniformValue("cirrusFront", frontUniform(cirrusFront));
 	p.setUniformValue("cloudGrow", QVector2D(static_cast<float>(motion.growU), static_cast<float>(motion.growV)));
-	p.setUniformValue("cloudBoil", QVector2D(static_cast<float>(motion.boilX), static_cast<float>(motion.boilY)));
-	// The billows: 1/km of their tile, how deep they eat in (km, less in flat clouds; not used any more), and how far
+	// The billows: 1/km of their tile, a free place, and how far
 	// they have risen through the clouds (in tiles, reduced in double precision: the third coordinate of the tile moves on,
 	// as the air rises in a cumulus and its billows with it)
 	const double billowRise = CloudShape::BillowRise*(core->getJD() - 2451545.)*86400./layer.billowTile();
 	p.setUniformValue("cloudBillowScale", QVector3D(static_cast<float>(1./layer.billowTile()),
-	                                                static_cast<float>(CloudShape::BillowDepth*layer.size*(1. - 0.7*layer.flatness)),
+	                                                0.f,
 	                                                static_cast<float>(std::remainder(billowRise + 0.35*motion.boilX/layer.billowTile(), 1.))));
 	p.setUniformValue("cloudFrontDrift", QVector2D(static_cast<float>(motion.frontU), static_cast<float>(motion.frontV)));
 	p.setUniformValue("cloudDeform", QVector2D(static_cast<float>(motion.deformU), static_cast<float>(motion.deformV)));

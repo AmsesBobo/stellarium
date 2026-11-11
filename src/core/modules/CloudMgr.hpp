@@ -35,8 +35,9 @@ class QOpenGLFramebufferObject;
 
 //! @class CloudMgr
 //! The ordinary clouds of the Earth, in the photographic mode: fair weather cumulus in a layer from 1.5 km above a
-//! spherical Earth, in front of the sky. The shader follows the line of sight through the layer over a height map (see
-//! CloudShape), so perspective alone packs the clouds together and shows their sides low over the horizon.
+//! spherical Earth, in front of the sky. The shader follows the line of sight through the layer, in which the clouds are a density
+//! in space: a height map (see CloudShape) gives their outlines and heights, a 3D noise their billows. Perspective alone
+//! packs the clouds together and shows their sides low over the horizon.
 //!
 //! All the other lights of the sky are added to the scene, the atmosphere too. Clouds must take light away instead: the
 //! stars and the sky behind them go, and their own light and that of the air in front of them come. With the transmission
