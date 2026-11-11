@@ -169,12 +169,14 @@ public:
 	static std::vector<float> computeTile();
 	//! The billows of the cauliflower tops: a tileable 3D texture of BillowTexels^3 RGBA texels, each channel puffs
 	//! (balls around random points, highest at their centers: an inverted Worley noise), red with BillowCellsCoarse
-	//! cells across the tile, green with BillowCellsFine, blue with BillowCellsFiner; alpha holds broad, smooth lumps (a
+	//! cells across the tile, green with BillowCellsFine; blue holds wisps, thin threads of a ridged noise
+	//! with BillowCellsWisps cells, for the shreds around a cloud; alpha holds broad, smooth lumps (a
 	//! Perlin-Worley noise with BillowCellsLumps cells). The shader takes them away from the density of the clouds above
 	//! their flat bases: what is left are the billows, each with its lit side and its shaded underside
 	static constexpr int BillowTexels = 96;
 	static constexpr int BillowCellsCoarse = 5, BillowCellsFine = 11, BillowCellsFiner = 23;
 	static constexpr int BillowCellsLumps = 3;   //!< the cells of the broad lumps of the alpha channel
+	static constexpr int BillowCellsWisps = 6;   //!< the cells of the coarsest wisps of the blue channel
 	static constexpr double BillowScale = 1.8;   //!< km per tile, for clouds of size 1 (see Layer::billowTile())
 	static constexpr double BillowRise = 0.0012; //!< km/s: how fast the billows rise through a cloud
 	static constexpr double BillowDepth = 0.3;   //!< how deep the billows eat into the clouds, for clouds of size 1 (km)

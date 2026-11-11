@@ -1120,7 +1120,7 @@ highp float cloudDepth(highp vec2 map, highp float z, CloudWeather weather, high
 	// keeps its thickness
 	highp vec4 n = textureLod(cloudBillow, c, noiseLod);
 	highp float rim = 1. - smoothstep(0.08, 0.5, s);
-	s += heaped*rim*(0.2*(n.r - 0.7) + 0.22*(n.g - 0.7) + 0.32*(n.a - 0.5));
+	s += heaped*rim*(0.2*(n.r - 0.7) + 0.22*(n.b - 0.58) + 0.32*(n.a - 0.5));
 	// (between the rolls the layer thins out and breaks up)
 	s -= 0.1*rolls*smoothstep(0.62, 0.3, towers);
 	highp float height = cloudSize*cloudShape.w*f.y*weather.growth.y;
@@ -1141,11 +1141,12 @@ highp float cloudDepth(highp vec2 map, highp float z, CloudWeather weather, high
 	highp float d = cover - erosion*(1. - billow);
 	// (the finest billows, only where the edge is, and only where a pixel shows them)
 	// Around the cloud, where it mixes with the dry air and dissolves, thin shreds: the fuzzy rim of a real cumulus
+	// (threads of the wisps in the blue channel: with small balls there, the shreds were a halo of dots around the cloud)
 	if (fine && d > -0.3 && d < 0.6 && noiseLod < 2.5)
 	{
 		highp vec4 m = textureLod(cloudBillow, 3.*c + vec3(0.43, 0.17, 0.71), noiseLod + 0.6);
 		highp float shown = 1. - smoothstep(1.5, 2.5, noiseLod);
-		cloudVeilHere = 0.1*heaped*shown*smoothstep(-0.3, 0., d)*smoothstep(0.6, 0.95, m.b)*smoothstep(0.35, 0.75, n.a);
+		cloudVeilHere = 0.1*heaped*shown*smoothstep(-0.3, 0., d)*smoothstep(0.62, 0.92, 0.6*n.b + 0.4*m.b)*smoothstep(0.35, 0.75, n.a);
 		d -= mix(0.34, 0.5, rim)*(1. - (0.6*m.r + 0.4*m.g))*shown;
 	}
 	// (soft edges; a little softer low on the sides of a heaped cloud than at its rising top)

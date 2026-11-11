@@ -338,7 +338,11 @@ std::vector<unsigned char> CloudShape::computeBillows()
 				t[3] = static_cast<unsigned char>(std::lround(255.*std::clamp(lumps, 0., 1.)));
 				t[0] = static_cast<unsigned char>(std::lround(255.*puffs(u, v, w, BillowCellsCoarse, 1)));
 				t[1] = static_cast<unsigned char>(std::lround(255.*puffs(u, v, w, BillowCellsFine, 2)));
-				t[2] = static_cast<unsigned char>(std::lround(255.*puffs(u, v, w, BillowCellsFiner, 3)));
+				// Wisps: the lines along which a smooth noise changes its sign, as thin curved threads and sheets (a ridged
+				// noise). Balls make rounded billows; the shreds that a cloud leaves where it dissolves are drawn out
+				const double threads = 0.5*gradientNoise(u, v, w, BillowCellsWisps, 8) + 0.3*gradientNoise(u, v, w, 2*BillowCellsWisps, 9)
+				                     + 0.2*gradientNoise(u, v, w, 4*BillowCellsWisps, 10);
+				t[2] = static_cast<unsigned char>(std::lround(255.*std::clamp(1. - 3.2*std::fabs(threads), 0., 1.)));
 			}
 	return texels;
 }
