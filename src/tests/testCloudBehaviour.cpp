@@ -14,6 +14,34 @@ double distance(const CloudShape::Motion& a, const CloudShape::Motion& b)
 {
 	return std::hypot(a.offsetX - b.offsetX, a.offsetY - b.offsetY);
 }
+
+// Count connected footprints on the periodic tile, including across its edges.
+int bodyComponents(const std::vector<float>& tile, int channel, float threshold)
+{
+	const int n = CloudShape::TileTexels;
+	std::vector<unsigned char> visited(n*n, 0);
+	std::vector<int> pending;
+	int count = 0;
+	for (int start = 0; start < n*n; ++start)
+	{
+		if (visited[start] || tile[4*start + channel] <= threshold) continue;
+		++count; visited[start] = 1; pending.push_back(start);
+		while (!pending.empty())
+		{
+			const int k = pending.back(); pending.pop_back();
+			const int x = k%n, y = k/n;
+			const int neighbours[] = {y*n + (x + 1)%n, y*n + (x + n - 1)%n,
+			                          ((y + 1)%n)*n + x, ((y + n - 1)%n)*n + x};
+			for (int next : neighbours)
+				if (!visited[next] && tile[4*next + channel] > threshold)
+				{
+					visited[next] = 1; pending.push_back(next);
+				}
+		}
+	}
+	return count;
+}
+
 }
 
 int main()
@@ -30,6 +58,11 @@ int main()
 		require(distance(c, d) < 0.2, "Upper layer jumps at ten-day boundary");
 	}
 	const auto tile = CloudShape::computeTile();
+	for (float threshold : {0.f, 0.15f, 0.3f})
+	{
+		const int ordinary = bodyComponents(tile, 0, threshold), bank = bodyComponents(tile, 3, threshold);
+		require(bank > 0 && bank < ordinary/2, "Sc body map remains fragmented or loses all clouds");
+	}
 	CloudShape::Layer layer;
 	for (double cycle : {-100., -1., 0., 1., 100.})
 	{
@@ -124,12 +157,44 @@ int main()
 	cumulus.base = 1.2; cumulus.flatness = 0.;
 	stratocumulus.base = 1.; stratocumulus.flatness = 0.4;
 	altocumulus.base = 3.5; altocumulus.flatness = 0.6;
+	require(cumulus.bodyScale() == 1. && altocumulus.bodyScale() == 1. && stratocumulus.bodyScale() == 1.5,
+	        "Broader body scale affects the wrong cloud types");
+	// Adjacent seed identities must not divide a Sc bank into separate domes.
+	require(stratocumulus.bodyHeight(0.6, 0.5) - stratocumulus.bodyHeight(0.06, 0.5) < 0.03,
+	        "Sc depth still follows individual ellipsoid seeds");
+	require(stratocumulus.bodyHeight(0.3, 0.8) - stratocumulus.bodyHeight(0.3, 0.2) > 0.05,
+	        "Sc shared surface has no broad relief");
+	for (const auto& other : {cumulus, altocumulus})
+	{
+		require(other.bodyHeight(0.17, 0.8) == 0.17 && other.profileFlatness() == other.flatness,
+		        "Shared Sc surface affects another cloud type");
+	}
 	const auto cu = CloudShape::formationParameters(cumulus);
 	const auto sc = CloudShape::formationParameters(stratocumulus);
 	const auto ac = CloudShape::formationParameters(altocumulus);
 	require(sc[0] < cu[0] && sc[1] < cu[1], "Stratocumulus does not form broader banks");
 	require(ac[0] > cu[0] && ac[1] > cu[1], "Altocumulus does not form smaller patches");
-	require(cu[3] == 0. && sc[3] == 0. && ac[3] > 0., "Bands affect the wrong cloud types");
+	require(cu[3] == 0. && sc[3] > 0. && sc[3] < ac[3], "Bands affect the wrong cloud types");
+	// Broad Sc relief varies spatially without exceeding the existing volume bounds.
+	double minRelief = 1., maxRelief = 0.;
+	for (int i = 0; i < 1024; ++i)
+	{
+		const double x = i*1.31 - 500., y = i*3.17 - 1200.;
+		const auto d = CloudShape::development(tile, stratocumulus, now, x, y);
+		require(d[1] >= 0.65 && d[1] <= 1. && d[2] >= 0.65 && d[2] <= 1., "Sc relief exceeds volume or density bounds");
+		minRelief = std::min(minRelief, d[1]); maxRelief = std::max(maxRelief, d[1]);
+		for (double boundary : {0.15, 0.35, 0.45, 0.6})
+		{
+			auto a = stratocumulus, b = stratocumulus;
+			a.flatness = boundary - 1e-6; b.flatness = boundary + 1e-6;
+			const auto left = CloudShape::development(tile, a, now, x, y);
+			const auto right = CloudShape::development(tile, b, now, x, y);
+			for (int channel = 0; channel < 3; ++channel)
+				require(std::abs(left[channel] - right[channel]) < 0.001, "Sc variation jumps between presets");
+		}
+	}
+	require(maxRelief - minRelief > 0.1, "Sc elements lack height variation");
+
 	double typeDifference = 0.;
 	for (int i = 0; i < 128; ++i)
 	{

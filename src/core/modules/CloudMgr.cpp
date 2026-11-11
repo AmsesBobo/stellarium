@@ -160,7 +160,7 @@ void setLayerMotion(QOpenGLShaderProgram& p, const char* prefix, const CloudShap
 	p.setUniformValue((name + "Formation").constData(), QVector4D(static_cast<float>(formation[0]), static_cast<float>(formation[1]),
 	                                                            static_cast<float>(formation[2]), static_cast<float>(formation[3])));
 	const QVector2D phases[] = {
-		texturePhase(x*layer.stretch()/(layer.size*CloudShape::TileSize), y/(layer.size*CloudShape::TileSize)),
+		texturePhase(x*layer.stretch()/(layer.size*layer.bodyScale()*CloudShape::TileSize), y/(layer.size*layer.bodyScale()*CloudShape::TileSize)),
 		texturePhase(x/CloudShape::CoverScaleLarge, y/CloudShape::CoverScaleLarge),
 		texturePhase(x/CloudShape::CoverScaleSmall, y/CloudShape::CoverScaleSmall),
 		texturePhase(x/CloudShape::GrowScale, y/CloudShape::GrowScale),
@@ -966,14 +966,44 @@ CloudWeather cloudWeatherAt(highp vec3 p, highp vec2 map, highp vec4 cover, high
 	// retain their more broken structure. See cohesiveWeather().
 	highp float coherence = 1. - smoothstep(0.15, 0.5, shape.y);
 	highp float fade = smoothstep(-1.25, -0.85, offset);
-	highp float density = (0.45 + 0.55*life)*mix(1., fade, coherence)*presence;
+	// Match CloudShape::development(): coherent variation from flatter elements
+	// to deeper rolls, with substantial bodies rather than uniformly thin wisps.
+	highp float stratiform = smoothstep(0.15, 0.35, shape.y)*(1. - smoothstep(0.45, 0.6, shape.y));
+	highp float relief = smoothstep(0.2, 0.8, 0.65*detail + 0.35*life);
+	highp float height = 0.65 + 0.35*mix(life, relief, stratiform);
+	highp float density = (0.45 + 0.55*life + 0.2*stratiform*(1. - life))*mix(1., fade, coherence)*presence;
 	offset = mix(offset, max(offset, -0.85), coherence);
-	return CloudWeather(vec3(offset, 0.65 + 0.35*life, density), drift);
+	return CloudWeather(vec3(offset, height, density), drift);
 }
 
 CloudWeather cloudWeather(highp vec3 p)
 {
 	return cloudWeatherAt(p, cloudMap(p), cloudCover, cloudFront, cloudRadii.y, cloudBank, cloudShape, cloudSize, cloudFormation, cloudPhase);
+}
+
+// The bank skeleton shares the texture with the other shapes, but excludes
+// independent cloudlets. Broad depth follows the bank, not each ellipsoidal seed.
+highp vec4 cloudBodySample(highp vec4 f, highp float flatness)
+{
+	highp float bank = smoothstep(0.15, 0.35, flatness)*(1. - smoothstep(0.45, 0.6, flatness));
+	f.x = mix(f.x, f.w, bank);
+	f.y = mix(f.y, 0.44 + 0.12*f.z, 0.95*bank);
+	return f;
+}
+
+// Use the same shared top profile for view rays and upper-layer shadows.
+highp float cloudProfileFlatness(highp float flatness)
+{
+	highp float bank = smoothstep(0.15, 0.35, flatness)*(1. - smoothstep(0.45, 0.6, flatness));
+	return mix(flatness, 0.95, bank);
+}
+
+// The bank shape is an outline distance, not a separate dome at each seed.
+// Reach its shared top over a narrow shoulder, leaving 3D billows as relief.
+highp float cloudPlateauWidth(highp float flatness)
+{
+	highp float bank = smoothstep(0.15, 0.35, flatness)*(1. - smoothstep(0.45, 0.6, flatness));
+	return mix(0.0625, 0.01, bank);
 }
 
 // Filter the upper layer's transmission over the receiving footprint. Filtering
@@ -1005,12 +1035,12 @@ highp float otherShadow(highp vec3 p, highp vec3 key, highp float foot)
 	{
 		highp vec2 offset = tap == 0 ? vec2(0.) : tap == 1 ? axis*along : tap == 2 ? -axis*along : tap == 3 ? across : -across;
 		highp vec2 uv = map + weather.drift + radius*offset;
-		highp vec4 f = textureLod(cloudTile, vec2(uv.x*otherShape.x, uv.y)*otherRadius.z + otherPhase[0], lod);
+		highp vec4 f = cloudBodySample(textureLod(cloudTile, vec2(uv.x*otherShape.x, uv.y)*otherRadius.z + otherPhase[0], lod), otherShape.y);
 		highp float s = f.x + weather.growth.x;
 		highp float height = otherRadius.y*otherShape.w*f.y*weather.growth.y;
 		highp float round = s/pow(abs(s) + 0.01, 0.55);
-		highp float plateau = 0.8*s/sqrt(s*s + 0.0625);
-		highp float top = height*mix(round, plateau, otherShape.y);
+		highp float plateau = 0.8*s/sqrt(s*s + cloudPlateauWidth(otherShape.y));
+		highp float top = height*mix(round, plateau, cloudProfileFlatness(otherShape.y));
 		highp float under = max(otherRadius.y*otherShape.w*(0.012 + 0.008*f.z), r - otherRadius.x);
 		highp float tau = otherCover.w*weather.growth.z*max(top - under, 0.)*slant;
 		// Fractional edge coverage keeps an optically thick cloud's filtered
@@ -1059,6 +1089,10 @@ highp float cloudSide(highp float height)
 	// Preserve the established high, flat cloud profile (altocumulus).
 	highp float lowCloud = 1. - smoothstep(0.4, 0.6, cloudShape.y);
 	highp float drawnIn = mix(0.45*cloudSize, min(0.45*cloudSize, 0.85*cloudLastHeight), lowCloud)*(1. - cloudShape.y);
+	// Stratocumulus has a broad shared base; a cumulus waist narrows every
+	// broken bank into a pillow when viewed from below.
+	highp float bank = smoothstep(0.15, 0.35, cloudShape.y)*(1. - smoothstep(0.45, 0.6, cloudShape.y));
+	drawnIn *= mix(1., 0.7, bank);
 	return 0.4*cloudSize*cloudLastShape - drawnIn*(1. - smoothstep(0., 0.6, height/max(cloudLastHeight, 0.01)));
 }
 
@@ -1069,7 +1103,11 @@ highp float baseRounding()
 {
 	highp float original = min(0.8*cloudSize, (0.8 + 0.7*(1. - cloudShape.y))*cloudLastHeight);
 	highp float roundingScale = mix(0.7, 0.9, clamp(cloudShape.y/0.4, 0., 1.));
-	return mix(original, roundingScale*original, 1. - smoothstep(0.4, 0.6, cloudShape.y));
+	highp float rounding = mix(original, roundingScale*original, 1. - smoothstep(0.4, 0.6, cloudShape.y));
+	// Confine the Sc shoulder to the edge, not the full thickness. The same
+	// profile is used by the view and light marches to avoid a bright seam.
+	highp float bank = smoothstep(0.15, 0.35, cloudShape.y)*(1. - smoothstep(0.45, 0.6, cloudShape.y));
+	return mix(rounding, min(0.15*cloudSize, 0.65*cloudLastHeight), bank);
 }
 
 // The heights over the base of the top and the underside of the cloud at a place (km, the top below 0 outside the clouds),
@@ -1088,7 +1126,7 @@ highp vec2 cloudHeights(highp vec2 map, CloudWeather weather, highp float lod, h
 		highp float wy = textureLod(cloudBillow, c + vec3(0.57, 0.08, 0.83), max(lod - 2., 0.)).r;
 		map += near*0.19*cloudSize*vec2(wx - 0.7, wy - 0.7);
 	}
-	highp vec4 f = textureLod(cloudTile, cloudTileAt(map), lod);
+	highp vec4 f = cloudBodySample(textureLod(cloudTile, cloudTileAt(map), lod), cloudShape.y);
 	highp float s = f.x + weather.growth.x;
 	// Fine lobes, stronger at the edge of a cloud, which they tear up: a 3D noise (the billows' texture at twice its
 	// density, some 80 and 40 m at size 1, scaled to the spread of the former 2D lobes). A 2D noise shifted with the
@@ -1108,8 +1146,8 @@ highp vec2 cloudHeights(highp vec2 map, CloudWeather weather, highp float lod, h
 	highp float round = s/pow(abs(s) + 0.01, 0.55);
 	// Smooth shoulders retain relief in stratocumulus and altocumulus instead of
 	// clipping their tops into plates. Keep the CPU transmission model in sync.
-	highp float plateau = 0.8*s/sqrt(s*s + 0.0625);
-	highp float top = height*mix(round, plateau, cloudShape.y);
+	highp float plateau = 0.8*s/sqrt(s*s + cloudPlateauWidth(cloudShape.y));
+	highp float top = height*mix(round, plateau, cloudProfileFlatness(cloudShape.y));
 	// A common condensation level with only broad, shallow variation. Do not
 	// imprint each rounded top or its rim on the underside. Mirror on the CPU.
 	return vec2(top, cloudSize*cloudShape.w*(0.012 + 0.008*f.z));
@@ -1225,7 +1263,7 @@ void main(void)
 			// (and a wider look, for what lies a little beyond: the map bends with the height (see cloudHeights()), small
 			// clouds have steep sides and the fine lobes add to the shape, so that a cloud may stand where the first look
 			// saw none. A step that skips a cloud cuts it: bands across the sides and sheared slabs, under a low Sun)
-			blurred = max(blurred, textureLod(cloudTile, lookAt, look + 1.5));
+			blurred = cloudBodySample(max(blurred, textureLod(cloudTile, lookAt, look + 1.5)), cloudShape.y);
 			highp float shape = blurred.x + 0.5*(weatherStart.growth.x + weatherEnd.growth.x);
 			highp float reach = cloudSize*cloudShape.w*(blurred.y*pow(max(shape + 0.5, 0.), 0.7) + 0.15);
 			if (max(weatherStart.growth.z, weatherEnd.growth.z) > 1e-5 && (t > 30. || shape > -0.7 && length(middle) - cloudRadii.y - 0.5*ds*altAz.z < reach + 0.05 + smear))
@@ -1268,7 +1306,10 @@ void main(void)
 					highp float low = 1. - smoothstep(0.15, 0.7, height/max(cloudLastHeight, 0.01));
 					highp float vary = textureLod(cloudBillow, vec3((cloudMap(q) + weather.drift)*0.5*cloudBillowScale.x + 0.5*cloudBillowPhase,
 					                                               height*0.5*cloudBillowScale.x) + vec3(0.7, 0.3, 0.2), 0.).r;
-					highp float soft = mix(0.004, 0.12, max(low, 0.7*smoothstep(0.55, 0.85, vary)));
+					// The broad transition used for cumulus dissolves much of a thin Sc
+					// element. Retain a soft rim, but let its internal lobes remain visible.
+					highp float stratiform = smoothstep(0.15, 0.35, cloudShape.y)*(1. - smoothstep(0.45, 0.6, cloudShape.y));
+					highp float soft = mix(0.004, mix(0.12, 0.045, stratiform), max(low, 0.7*smoothstep(0.55, 0.85, vary)));
 					highp float a = -e, b = e + soft*cloudSize;
 					highp float inside = clamp((d - a)/(b - a), 0., 1.);
 					if (u - lastU < 1.5*dt && abs(d - lastD) > 1e-4)
@@ -1450,7 +1491,7 @@ void main(void)
 		shadow *= upper;
 		// Broad diffuse transport retains depth without tracing each rounded top
 		// onto the base. Direct light is determined by the density light march.
-		highp vec4 field = textureLod(cloudTile, cloudTileAt(cloudMap(start) + hitWeather.drift), max(point.w + 3., 4.));
+		highp vec4 field = cloudBodySample(textureLod(cloudTile, cloudTileAt(cloudMap(start) + hitWeather.drift), max(point.w + 3., 4.)), cloudShape.y);
 		highp float broadDepth = cloudSize*cloudShape.w*field.y*hitWeather.growth.y;
 		highp float diffuseDepth = mix(max(point.z - point.y, 0.), broadDepth, 0.85);
 		highp float through = 1./(1. + 8.4*cloudShape.z*hitWeather.growth.z*diffuseDepth);
@@ -1681,7 +1722,7 @@ void CloudMgr::setUniformsOfLayer(QOpenGLShaderProgram& p, int i, const char* pr
 	const QByteArray name(prefix);
 	const float coverStart = static_cast<float>(CloudShape::coverOffset(currentCovers[i], 0.));
 	p.setUniformValue((name + "Cover").constData(), QVector4D(coverStart, static_cast<float>(CloudShape::coverOffset(currentCovers[i], 1.)) - coverStart,
-	                                                          static_cast<float>(layer.size*CloudShape::TileSize/CloudShape::TileTexels),
+	                                                          static_cast<float>(layer.size*layer.bodyScale()*CloudShape::TileSize/CloudShape::TileTexels),
 	                                                          static_cast<float>(CloudShape::Extinction*layer.density)));
 	p.setUniformValue((name + "Shape").constData(), QVector4D(static_cast<float>(layer.stretch()), static_cast<float>(layer.flatness),
 	                                                          static_cast<float>(layer.density), static_cast<float>(layer.heightScale())));
@@ -1692,7 +1733,7 @@ void CloudMgr::setUniformsOfLayer(QOpenGLShaderProgram& p, int i, const char* pr
 	p.setUniformValue((name + "Front").constData(), frontUniform(fronts[i]));
 	// the radius of the base (km), the size of the clouds, 1/km of the tile
 	p.setUniformValue((name + "Radius").constData(), QVector3D(static_cast<float>(EarthRadius + layer.base), static_cast<float>(layer.size),
-	                                                           static_cast<float>(1./(layer.size*CloudShape::TileSize))));
+	                                                           static_cast<float>(1./(layer.size*layer.bodyScale()*CloudShape::TileSize))));
 }
 
 bool CloudMgr::beginAtmosphereCapture(StelCore* core, bool enabled)
@@ -1897,7 +1938,7 @@ void CloudMgr::drawLayer(StelCore* core, const StelProjector& prj, int i, int ot
 	p.setUniformValue("cloudTile", 2);
 	bindBillowTexture(3);
 	p.setUniformValue("cloudBillow", 3);
-	p.setUniformValue("cloudTileScale", QVector4D(static_cast<float>(1./(layer.size*CloudShape::TileSize)), static_cast<float>(1./CloudShape::CoverScaleLarge),
+	p.setUniformValue("cloudTileScale", QVector4D(static_cast<float>(1./(layer.size*layer.bodyScale()*CloudShape::TileSize)), static_cast<float>(1./CloudShape::CoverScaleLarge),
 	                                              static_cast<float>(1./CloudShape::CoverScaleSmall), static_cast<float>(1./(layer.size*CloudShape::FineScale))));
 	p.setUniformValue("cloudSize", static_cast<float>(layer.size));
 	setUniformsOfLayer(p, i, "cloud");

@@ -322,7 +322,7 @@ std::vector<float> CloudShape::computeTile()
 {
 	const int n = TileTexels;
 	constexpr int Bodies = 26;  // cells per tile: 1.6 km
-	const SphereLayer bodies(Bodies, 3, 0.2, 0.55, 0.85, true), lobes(78, 4, 0.45, 0.8, 1.), small(190, 5, 0.45, 0.8, 1.), fine(64, 8, 0.45, 0.8, 1.);
+	const SphereLayer bodies(Bodies, 3, 0.2, 0.55, 0.85, true), lobes(78, 4, 0.45, 0.8, 1.), small(190, 5, 0.45, 0.8, 1.);
 	// Small cumulus of their own between the bodies, a third of their size or less: a field of cumulus comes in all
 	// sizes, with many more small clouds than large ones
 	constexpr int Cloudlets = 72;
@@ -366,17 +366,16 @@ std::vector<float> CloudShape::computeTile()
 			const double t = std::clamp((cloudlet - bodyShape + 0.1)/0.2, 0., 1.), toSmall = t*t*(3. - 2.*t);
 			texel[1] = static_cast<float>(((0.2 + 0.4*which) + toSmall*((0.06 + 0.1*whichSmall) - (0.2 + 0.4*which)))*(0.82 + 0.14*billow));
 			texel[2] = static_cast<float>(0.65*softNoise(u*5., v*5., 5, 6) + 0.35*softNoise(u*11., v*11., 11, 7));
-			texel[3] = static_cast<float>(fine.lobes(u, v));
 		}
 	// Close narrow clefts between neighbouring billows to give a cloud a shared
 	// body. A circular closing preserves isolated silhouettes and large openings;
 	// unlike inflating every sphere it does not grow every cloud indiscriminately.
 	// All operations wrap, so the procedural tile remains seamless.
-	constexpr int JoinRadius = 6;
+
 	const auto pixel = [n](int x, int y) {
 		return static_cast<std::size_t>(wrap(y, n))*n + wrap(x, n);
 	};
-	const auto close = [n, &pixel](std::vector<float>& shape) {
+	const auto close = [n, &pixel](std::vector<float>& shape, int JoinRadius) {
 		std::vector<float> dilated(shape.size()), added(shape.size());
 		for (int y = 0; y < n; ++y) for (int x = 0; x < n; ++x)
 		{
@@ -415,8 +414,8 @@ std::vector<float> CloudShape::computeTile()
 			value = std::min(value + 0.95f*sum/16.f, 1.5f);
 		}
 	};
-	close(shapes);
-	close(bodiesOnly);
+	close(shapes, 6);
+	close(bodiesOnly, 6);
 	// The small clouds must not add to the cover: a cover fills as much of the map as with the bodies alone, which then
 	// give room to the small clouds. Each shape value is mapped to the one of the same rank among the bodies alone (a
 	// monotonic mapping, which keeps every outline)
@@ -429,6 +428,34 @@ std::vector<float> CloudShape::computeTile()
 		const auto first = static_cast<std::size_t>(std::lower_bound(sortedShapes.begin(), sortedShapes.end(), shapes[k]) - sortedShapes.begin());
 		// (ties, as at the clamp, take the middle of their ranks)
 		tile[4*k] = sortedBodies[std::min((first + rank)/2, sortedBodies.size() - 1)];
+	}
+	// Stratocumulus is an irregular continuous bank, not the union of the
+	// cumulus ellipsoids. Its connected contours must remain irregular when a
+	// weather threshold exposes only the last pieces of the bank.
+	// Domain warping and three spatial scales are baked once, with exact wrapping.
+	std::vector<float> bankField(shapes.size());
+	for (int j = 0; j < n; ++j) for (int i = 0; i < n; ++i)
+	{
+		const double u = (i + 0.5)/n, v = (j + 0.5)/n;
+		const double x = u + 0.035*(softNoise(u*9., v*9., 9, 20) - 0.5);
+		const double y = v + 0.035*(softNoise(u*9. + 0.37, v*9. + 0.71, 9, 21) - 0.5);
+		bankField[static_cast<std::size_t>(j)*n + i] = static_cast<float>(
+			0.67*softNoise(x*18., y*18., 18, 22)
+			+ 0.25*softNoise(x*36. + 0.31, y*36. + 0.57, 36, 23)
+			+ 0.08*softNoise(x*72. + 0.13, y*72. + 0.29, 72, 24));
+	}
+	// Preserve the previous bank's coverage distribution, never its positions
+	// or outlines. A shape change must not silently reduce the cover setting.
+	close(bodiesOnly, 16);
+	std::sort(bodiesOnly.begin(), bodiesOnly.end());
+	std::vector<float> sortedBank(bankField);
+	std::sort(sortedBank.begin(), sortedBank.end());
+	for (std::size_t k = 0; k < bankField.size(); ++k)
+	{
+		const auto lo = std::lower_bound(sortedBank.begin(), sortedBank.end(), bankField[k]);
+		const auto hi = std::upper_bound(lo, sortedBank.end(), bankField[k]);
+		const auto rank = static_cast<std::size_t>((lo - sortedBank.begin() + hi - sortedBank.begin())/2);
+		tile[4*k + 3] = bodiesOnly[std::min(rank, bodiesOnly.size() - 1)];
 	}
 	return tile;
 }
@@ -448,13 +475,14 @@ std::array<double, 4> CloudShape::formationParameters(const Layer& layer)
 	// Low flat layers organize into broad banks. Higher flat layers have smaller
 	// patches with a weak band structure. Blend rather than switching at a preset.
 	const double alto = smooth(2., 3.5, layer.base)*smooth(0.3, 0.6, layer.flatness);
+	const double stratiform = smooth(0.15, 0.35, layer.flatness)*(1. - smooth(0.45, 0.6, layer.flatness));
 	const double lowX = GroupScale*(1. + 2.*layer.flatness);
 	const double lowY = GroupScale*(1. + 0.5*layer.flatness);
 	return {1./(lowX + alto*(32. - lowX)), 1./(lowY + alto*(18. - lowY)),
 	        // A little more contrast between low-cloud banks and their clear gaps.
 	        // Keep the altocumulus formation parameters exactly as before.
 	        0.95 - 0.45*std::clamp(layer.flatness/0.6, 0., 1.) + 0.25*alto
-	        + 0.25*(1. - smooth(0.4, 0.6, layer.flatness)), 0.28*alto};
+	        + 0.25*(1. - smooth(0.4, 0.6, layer.flatness)), 0.28*alto + 0.16*stratiform};
 }
 
 std::array<double, 3> CloudShape::development(const std::vector<float>& tile, const Layer& layer,
@@ -494,8 +522,14 @@ std::array<double, 3> CloudShape::development(const std::vector<float>& tile, co
 	const double population = layer.front.on ? (1. - smooth(0.15, 0.4, layer.flatness))
 		* (1. - smooth(2.5, 3.5, layer.base)) : 0.;
 	const double occupied = 1. + population*(smooth(0.45, 0.57, patches) - 1.);
-	return {formation[2]*(group - 0.5) + GrowStrength*(life - 0.5), 0.65 + 0.35*life,
-	        (0.45 + 0.55*life)*occupied};
+	// Stratocumulus banks contain both low, spread-out elements and deeper rolls.
+	// Reuse the advected detail field so variation is coherent, not random per frame.
+	// Keep the height inside the existing ray-march bounds and preserve Cu/Ac.
+	const double stratiform = smooth(0.15, 0.35, layer.flatness)*(1. - smooth(0.45, 0.6, layer.flatness));
+	const double relief = smooth(0.2, 0.8, 0.65*detail + 0.35*life);
+	const double height = 0.65 + 0.35*(life + stratiform*(relief - life));
+	const double density = 0.45 + 0.55*life + 0.2*stratiform*(1. - life);
+	return {formation[2]*(group - 0.5) + GrowStrength*(life - 0.5), height, density*occupied};
 }
 
 std::array<double, 3> CloudShape::cohesiveWeather(double offset, double height, double density, double flatness, double cover)
@@ -594,17 +628,20 @@ double CloudShape::transmission(const std::vector<float>& tile, const Layer& lay
 		const double mapY = motion.sine*scale*ex + motion.cosine*scale*ey + motion.offsetY + layer.shift;
 		const double noise = 0.6*readTile(tile, mapX/CoverScaleLarge, mapY/CoverScaleLarge, 2) + 0.4*readTile(tile, mapX/CoverScaleSmall, mapY/CoverScaleSmall, 2);
 		const auto drift = deformation(tile, layer, motion, mapX, mapY);
-		const double tileX = (mapX + drift[0])*layer.stretch()/(TileSize*size), tileY = (mapY + drift[1])/(TileSize*size);
+		const double tileX = (mapX + drift[0])*layer.stretch()/(TileSize*size*layer.bodyScale()), tileY = (mapY + drift[1])/(TileSize*size*layer.bodyScale());
 		const auto life = development(tile, layer, motion, mapX, mapY);
 		const double cover = layer.front.on ? frontCover(tile, frontMotion.cosine*scale*ex - frontMotion.sine*scale*ey + frontMotion.offsetX,
 		                                                 frontMotion.sine*scale*ex + frontMotion.cosine*scale*ey + frontMotion.offsetY, layer.front, frontMotion)
 		                                    : layer.cover;
 		const double offset = std::min(coverOffset(cover, noise) + life[0], 0.45) + 2.5*(bankMask(layer, px, py) - 1.);
 		const auto weather = cohesiveWeather(offset, life[1], life[2], flat, cover);
-		const double shape = readTile(tile, tileX, tileY, 0) + weather[0];
-		const double height = size*layer.heightScale()*readTile(tile, tileX, tileY, 1)*weather[1];
-		const double round = shape/std::pow(std::fabs(shape) + 0.01, 0.55), plateau = 0.8*shape/std::sqrt(shape*shape + 0.0625);
-		const double topHeight = height*(round + flat*(plateau - round));
+		const double bank = 2.*(layer.bodyScale() - 1.);
+		const double body = readTile(tile, tileX, tileY, 0);
+		const double shape = body + bank*(readTile(tile, tileX, tileY, 3) - body) + weather[0];
+		const double h = readTile(tile, tileX, tileY, 1);
+		const double height = size*layer.heightScale()*layer.bodyHeight(h, readTile(tile, tileX, tileY, 2))*weather[1];
+		const double round = shape/std::pow(std::fabs(shape) + 0.01, 0.55), plateau = 0.8*shape/std::sqrt(shape*shape + layer.profileWidth());
+		const double topHeight = height*(round + layer.profileFlatness()*(plateau - round));
 		const double under = size*layer.heightScale()*(0.012 + 0.008*readTile(tile, tileX, tileY, 2));
 		const double level = r - base;
 		const double e = std::clamp((std::min(topHeight - level, level - under) + 0.012)/(0.024 + 0.004*size), 0., 1.);

@@ -20,6 +20,7 @@
 #ifndef CLOUDSHAPE_HPP
 #define CLOUDSHAPE_HPP
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <vector>
@@ -36,7 +37,7 @@
 //!     a large area, which the mipmaps give far away, near the edge of a cloud)
 //!   1 the height of the cloud (km) at S = 1
 //!   2 a soft noise of the tile, from 0 to 1, for the areas with and without clouds
-//!   3 fine lobes, from 0 to 1, for near clouds
+//!   3 continuous warped-noise stratocumulus bank shape, independent of the ellipsoids
 //! The top over the base is then about H (S + cover)^0.7, and the underside is flat but for its rim: with more cover the
 //! clouds grow. The shader follows the line of
 //! sight through the layer in this way, and transmission() does the same for what is drawn over the clouds.
@@ -93,7 +94,25 @@ public:
 			const double heaped = 1. - flatness;
 			return (1. - 0.75*flatness)*(1. + 0.8*heaped*heaped)*std::pow(std::max(size, 0.05), -0.7*heaped*heaped);
 		}
+		//! A bank shares its broad depth; individual seed heights leave only weak relief.
+		double bodyHeight(double seedHeight, double environment) const
+		{
+			const double bank = 2.*(bodyScale() - 1.);
+			return seedHeight + 0.95*bank*(0.44 + 0.12*environment - seedHeight);
+		}
+		//! Flatten the shared bank shoulders without changing other presets.
+		double profileFlatness() const {return flatness + 2.*(bodyScale() - 1.)*(0.95 - flatness);}
+		double profileWidth() const {return 0.0625*(1. - 0.84*2.*(bodyScale() - 1.));}
 		double stretch() const {return 1./(1. + 2.*flatness);}
+		//! Broader footprints for stratocumulus without increasing vertical depth.
+		double bodyScale() const
+		{
+			const auto smooth = [](double a, double b, double x) {
+				const double t = std::clamp((x - a)/(b - a), 0., 1.);
+				return t*t*(3. - 2.*t);
+			};
+			return 1. + 0.5*smooth(0.15, 0.35, flatness)*(1. - smooth(0.45, 0.6, flatness));
+		}
 	};
 	//! What the bank of clouds lets stand at a place (km from the observer: x to the south, y to the east), from 0 to 1
 	static double bankMask(const Layer& layer, double x, double y);
