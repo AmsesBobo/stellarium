@@ -162,8 +162,9 @@ public:
 	//! tile in three sizes stretched along it, in patches that the cover sets. The constants are shared with the shader.
 	static constexpr double CirrusAxisCos = 0.819, CirrusAxisSin = 0.574;
 	static constexpr double CirrusPatchScale = 190.;          //!< km per tile of the patches
-	static constexpr double CirrusScaleX[3] = {32., 18., 6.}; //!< km per tile along the fibres
-	static constexpr double CirrusScaleY[3] = {18., 2.6, 0.55}; //!< and across them
+	//! The streaks of the cirrus lie in the cells of a grid: km per cell along the streaks and across them, and after
+	//! how many cells the grid repeats
+	static constexpr double CirrusCellX = 14., CirrusCellY = 5., CirrusCells = 64.;
 	static constexpr double CirrusBendScale = 60.;            //!< km per tile of the noise that bends them
 	static constexpr double CirrusBend = 2.4;                  //!< km
 	static constexpr double CirrusShift = 4711.;              //!< km: where the cirrus lie on the map

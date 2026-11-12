@@ -90,31 +90,77 @@ highp float cirrusNoise(highp vec2 uv, highp float lod)
 }
 
 // The density from 0 to 1 at a place of the map, with the size of a pixel there (km) and the cover: see
-// CloudShape::cirrusDensity()
+// CloudShape::cirrusDensity(), which is the same, step for step.
+// Cirrus are trails of falling ice crystals. Each one begins in a small dense tuft, where the crystals form, and trails
+// away from it to one side as the crystals fall into slower air: a streak that widens, thins out and bends a little,
+// combed into fine fibres along its length (cirrus uncinus, the hooks, and with many streaks side by side fibratus).
+// The streaks lie in the cells of a grid, each with a tuft at a random place and a tail of a random length, width and bend
 highp float cirrusDensity(highp vec2 map, highp float foot, highp float cover)
 {
 	if (cover <= 0.) return 0.;
 	highp vec2 m = vec2(0.819*map.x - 0.574*map.y, 0.574*map.x + 0.819*map.y);
 	// A weak shared bend gives a prevailing direction without combing every
-	// filament into the same large wave. Local tufts steer their own fine fibres.
+	// filament into the same large wave.
 	m += 2.4*(vec2(cirrusNoise(map/60. + cirrusTexturePhase[0] + 0.5, max(log2(foot*1024./60.), 0.)),
 	               cirrusNoise(map/60. + cirrusTexturePhase[0] + 0.25, max(log2(foot*1024./60.), 0.))) - 0.5);
 	highp float patch = cirrusNoise(map/190. + cirrusTexturePhase[1], max(log2(foot*1024./190.), 0.));
 	highp float area = smoothstep(0., 1., clamp((patch - 0.85 + 0.9*cover)/0.2, 0., 1.));
-	highp vec2 tuftUV = vec2(m.x/32., m.y/18.) + cirrusTexturePhase[2];
-	highp float tuftLod = max(log2(foot*1024./18.), 0.);
-	highp float tuft = cirrusNoise(tuftUV, tuftLod);
-	// A second envelope breaks long ribbons into unequal, tapering wisps.
-	highp float envelope = cirrusNoise(tuftUV + vec2(0.23, 0.61), tuftLod);
-	m.y += 1.4*(tuft - 0.5);
-	highp float strands = cirrusNoise(vec2(m.x/18. + 0.37, m.y/2.6 + 0.71) + cirrusTexturePhase[3], max(log2(foot*1024./2.6), 0.));
-	highp float fine = cirrusNoise(vec2(m.x/6. + 0.13, m.y/0.55 + 0.29) + cirrusTexturePhase[4], max(log2(foot*1024./0.55), 0.));
-	highp float wisps = smoothstep(0.38, 0.72, 0.7*strands + 0.3*fine);
-	highp float taper = smoothstep(0.3, 0.7, envelope);
-	highp float head = smoothstep(0.52, 0.8, tuft);
-	// Increasing cover adds patches, rather than filling the spaces between
-	// all their fibres with a uniform veil. Density stays in [0,1].
-	return clamp(1.6*area*taper*(0.85*wisps + 0.15*head), 0., 1.);
+	if (area <= 0.) return 0.;
+	// (cells of 14 km along the streaks and 5 km across; the grid repeats after 64 cells, and the wind carries it on by
+	// whole grids: cirrusTexturePhase[2])
+	highp vec2 c = vec2(m.x/14., m.y/5.) + 64.*cirrusTexturePhase[2];
+	highp vec2 first = floor(c);
+	highp float sum = 0.;
+	for (int i = -2; i <= 0; ++i)
+		for (int j = -1; j <= 1; ++j)
+		{
+			highp vec2 cell = first + vec2(float(i), float(j));
+			// (random numbers of the cell: texels of the noise of the tile, far apart)
+			highp vec2 id = mod(cell, 64.);
+			highp vec2 r = vec2(textureLod(cloudTile, (vec2(mod(37.*id.x + 17.*id.y, 1024.), mod(53.*id.y + 29.*id.x, 1024.)) + 0.5)/1024., 0.).z,
+			                    textureLod(cloudTile, (vec2(mod(13.*id.x + 41.*id.y + 300., 1024.), mod(7.*id.y + 59.*id.x + 700., 1024.)) + 0.5)/1024., 0.).z);
+			r = clamp((r - 0.25)/0.5, 0., 1.);
+			highp vec2 q = fract(vec2(13.7, 29.3)*r + vec2(0.3, 0.6));
+			// (fewer streaks at a low cover)
+			if (q.x > 0.25 + 0.7*cover)
+				continue;
+			highp vec2 head = cell + 0.25 + 0.6*vec2(q.y, r.x);
+			highp vec2 d = (c - head)*vec2(14., 5.);   // km from the tuft: along the streak, across it
+			// (each streak a little to its own side of the common direction, up to 12 degrees)
+			highp float turn = 0.42*(fract(11.3*q.x + 5.1*r.y) - 0.5);
+			d = vec2(d.x + turn*d.y, d.y - turn*d.x);
+			highp float tailLength = 6. + 16.*r.y;
+			if (d.x < -3. || d.x > tailLength)
+				continue;
+			highp float along = max(d.x, 0.)/tailLength;
+			// (the tail bends to one side, wanders a little on its way and widens)
+			highp float wander = cirrusNoise(vec2(d.x/40., 0.37) + vec2(5.3, 2.9)*r, max(log2(foot*1024./40.), 0.));
+			highp float width = (0.45 + 0.5*r.x)*(0.9 + 1.4*along);
+			highp float across = d.y - 0.3*(fract(7.1*q.y) - 0.5)*tailLength*along*along - 2.2*width*(wander - 0.5)*(0.25 + along);
+			highp float v = across/width;
+			// (the fibres are not straight: they wave a little, each part of the tail on its own)
+			v += 0.3*(cirrusNoise(vec2(d.x/7., v/5.) + vec2(4.1, 0.9)*r, max(log2(foot*1024./7.), 0.)) - 0.5);
+			// (the fibres: a noise drawn out along the tail, in the coordinates of the tail, so that they spread and bend
+			// with it; in three sizes: strands, the fibres in them, and the finest hairs)
+			highp float strands = cirrusNoise(vec2(d.x/60., v/2.5) + vec2(3.1, 5.7)*r, max(log2(foot*1024./(2.5*width)), 0.));
+			highp float fibres = 0.45*strands
+			                   + 0.33*cirrusNoise(vec2(d.x/25., v/0.8) + vec2(7.3, 1.9)*r, max(log2(foot*1024./(0.8*width)), 0.))
+			                   + 0.22*cirrusNoise(vec2(d.x/11., v/0.27) + vec2(1.7, 8.3)*r, max(log2(foot*1024./(0.27*width)), 0.));
+			highp float combed = smoothstep(0.4, 0.6, fibres);
+			// (no smooth outline: the strands end at different widths, and single fibres stand out at the sides)
+			highp float side = 1. - smoothstep(0.3, 1.7, abs(v) + 1.6*(strands - 0.5));
+			highp float tail = side*pow(1. - along, 1.1)*smoothstep(0., 0.04, along)*(0.3 + 0.7*(1. - along))*(0.05 + 1.25*combed);
+			// (the tuft at the head, where the crystals form: the dense, woolly beginning of the streak, a little longer
+			// than wide and no wider than the tail that leaves it; a ball there makes a jellyfish of the streak)
+			highp float lumps = 0.6*cirrusNoise(d/5. + vec2(2.3, 6.1)*r, max(log2(foot*1024./5.), 0.))
+			                  + 0.4*cirrusNoise(d/1.9 + vec2(6.7, 3.3)*r, max(log2(foot*1024./1.9), 0.));
+			// (short towards the front: the streak begins there)
+			highp vec2 h = vec2(d.x/(d.x < 0. ? 1. : 2.2), across/(1.15*width));
+			highp float tuft = 1.5*exp(-dot(h, h))*(0.3 + 1.1*lumps);
+			sum += (0.55 + 0.45*q.y)*(tuft + tail);
+		}
+	// Increasing cover adds patches and streaks, rather than a uniform veil. Density stays in [0,1].
+	return clamp(1.5*area*sum, 0., 1.);
 }
 )";
 }
@@ -197,9 +243,10 @@ void setCirrusMotion(QOpenGLShaderProgram& p, const char* turnName, const CloudS
 	const QVector2D phases[] = {
 		texturePhase(x/CloudShape::CirrusBendScale, y/CloudShape::CirrusBendScale),
 		texturePhase(x/CloudShape::CirrusPatchScale, y/CloudShape::CirrusPatchScale),
-		texturePhase(u/CloudShape::CirrusScaleX[0], v/CloudShape::CirrusScaleY[0]),
-		texturePhase(u/CloudShape::CirrusScaleX[1], v/CloudShape::CirrusScaleY[1]),
-		texturePhase(u/CloudShape::CirrusScaleX[2], v/CloudShape::CirrusScaleY[2])
+		// (the grid of the streaks, in whole grids: see cirrusDensity())
+		texturePhase(u/(CloudShape::CirrusCellX*CloudShape::CirrusCells), v/(CloudShape::CirrusCellY*CloudShape::CirrusCells)),
+		QVector2D(0.f, 0.f),   // (two free places)
+		QVector2D(0.f, 0.f)
 	};
 	p.setUniformValueArray("cirrusTexturePhase", phases, 5);
 }
@@ -257,7 +304,7 @@ void CloudMgr::init()
 	setFlagManualWind(conf->value("clouds/flag_manual_wind", false).toBool());
 	setCirrusCover(conf->value("clouds/cirrus_cover", 0.4).toDouble());
 	setCirrusHeight(conf->value("clouds/cirrus_height", 8.).toDouble());
-	setCirrusOpticalDepth(conf->value("clouds/cirrus_optical_depth", 0.15).toDouble());
+	setCirrusOpticalDepth(conf->value("clouds/cirrus_optical_depth", 1.0).toDouble());
 	addAction("actionShow_Clouds", N_("Display Options"), N_("Clouds"), "flagShow");
 
 	// A full screen quad
@@ -486,7 +533,7 @@ struct CloudType
 	double base, size, density, flatness, cover;
 };
 constexpr CloudType CloudTypes[] = {
-	{1.2, 0.45, 1., 0., 0.25},   // cumulus humilis: fair weather heaps, white in the sunlight, most well under 1 km across
+	{1.2, 0.6, 1., 0., 0.3},     // cumulus humilis: fair weather heaps, white in the sunlight, most under 1 km across
 	{1.0, 1.2, 0.9, 0.4, 0.6},   // stratocumulus: large flat masses close together, grey below
 	{3.5, 0.4, 0.3, 0.6, 0.4},   // altocumulus: sheets of small, thin cloudlets higher up, with open sky between the sheets
 	{3.5, 0.7, 0.35, 0.1, 0.15}, // altocumulus floccus: a few ragged, fuzzy tufts higher up
@@ -1118,7 +1165,8 @@ highp float cloudDepth(highp vec2 map, highp float z, CloudWeather weather, high
 	// not a cloud
 	highp float rolls = smoothstep(0.15, 0.35, cloudShape.y)*(1. - smoothstep(0.45, 0.6, cloudShape.y));
 	highp float heaped = max(1. - flatness, 0.9*rolls);
-	highp float lumps = max(1. - flatness, 0.35*rolls);
+	// (the top of a stratocumulus lies against an inversion and is even: its relief is below, see the base)
+	highp float lumps = max(1. - flatness, 0.1*rolls);
 	highp float k = cloudBillowScale.x;
 	// (the billows rise through the cloud as time goes on: cloudBillowScale.z)
 	highp vec3 c = vec3(map*k + cloudBillowPhase, z*k - cloudBillowScale.z);
@@ -1136,6 +1184,10 @@ highp float cloudDepth(highp vec2 map, highp float z, CloudWeather weather, high
 	// Floccus: heaped clouds at the level of altocumulus. No rising air from the ground feeds them through a flat base:
 	// they are tufts, ragged below and fuzzy all around, which dissolve into shreds
 	highp float floccus = smoothstep(2., 3.5, cloudRadii.y - cloudRadii.x)*(1. - smoothstep(0.1, 0.3, cloudShape.y));
+	// How woolly the cloud is, against bubbly: floccus wholly, and heaped cumulus half. With the balls of the billows
+	// alone a cumulus is a heap of lumps; a real one has soft, drawn-out shapes between its rounded tops, and sides that
+	// dissolve into shreds
+	highp float wool = max(floccus, 0.75*(1. - flatness)*(1. - alto));
 	highp float cell = 1.;
 	if (alto > 0.)
 	{
@@ -1156,24 +1208,32 @@ highp float cloudDepth(highp vec2 map, highp float z, CloudWeather weather, high
 	// keeps its thickness
 	highp vec4 n = textureLod(cloudBillow, c, noiseLod);
 	highp float rim = 1. - smoothstep(0.08, 0.5, s);
-	s += heaped*rim*(0.2*(1. - floccus)*(n.r - 0.7) + 0.22*(n.b - 0.58) + 0.32*(n.a - 0.5));
+	s += heaped*rim*(0.2*(1. - wool)*(n.r - 0.7) + 0.22*(n.b - 0.58) + 0.32*(n.a - 0.5));
 	// (between the rolls the layer thins out and breaks up)
 	s -= 0.1*rolls*smoothstep(0.62, 0.3, towers);
 	highp float height = cloudSize*cloudShape.w*f.y*weather.growth.y;
 	highp float round = s/pow(abs(s) + 0.01, 0.55);
 	highp float plateau = 0.8*s/sqrt(s*s + cloudPlateauWidth(cloudShape.y));
 	highp float top = height*mix(round, plateau, flatness)*(1. + 0.9*lumps*(towers - 0.5))*mix(1., 0.12 + 1.2*cell*cell, alto);
+	// (a stratocumulus is as thick in its rolls as before, though its base now lies higher between them)
+	top *= 1. + 0.3*rolls;
 	cloudTopHere = max(top, 0.);
 	// How much of the noise stands: all of it in the middle of the cloud, less towards the top (over the upper part of
 	// the cloud: a dome) and nothing at the level of the base, which is flat and sets in within a few meters
 	// (below 0 under the base, above the top and outside the cloud, so that the depth is continuous)
-	highp float lower = min(z/(0.008 + 0.022*cloudSize + 0.5*floccus*max(top, 0.)), 1.);
-	highp float upper = min((top - z)/(0.75*max(top, 0.) + 0.03*cloudSize), 1.);
+	// The base of a stratocumulus is not level: the layer is some hundreds of meters thick in its rolls and thin between
+	// them, with an even top, so the base hangs down in the rolls and lies higher between them. Seen from below, the
+	// thick rolls are dark and what lies between them is bright
+	// (broad rolls, from a blurred look at the lumps, with smaller ones on them)
+	highp float broad = textureLod(cloudBillow, vec3(0.5*c.xy + vec2(0.61, 0.23), 0.7), noiseLod + 1.).a;
+	highp float lift = rolls*0.5*max(top, 0.)*smoothstep(0.8, 0.25, 0.65*broad + 0.35*towers);
+	highp float lower = min((z - lift)/(0.008 + 0.022*cloudSize + 0.5*floccus*max(top, 0.) + 0.18*rolls*max(top, 0.)), 1.);
+	highp float upper = min((top - z)/(mix(0.75, 0.4, rolls)*max(top, 0.) + 0.03*cloudSize), 1.);
 	highp float cover = min(lower, upper);
 	if (cover > 0.)
 		cover = lower*upper*mix(1., clamp((s + 0.05)/0.35, 0., 1.), 0.85);
 	// (the tufts of floccus are woolly, not bubbly: broad lumps and threads in place of the balls)
-	highp float billow = smoothstep(0.4, 0.9, mix(0.27*n.a + 0.45*n.r + 0.28*n.g, 0.62*n.a + 0.3*n.b + 0.08*n.r + 0.07, floccus));
+	highp float billow = smoothstep(0.4, 0.9, mix(0.27*n.a + 0.45*n.r + 0.28*n.g, 0.62*n.a + 0.3*n.b + 0.08*n.r + 0.07, wool));
 	highp float erosion = mix(0.5, 0.85, heaped);
 	highp float d = cover - erosion*(1. - billow);
 	// (the finest billows, only where the edge is, and only where a pixel shows them)
@@ -1183,12 +1243,12 @@ highp float cloudDepth(highp vec2 map, highp float z, CloudWeather weather, high
 	{
 		highp vec4 m = textureLod(cloudBillow, 3.*c + vec3(0.43, 0.17, 0.71), noiseLod + 0.6);
 		highp float shown = 1. - smoothstep(1.5, 2.5, noiseLod);
-		cloudVeilHere = (0.1 + 0.2*floccus)*heaped*shown*smoothstep(-0.3, 0., d)*smoothstep(0.62, 0.92, 0.6*n.b + 0.4*m.b)*smoothstep(0.35, 0.75, n.a);
-		d -= mix(0.34, 0.5, rim)*(1. - 0.75*floccus)*(1. - (0.6*m.r + 0.4*m.g))*shown;
+		cloudVeilHere = (0.1 + 0.2*wool)*heaped*shown*smoothstep(-0.3, 0., d)*smoothstep(0.62, 0.92, 0.6*n.b + 0.4*m.b)*smoothstep(0.35, 0.75, n.a);
+		d -= mix(0.34, 0.5, rim)*(1. - 0.75*wool)*(1. - (0.6*m.r + 0.4*m.g))*shown;
 	}
 	// (soft edges; a little softer low on the sides of a heaped cloud than at its rising top)
 	// (cloudlets of altocumulus and tufts of floccus are fuzzy all around)
-	cloudSoftHere = mix(mix(0.24, 0.07, (1. - flatness)*smoothstep(0.15, 0.6, z/max(top, 0.01))), mix(0.34, 0.55, floccus), max(0.8*alto, floccus));
+	cloudSoftHere = mix(mix(0.24, mix(0.07, 0.14, wool), (1. - flatness)*smoothstep(0.15, 0.6, z/max(top, 0.01))), mix(0.34, 0.55, floccus), max(0.8*alto, floccus));
 	return d;
 }
 
@@ -2027,7 +2087,19 @@ void main(void)
 	highp float x = clamp((localSun + 5.)/0.5, 0., 31.999);
 	highp int i = int(x);
 	highp vec3 sunlight = exp(mix(cirrusSunLog[i], cirrusSunLog[i + 1], x - float(i)));
-	highp vec3 light = (1. - T)*(sunlight*cirrusPhase(dot(dir, cirrusSun)) + cirrusMoonLight*cirrusPhase(dot(dir, cirrusMoon)) + cirrusSky);
+	// Scattered once, the light goes where the crystals send it: mostly forwards, around the Sun, and little to the sides.
+	// That is all there is to a thin veil, which is faint away from the Sun. The denser tufts and streaks scatter the
+	// light many times, until it has lost its direction and comes out below to all sides alike: this is what makes
+	// cirrus white all over the sky. Of the light that falls on a layer of the optical depth tau, the part
+	// 1/(1 + 0.75 tau (1 - g)) comes through (two-stream, as for the other clouds; g = 0.75 for ice), less the part
+	// that was not scattered at all, exp(-tau/mu). (sunlight is E/(4 pi): times 4 mu for a white surface below the layer)
+	highp float tauUp = cirrusCover.y*density;
+	highp float muSun = max(dot(up, cirrusSun), 0.03), muMoon = max(dot(up, cirrusMoon), 0.03);
+	highp float many = 1. - exp(-tauUp);
+	highp float diffusedSun = 4.*muSun*max(1./(1. + 0.19*tauUp) - exp(-tauUp/muSun), 0.)*many;
+	highp float diffusedMoon = 4.*muMoon*max(1./(1. + 0.19*tauUp) - exp(-tauUp/muMoon), 0.)*many;
+	highp vec3 light = (1. - T)*(sunlight*cirrusPhase(dot(dir, cirrusSun)) + cirrusMoonLight*cirrusPhase(dot(dir, cirrusMoon)) + cirrusSky)
+	                 + sunlight*diffusedSun + cirrusMoonLight*diffusedMoon;
 	// The air below the cirrus dims them (Rozenberg's air mass)
 	highp float sine = max(altAz.z, 0.);
 	highp vec3 way = exp(-cirrusTau/(sine + 0.025*exp(-11.*sine)));

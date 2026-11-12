@@ -232,7 +232,7 @@ private:
 	CloudShape::Motion motionAt(const StelCore* core, double jd, int wind) const;
 	double cirrusCover = 0.4;
 	double cirrusHeight = 8.;
-	double cirrusOpticalDepth = 0.15;
+	double cirrusOpticalDepth = 1.0;
 	double currentCirrusCover = 0.4;  //!< the cover of the cirrus at this moment
 	bool isCirrusShown(const StelCore* core) const;
 	//! The transmission of the cirrus towards a direction (AltAz, unit vector)

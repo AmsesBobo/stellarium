@@ -593,22 +593,56 @@ std::array<double, 2> CloudShape::deformation(const std::vector<float>& tile, co
 double CloudShape::cirrusDensity(const std::vector<float>& tile, double mapX, double mapY, double cover)
 {
 	if (cover <= 0.) return 0.;
-	// as in the shader of CloudMgr, at the full detail of the tile
+	// as cirrusDensity() in the shader of CloudMgr, step for step, at the full detail of the tile
 	const auto smooth = [](double a, double b, double x) {
 		const double t = std::clamp((x - a)/(b - a), 0., 1.);
 		return t*t*(3. - 2.*t);
 	};
+	const auto fract = [](double x) {return x - std::floor(x);};
 	const double x = CirrusAxisCos*mapX - CirrusAxisSin*mapY + CirrusBend*(readTile(tile, mapX/CirrusBendScale + 0.5, mapY/CirrusBendScale + 0.5, 2) - 0.5);
-	double y = CirrusAxisSin*mapX + CirrusAxisCos*mapY + CirrusBend*(readTile(tile, mapX/CirrusBendScale + 0.25, mapY/CirrusBendScale + 0.25, 2) - 0.5);
+	const double y = CirrusAxisSin*mapX + CirrusAxisCos*mapY + CirrusBend*(readTile(tile, mapX/CirrusBendScale + 0.25, mapY/CirrusBendScale + 0.25, 2) - 0.5);
 	const double patch = readTile(tile, mapX/CirrusPatchScale, mapY/CirrusPatchScale, 2);
 	const double area = smooth(0., 1., (patch - 0.85 + 0.9*cover)/0.2);
-	const double tuft = readTile(tile, x/CirrusScaleX[0], y/CirrusScaleY[0], 2);
-	const double envelope = readTile(tile, x/CirrusScaleX[0] + 0.23, y/CirrusScaleY[0] + 0.61, 2);
-	y += 1.4*(tuft - 0.5);
-	const double strands = readTile(tile, x/CirrusScaleX[1] + 0.37, y/CirrusScaleY[1] + 0.71, 2);
-	const double fine = readTile(tile, x/CirrusScaleX[2] + 0.13, y/CirrusScaleY[2] + 0.29, 2);
-	const double wisps = smooth(0.38, 0.72, 0.7*strands + 0.3*fine);
-	return std::clamp(1.6*area*smooth(0.3, 0.7, envelope)*(0.85*wisps + 0.15*smooth(0.52, 0.8, tuft)), 0., 1.);
+	if (area <= 0.) return 0.;
+	const double cx = x/CirrusCellX, cy = y/CirrusCellY;
+	const double firstX = std::floor(cx), firstY = std::floor(cy);
+	const auto wrap = [](double v, double period) {return v - period*std::floor(v/period);};
+	double sum = 0.;
+	for (int i = -2; i <= 0; ++i)
+		for (int j = -1; j <= 1; ++j)
+		{
+			const double cellX = firstX + i, cellY = firstY + j;
+			const double idX = wrap(cellX, CirrusCells), idY = wrap(cellY, CirrusCells);
+			const double r0 = std::clamp((readTile(tile, (wrap(37.*idX + 17.*idY, TileTexels) + 0.5)/TileTexels, (wrap(53.*idY + 29.*idX, TileTexels) + 0.5)/TileTexels, 2) - 0.25)/0.5, 0., 1.);
+			const double r1 = std::clamp((readTile(tile, (wrap(13.*idX + 41.*idY + 300., TileTexels) + 0.5)/TileTexels, (wrap(7.*idY + 59.*idX + 700., TileTexels) + 0.5)/TileTexels, 2) - 0.25)/0.5, 0., 1.);
+			const double q0 = fract(13.7*r0 + 0.3), q1 = fract(29.3*r1 + 0.6);
+			if (q0 > 0.25 + 0.7*cover)
+				continue;
+			double dx = (cx - (cellX + 0.25 + 0.6*q1))*CirrusCellX, dy = (cy - (cellY + 0.25 + 0.6*r0))*CirrusCellY;
+			const double turn = 0.42*(fract(11.3*q0 + 5.1*r1) - 0.5);
+			const double turnedX = dx + turn*dy, turnedY = dy - turn*dx;
+			dx = turnedX;
+			dy = turnedY;
+			const double tailLength = 6. + 16.*r1;
+			if (dx < -3. || dx > tailLength)
+				continue;
+			const double along = std::max(dx, 0.)/tailLength;
+			const double wander = readTile(tile, dx/40. + 5.3*r0, 0.37 + 2.9*r1, 2);
+			const double width = (0.45 + 0.5*r0)*(0.9 + 1.4*along);
+			const double across = dy - 0.3*(fract(7.1*q1) - 0.5)*tailLength*along*along - 2.2*width*(wander - 0.5)*(0.25 + along);
+			double v = across/width;
+			v += 0.3*(readTile(tile, dx/7. + 4.1*r0, v/5. + 0.9*r1, 2) - 0.5);
+			const double strands = readTile(tile, dx/60. + 3.1*r0, v/2.5 + 5.7*r1, 2);
+			const double fibres = 0.45*strands + 0.33*readTile(tile, dx/25. + 7.3*r0, v/0.8 + 1.9*r1, 2)
+			                    + 0.22*readTile(tile, dx/11. + 1.7*r0, v/0.27 + 8.3*r1, 2);
+			const double combed = smooth(0.4, 0.6, fibres);
+			const double side = 1. - smooth(0.3, 1.7, std::fabs(v) + 1.6*(strands - 0.5));
+			const double tail = side*std::pow(1. - along, 1.1)*smooth(0., 0.04, along)*(0.3 + 0.7*(1. - along))*(0.05 + 1.25*combed);
+			const double lumps = 0.6*readTile(tile, dx/5. + 2.3*r0, dy/5. + 6.1*r1, 2) + 0.4*readTile(tile, dx/1.9 + 6.7*r0, dy/1.9 + 3.3*r1, 2);
+			const double hx = dx/(dx < 0. ? 1. : 2.2), hy = across/(1.15*width);
+			sum += (0.55 + 0.45*q1)*(1.5*std::exp(-hx*hx - hy*hy)*(0.3 + 1.1*lumps) + tail);
+		}
+	return std::clamp(1.5*area*sum, 0., 1.);
 }
 
 double CloudShape::bankMask(const Layer& layer, double x, double y)
