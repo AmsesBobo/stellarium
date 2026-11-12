@@ -1225,7 +1225,8 @@ highp float cloudDepth(highp vec2 map, highp float z, CloudWeather weather, high
 	// them, with an even top, so the base hangs down in the rolls and lies higher between them. Seen from below, the
 	// thick rolls are dark and what lies between them is bright
 	// (broad rolls, from a blurred look at the lumps, with smaller ones on them)
-	highp float broad = textureLod(cloudBillow, vec3(0.5*c.xy + vec2(0.61, 0.23), 0.7), noiseLod + 1.).a;
+	// (at whole multiples of c only, as above: at half of c the rolls jumped whenever the wind had carried c on by a tile)
+	highp float broad = textureLod(cloudBillow, vec3(c.xy + vec2(0.61, 0.23), 0.7), noiseLod + 1.5).a;
 	highp float lift = rolls*0.5*max(top, 0.)*smoothstep(0.8, 0.25, 0.65*broad + 0.35*towers);
 	highp float lower = min((z - lift)/(0.008 + 0.022*cloudSize + 0.5*floccus*max(top, 0.) + 0.18*rolls*max(top, 0.)), 1.);
 	highp float upper = min((top - z)/(mix(0.75, 0.4, rolls)*max(top, 0.) + 0.03*cloudSize), 1.);
