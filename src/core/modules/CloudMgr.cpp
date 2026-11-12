@@ -537,13 +537,14 @@ constexpr CloudType CloudTypes[] = {
 	{1.0, 1.2, 0.9, 0.4, 0.6},   // stratocumulus: large flat masses close together, grey below
 	{3.5, 0.4, 0.3, 0.6, 0.4},   // altocumulus: sheets of small, thin cloudlets higher up, with open sky between the sheets
 	{3.5, 0.7, 0.35, 0.1, 0.15}, // altocumulus floccus: a few ragged, fuzzy tufts higher up
+	{1.0, 6.0, 1., 0., 0.1},     // cumulus congestus: a few towers several km across and high
 };
 }
 
 int CloudMgr::getType() const
 {
 	const auto near = [](double a, double b) {return std::fabs(a - b) < 0.005;};
-	for (int i = 0; i < 4; ++i)
+	for (int i = 0; i < 5; ++i)
 	{
 		const CloudType& t = CloudTypes[i];
 		if (near(layers[edited].base, t.base) && near(layers[edited].size, t.size) && near(layers[edited].density, t.density) && near(layers[edited].flatness, t.flatness))
@@ -554,7 +555,7 @@ int CloudMgr::getType() const
 
 void CloudMgr::setType(int type)
 {
-	if (type < TypeCumulus || type > TypeFloccus || type == getType())
+	if (type < TypeCumulus || type > TypeCongestus || type == getType())
 		return;
 	const CloudType& t = CloudTypes[type - 1];
 	setBaseHeight(t.base);
@@ -766,7 +767,8 @@ void CloudMgr::update(double)
 
 void CloudMgr::setSize(double value)
 {
-	value = std::clamp(value, 0.4, 2.5);
+	// (up to 8: the towers of cumulus congestus are clouds of size 3.5 and more)
+	value = std::clamp(value, 0.4, 8.);
 	if (!qFuzzyCompare(value, layers[edited].size))
 	{
 		layers[edited].size = value;
@@ -1009,7 +1011,9 @@ CloudWeather cloudWeatherAt(highp vec3 p, highp vec2 map, highp vec4 cover, high
 	}
 	highp vec2 uv = map*cloudDeformScale + phases[8] + cloudDeform;
 	// (1.6: CloudShape::DeformStrength)
-	highp vec2 drift = 1.6*size*(1. - 0.4*shape.y)*
+	// (no more for clouds larger than 1.2: the shift grows with the clouds, and where it changed by more than a km
+	// per km it folded the towers of cumulus congestus into level plates)
+	highp vec2 drift = 1.6*min(size, 1.2)*(1. - 0.4*shape.y)*
 		(vec2(textureLod(cloudTile, uv, 2.).z, textureLod(cloudTile, uv + vec2(0.37, 0.71), 2.).z) - 0.5);
 	// At a low cover the cumulus get fewer and smaller, down to a few percent of the sky, and keep their density: thin,
 	// half transparent clouds let the eye far in and look fibrous. Only the last few dissolve by thinning. Flat layers
@@ -1038,6 +1042,12 @@ CloudWeather cloudWeather(highp vec3 p)
 highp float cloudAlto(highp float base, highp float flatness)
 {
 	return smoothstep(2., 3.5, base)*smoothstep(0.3, 0.6, flatness);
+}
+
+// How much a layer towers: heaped clouds several km across are cumulus congestus, which grow some km high (as CloudShape::Layer::tower())
+highp float cloudTower(highp float size, highp float flatness)
+{
+	return smoothstep(3.5, 6., size)*(1. - flatness)*(1. - flatness);
 }
 
 highp vec4 cloudBodySample(highp vec4 f, highp float flatness, highp float base)
@@ -1130,6 +1140,10 @@ highp vec2 cloudTileAt(highp vec2 map)
 // The height of the top over the base (km) at the last place that cloudDepth() looked at, for the light; how soft the
 // edge of the cloud is there, and the density of the thin shreds around it
 highp float cloudTopHere = 0., cloudSoftHere = 0.1, cloudVeilHere = 0.;
+// Over how many km the depth in the cloud changes by 1 there, upwards: the scale of its edge, for the steps of the light
+highp float cloudScaleHere = 0.1;
+// How thin the cloud is there against a cloud of water: 1 (a place for thinner clouds, as the ice of an anvil)
+highp float cloudThinHere = 1.;
 
 // The integral of the ramp of the density at the edge of a cloud, from 0 below a to 1 above b, up to x
 highp float edgeIntegral(highp float x, highp float a, highp float b)
@@ -1156,6 +1170,8 @@ highp float cloudDepth(highp vec2 map, highp float z, CloudWeather weather, high
 	highp float s = f.x + weather.growth.x;
 	cloudTopHere = 0.;
 	cloudVeilHere = 0.;
+	cloudThinHere = 1.;
+	highp float tower = cloudTower(cloudSize, cloudShape.y);
 	if (s < -0.3)
 		return -10.;
 	highp float flatness = cloudProfileFlatness(cloudShape.y);
@@ -1187,7 +1203,8 @@ highp float cloudDepth(highp vec2 map, highp float z, CloudWeather weather, high
 	// How woolly the cloud is, against bubbly: floccus wholly, and heaped cumulus half. With the balls of the billows
 	// alone a cumulus is a heap of lumps; a real one has soft, drawn-out shapes between its rounded tops, and sides that
 	// dissolve into shreds
-	highp float wool = max(floccus, 0.75*(1. - flatness)*(1. - alto));
+	// (not the towers: the rising heads of a cumulus congestus are hard cauliflower)
+	highp float wool = max(floccus, 0.75*(1. - flatness)*(1. - alto)*(1. - 0.85*tower));
 	highp float cell = 1.;
 	if (alto > 0.)
 	{
@@ -1208,11 +1225,17 @@ highp float cloudDepth(highp vec2 map, highp float z, CloudWeather weather, high
 	// keeps its thickness
 	highp vec4 n = textureLod(cloudBillow, c, noiseLod);
 	highp float rim = 1. - smoothstep(0.08, 0.5, s);
-	s += heaped*rim*(0.2*(1. - wool)*(n.r - 0.7) + 0.22*(n.b - 0.58) + 0.32*(n.a - 0.5));
+	// (hardly so for a tower: its sides are so steep that a small move of the outline, different at each height, takes
+	// the whole cloud away there or adds it, and the tower came apart in level plates. Its billows are those of its sides)
+	s += (1. - 0.9*tower)*heaped*rim*(0.2*(1. - wool)*(n.r - 0.7) + 0.22*(n.b - 0.58) + 0.32*(n.a - 0.5));
 	// (between the rolls the layer thins out and breaks up)
 	s -= 0.1*rolls*smoothstep(0.62, 0.3, towers);
-	highp float height = cloudSize*cloudShape.w*f.y*weather.growth.y;
-	highp float round = s/pow(abs(s) + 0.01, 0.55);
+	// (the heights of the bodies of the map change from cell to cell of its grid. Towers stand so close and have such
+	// steep sides that these steps showed, as walls through the clouds: their heights come mostly from their outlines)
+	// (and from the broad smooth noise of the map: turrets of different heights, not mesas)
+	highp float height = cloudSize*cloudShape.w*mix(f.y, 0.4*(0.35 + 1.3*textureLod(cloudTile, cloudTileAt(map), lod).z), 0.75*tower)*weather.growth.y;
+	// (a tower has steep sides)
+	highp float round = s/pow(abs(s) + 0.01, mix(0.55, 0.68, tower));
 	highp float plateau = 0.8*s/sqrt(s*s + cloudPlateauWidth(cloudShape.y));
 	highp float top = height*mix(round, plateau, flatness)*(1. + 0.9*lumps*(towers - 0.5))*mix(1., 0.12 + 1.2*cell*cell, alto);
 	// (a stratocumulus is as thick in its rolls as before, though its base now lies higher between them)
@@ -1229,7 +1252,9 @@ highp float cloudDepth(highp vec2 map, highp float z, CloudWeather weather, high
 	highp float broad = textureLod(cloudBillow, vec3(c.xy + vec2(0.61, 0.23), 0.7), noiseLod + 1.5).a;
 	highp float lift = rolls*0.5*max(top, 0.)*smoothstep(0.8, 0.25, 0.65*broad + 0.35*towers);
 	highp float lower = min((z - lift)/(0.008 + 0.022*cloudSize + 0.5*floccus*max(top, 0.) + 0.18*rolls*max(top, 0.)), 1.);
-	highp float upper = min((top - z)/(mix(0.75, 0.4, rolls)*max(top, 0.) + 0.03*cloudSize), 1.);
+	// (of a tower the billows take away its outer km or so, not most of its height)
+	cloudScaleHere = mix(mix(0.75, 0.4, rolls)*max(top, 0.), min(0.75*max(top, 0.), 1.1), tower) + 0.03*cloudSize;
+	highp float upper = min((top - z)/cloudScaleHere, 1.);
 	highp float cover = min(lower, upper);
 	if (cover > 0.)
 		cover = lower*upper*mix(1., clamp((s + 0.05)/0.35, 0., 1.), 0.85);
@@ -1250,6 +1275,8 @@ highp float cloudDepth(highp vec2 map, highp float z, CloudWeather weather, high
 	// (soft edges; a little softer low on the sides of a heaped cloud than at its rising top)
 	// (cloudlets of altocumulus and tufts of floccus are fuzzy all around)
 	cloudSoftHere = mix(mix(0.24, mix(0.07, 0.14, wool), (1. - flatness)*smoothstep(0.15, 0.6, z/max(top, 0.01))), mix(0.34, 0.55, floccus), max(0.8*alto, floccus));
+	// (the rising heads of a tower are crisp, and so must be for the eye: see the edge that the way through it looks for)
+	cloudSoftHere = mix(cloudSoftHere, 0.03, tower);
 	return d;
 }
 
@@ -1314,6 +1341,7 @@ void main(void)
 	// The octaves of the many scatterings (see below): less of them looking towards the light, where they still go forwards,
 	// and a thick cloud before the Sun stays dark
 	highp float octaves = mix(0.35, 1., 1. - towardKey);
+	highp float towering = cloudTower(cloudSize, cloudShape.y);
 
 	// What the eye sees is the sum, along the line of sight, of the light that each bit of cloud sends towards it, dimmed
 	// by the cloud in front of it. Each bit is lit through the cloud towards the light: the lit sides are bright, the far
@@ -1330,6 +1358,8 @@ void main(void)
 		CloudWeather weatherFrom = CloudWeather(vec3(0.), vec2(0.)), weatherTo = CloudWeather(vec3(0.), vec2(0.));
 		int stride = int(clamp(floor(0.5/ds), 1., 4.)), phase = 0;
 		highp float lastD = -10., lastU = -1e9;  // the depth in the cloud at the last short step, and where that was
+		CloudWeather lastWeather = CloudWeather(vec3(0.), vec2(0.)); // and the weather there
+		highp float lastFacing = 1.;             // and which way the surface faced there
 		highp float lastSeen = -1.;              // the cloud on the way of the light at the last place that looked for it (km)
 		// Through the layer, until the clouds are opaque. Long steps look for clouds, short ones go through them
 		for (int k = 0; k < steps && depth < 7.; ++k)
@@ -1363,10 +1393,11 @@ void main(void)
 			    || !(t > 30. || (shape > -0.7 && length(middle) - cloudRadii.y - 0.5*ds*altAz.z < reach + 0.05 + smear)))
 				continue;
 			// (the map is no blurrier than a pixel, or a tenth of a step: the steps are short enough for far clouds)
-			highp float foot = max(max(t*cloudPixel, 0.1*ds), smear);
+			// (nor finer than the short steps can follow, where they are long: through the towers of cumulus congestus)
+			highp float foot = max(max(t*cloudPixel, max(0.1*ds, ds/float(CloudSubsteps) - 0.01)), smear);
 			highp float lod = max(log2(foot/cloudCover.z), 0.);
 			// (far away, where a pixel is wider than a billow, the light comes without a way of its own through the cloud)
-			highp float marched = keyUp*(1. - smoothstep(0.15, 0.3, t*cloudPixel));
+			highp float marched = keyUp*(1. - smoothstep(0.15, 0.3, t*cloudPixel/max(cloudSize*towering, 1.)));
 			// A second, closer look before the short steps: a few places along this step, with the map a little blurred.
 			// Most of the steps that pass the first look hold no cloud after all, and the short steps through them cost
 			// more than those through the clouds
@@ -1378,7 +1409,7 @@ void main(void)
 				CloudWeather weather = mixWeather(weatherStart, weatherEnd, (float(i) + 0.5)/float(probes));
 				highp vec4 f = cloudBodySample(textureLod(cloudTile, cloudTileAt(cloudMap(vec3(altAz.xy*u, r0 + altAz.z*u)) + weather.drift), lod + 2.),
 				                               cloudShape.y, cloudRadii.y - cloudRadii.x);
-				found = f.x + weather.growth.x > -0.45;
+				found = f.x + weather.growth.x > (towering > 0. ? -0.6 : -0.45);
 			}
 			if (!found)
 				continue;
@@ -1389,16 +1420,58 @@ void main(void)
 				highp vec3 q = vec3(altAz.xy*u, r0 + altAz.z*u);
 				highp float height = length(q) - cloudRadii.y;
 				CloudWeather weather = mixWeather(weatherStart, weatherEnd, (float(j) + 0.5)/float(CloudSubsteps));
+				// (through towers the steps are a km and more, over which the weather does not go evenly: its own value at
+				// each short step. With the even one the clouds came apart in level plates, since where the steps lie
+				// along the way changes with the altitude of the line of sight)
+				if (towering > 0.)
+				{
+					weather = cloudWeather(q);
+					// (and the blur of the map follows the distance along the step, or the shape jumps from step to step)
+					foot = max(max(u*cloudPixel, max(0.1*ds, ds/float(CloudSubsteps) - 0.01)), smear);
+					lod = max(log2(foot/cloudCover.z), 0.);
+				}
 				highp float d = cloudDepth(cloudMap(q), height, weather, lod, foot, true);
 				// (the mean density since the last short step; after a step that was skipped, as clear air, that of this place)
 				bool follows = u - lastU < 1.5*dt;
 				// (after a step that was skipped, as clear air, only this place counts)
 				highp float d0 = follows ? lastD : d;
+				// (where the steps are far apart, in towers, a look back shows whether the cloud began since then)
+				if (towering > 0. && !follows && d > 0. && dt > 0.03)
+				{
+					highp vec3 back = vec3(altAz.xy*(u - dt), r0 + altAz.z*(u - dt));
+					highp float top = cloudTopHere, soft = cloudSoftHere, veil = cloudVeilHere, scale = cloudScaleHere;
+					lastWeather = cloudWeather(back);
+					d0 = cloudDepth(cloudMap(back), length(back) - cloudRadii.y, lastWeather, lod, foot, true);
+					cloudTopHere = top; cloudSoftHere = soft; cloudVeilHere = veil; cloudScaleHere = scale;
+					follows = true;
+				}
 				lastD = d; lastU = u;
+				CloudWeather before = lastWeather;
+				lastWeather = weather;
 				if (max(d0, d) <= -0.3)
 					continue;
-				highp float top = cloudTopHere, soft = cloudSoftHere, veil = cloudVeilHere;
+				highp float top = cloudTopHere, soft = cloudSoftHere, veil = cloudVeilHere, thin = cloudThinHere;
 				highp float extinction = cloudCover.w*weather.growth.z;
+				// Where a short step through a tower passes its surface, three more looks are taken along it: the short steps
+				// are some 100 m there, and the cloud is opaque within some tens of meters behind its edge, so what the eye
+				// sees of the cloud lies within one step. With the depth only guessed between the two ends of the step, a
+				// thin or loose part of the cloud was there in one pixel and gone in the next, and the light jumped with where
+				// the edge lay in the step: bands of light and shade all over the sides of the towers
+				// (each with the weather of its place, between that of the two ends: the weather shifts and swells the
+				// clouds, by tens of meters over one step)
+				int parts = 1;
+				highp float d1 = 0., d2 = 0., d3 = 0.;
+				if (towering > 0. && follows && dt > 0.03 && min(d0, d) < 0.15)
+				{
+					highp vec3 m = vec3(altAz.xy*(u - 0.75*dt), r0 + altAz.z*(u - 0.75*dt));
+					d1 = cloudDepth(cloudMap(m), length(m) - cloudRadii.y, mixWeather(before, weather, 0.25), lod, foot, true);
+					m = vec3(altAz.xy*(u - 0.5*dt), r0 + altAz.z*(u - 0.5*dt));
+					d2 = cloudDepth(cloudMap(m), length(m) - cloudRadii.y, mixWeather(before, weather, 0.5), lod, foot, true);
+					m = vec3(altAz.xy*(u - 0.25*dt), r0 + altAz.z*(u - 0.25*dt));
+					d3 = cloudDepth(cloudMap(m), length(m) - cloudRadii.y, mixWeather(before, weather, 0.75), lod, foot, true);
+					cloudTopHere = top; cloudSoftHere = soft; cloudVeilHere = veil;
+					parts = 4;
+				}
 				// The stretch of the way from the last short step to this one, on which the depth in the cloud goes from one
 				// to the other. Near the surface of a cloud, where it is bright and soon opaque, the stretch counts in two
 				// parts, each with its own light: one part of some 20 m is as opaque as the eye sees deep, and with one light
@@ -1407,49 +1480,70 @@ void main(void)
 				// lies in the cloud of it, which moves evenly with the edge. Then the steps need no grain to hide them
 				// (in one part: the short steps are fine enough since there are 12 of them. More parts near the surface, each
 				// with a light of its own, cost much and showed no difference)
-				int parts = 1;
 				for (int part = 0; part < parts && depth < 7.; ++part)
 				{
-					highp float da = mix(d0, d, float(part)/float(parts)), db = mix(d0, d, float(part + 1)/float(parts));
+					highp float da = d0, db = d;
+					if (parts == 4)
+					{
+						da = part == 0 ? d0 : part == 1 ? d1 : part == 2 ? d2 : d3;
+						db = part == 0 ? d1 : part == 1 ? d2 : part == 2 ? d3 : d;
+					}
 					highp float density = max(edgeMean(da, db, 0., soft), veil);
+					highp float cross = da*db < 0. ? da/(da - db) : 0.;   // where the edge lies in the part
 					if (density <= 0.)
 						continue;
-					highp float cross = da*db < 0. ? da/(da - db) : 0.;   // where the edge lies in the part
-					highp float middle = 0.5*((da < 0. ? cross : 0.) + (db < 0. ? cross : 1.));
+					highp float opticalDepth = extinction*density*dt/float(parts);
+					// (the light of the part is that of the place from which, on average, its light reaches the eye: the
+					// middle of what lies in the cloud of a thin part, and only about one free path behind the edge of a
+					// part that is opaque by itself, as the long steps through a cumulus congestus are. Or the light of such a
+					// part came from anywhere inside it, deep in the dark)
+					highp float entry = da < 0. ? cross : 0., leave = db < 0. ? cross : 1.;
+					highp float seenFrom = towering > 0. && opticalDepth > 0.01 ? (1. - exp(-opticalDepth)*(1. + opticalDepth))/(opticalDepth*(1. - exp(-opticalDepth))) : 0.5;
+					highp float middle = entry + seenFrom*(leave - entry);
 					highp float dHere = mix(da, db, middle);
 					highp float uHere = u - dt*(1. - (float(part) + middle)/float(parts));
 					highp vec3 here = vec3(altAz.xy*uHere, r0 + altAz.z*uHere);
 					highp float heightHere = length(here) - cloudRadii.y;
-					highp float opticalDepth = extinction*density*dt/float(parts);
 					highp float weight = exp(-depth)*(1. - exp(-opticalDepth));
+					// (the weather of this place, for its light: in a tower that of the end of the step is another)
+					CloudWeather weatherHere = weather;
+					if (towering > 0. && follows)
+						weatherHere = mixWeather(before, weather, (float(part) + middle)/float(parts));
 					depth += opticalDepth;
 
 					// The way of the light to this place through the cloud: a few steps that grow, towards the Sun or the Moon
 					// (the steps lie at the same places for every pixel: steps that differ from pixel to pixel make grain)
-					highp float above = max(top - heightHere, 0.);
+					highp float above = max(top - heightHere, 0.)*thin;
 					highp float seen = 0.6*above;
 					// (the way of the light costs most of the time of the clouds. It is left out where it shows least: for the
 					// thin shreds around a cloud, which are lit all through, and deep in the cloud, behind what hides it
 					// almost wholly, where the last light found goes on)
-					bool deep = depth > 3.4 && lastSeen >= 0.;
+					// (in a tower one short step may be opaque by itself: there the depth in front of it counts, or the
+					// first of the cloud that the eye sees took the light of whatever lay before it on the way)
+					bool deep = (towering > 0. ? depth - opticalDepth : depth) > 3.4 && lastSeen >= 0.;
 					if (deep)
 						seen = lastSeen;
-					else if (opticalDepth < 0.02)
+					// (not in towers: the thin lowest part of their bases, seen from the side, was a sheet in full sunlight)
+					else if (opticalDepth < 0.02 && towering == 0.)
 						seen = 0.;
 					else if (marched > 0.)
 					{
-						highp float way = 0., stepLength = 0.035*cloudSize + 0.5*foot;
-						highp float lastLight = dHere;
+						// (in a tower shorter first steps, and one more: its billows are some hundred meters across)
+						highp float way = 0., stepLength = (0.035*cloudSize + 0.5*foot)*mix(1., 0.5, towering);
+						highp float lastLight = mix(dHere, min(dHere, 0.), towering);
 						seen = 0.;
-						for (int l = 0; l < 4; ++l)
+						int lightSteps = towering > 0. ? 5 : 4;
+						for (int l = 0; l < lightSteps; ++l)
 						{
 							highp vec3 g = here + (way + stepLength)*cloudKey;
-							highp float dLight = cloudDepth(cloudMap(g), length(g) - cloudRadii.y, weather, lod + 0.8*float(l), foot + 0.3*stepLength, false);
+							highp float dLight = cloudDepth(cloudMap(g), length(g) - cloudRadii.y, weatherHere, lod + 0.8*float(l), foot + 0.3*stepLength, false);
 							// (the light sees a softer cloud, the softer the longer its step: with the mean density between its
 							// places the shade then changes smoothly from place to place, where single looks at a crisp cloud drew
 							// the outline of the cloud into its shade six times over, as contours)
 							highp float width = max(0.3, stepLength/(0.75*max(cloudTopHere, 0.1*cloudSize)));
-							seen += stepLength*edgeMean(lastLight, dLight, -0.25*width, 0.75*width);
+							// (a tower is opaque within some tens of meters, against steps of some hundred: there the cloud
+							// begins at its edge for the light too, or a place at the sunlit edge lay in shade already)
+							seen += stepLength*edgeMean(lastLight, dLight, -0.25*width*(1. - towering), width*(1. - 0.25*(1. - towering)));
 							lastLight = dLight;
 							way += stepLength;
 							stepLength *= 2.3;
@@ -1463,6 +1557,23 @@ void main(void)
 					// First the beam and the first few scatterings, which still know where the light came from: in octaves
 					// (Wrenninge's approximation, as in Hillaire's clouds), each further order of scattering sees the cloud
 					// thinner. They light the side of a cloud that faces the light and soften the line between light and shade
+					// The billows of a tower shade themselves: a side of a billow that faces the light is bright, one that
+					// faces away is in shade, within tens of meters. The steps of the light are too far apart and too blurred
+					// for that, so one close look towards the light tells which way the surface faces here: the cloud gets
+					// thinner that way where it faces the light. This is what gives a tower its cauliflower look
+					highp float facing = 1.;
+					if (towering > 0. && marched > 0. && !deep)
+					{
+						// (both depths looked up: the depth of this place is only estimated from the two short steps around it,
+						// and the difference to a true depth nearby then changed with where the steps lie, as a hatching)
+						highp vec3 g = here + 0.06*cloudKey, h = here - 0.03*cloudKey;
+						highp float dNear = cloudDepth(cloudMap(g), length(g) - cloudRadii.y, weatherHere, lod, foot, true);
+						highp float dFar = cloudDepth(cloudMap(h), length(h) - cloudRadii.y, weatherHere, lod, foot, true);
+						facing = mix(1., smoothstep(-0.12, 0.1, dFar - dNear), towering*marched);
+						lastFacing = facing;
+					}
+					else if (towering > 0. && deep)
+						facing = lastFacing;
 					highp float tau = 0.55*extinction*seen;
 					highp float scattered = mix(1., (exp(-tau) + octaves*0.55*exp(-0.35*tau))/(1. + 0.55*octaves), keyUp);
 					// Then the light that has lost its direction after many scatterings and diffuses down through the cloud from
@@ -1470,11 +1581,20 @@ void main(void)
 					// comes out below (two-stream, g = 0.85; see CloudLight). This is the light of the grey bases, and it sets
 					// how dark they are against the sunlit sides: about 0.4 of them under 250 m of cloud, 0.2 under 700 m
 					highp float fromAbove = 1./(1. + 8.4*cloudShape.z*weather.growth.z*above);
-					highp float fromBelow = 1./(1. + 8.4*cloudShape.z*weather.growth.z*heightHere);
+					highp float fromBelow = 1./(1. + 8.4*cloudShape.z*weather.growth.z*heightHere*thin);
 					highp float diffused = keyUp*max(cloudKey.z, 0.)*fromAbove*(1. - exp(-0.35*tau))/0.85;
+					// (in a tower the light diffuses in from its lit sides more than down from its top, km above: the same
+					// formula along the way of the light. The shaded hollows between the billows of a cumulus congestus are
+					// grey, not dark)
+					if (towering > 0.)
+						// (no further than half a km in, or the few long steps of the light showed as bands in the shade;
+						// and less the lower in the cloud: its base is dark)
+						diffused = mix(diffused, keyUp*(1. - exp(-0.35*tau))/(0.85*(1. + 0.1125*extinction*min(seen, 0.5)))
+						                         *(0.15 + 0.85*clamp(heightHere/max(top, 0.1), 0., 1.)), towering);
 					// The light of the sky comes from above through the cloud in the same way, that of the ground from below
 					diffuse += weight*(0.5*(cloudAbove*fromAbove + cloudBelow*fromBelow) + cloudCity*fromBelow);
 					highp vec3 sunlight = cloudSunlight(dot(here.xy, sunWay)*57.3/7433. + 0.35*heightHere);
+					scattered *= 0.3 + 0.7*facing;
 					direct += weight*(sunlight*(sunPhase*mix(1., scattered, keyIsSun) + diffused*keyIsSun)
 					                  + sideMoon*(moonPhase*mix(scattered, 1., keyIsSun) + diffused*(1. - keyIsSun)));
 					single += weight*exp(-extinction*seen);

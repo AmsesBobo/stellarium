@@ -585,7 +585,7 @@ std::array<double, 2> CloudShape::deformation(const std::vector<float>& tile, co
 	const double u = mapX/DeformScale + motion.deformU, v = mapY/DeformScale + motion.deformV;
 	// (by about a body: the bodies of the map lie in the cells of a grid, each at a random place of its own, and with
 	// a small shift the grid showed as rows of clouds towards the horizon)
-	const double strength = DeformStrength*layer.size*(1. - 0.4*layer.flatness);
+	const double strength = DeformStrength*std::min(layer.size, 1.2)*(1. - 0.4*layer.flatness);
 	return {strength*(readTile(tile, u, v, 2) - 0.5),
 	        strength*(readTile(tile, u + 0.37, v + 0.71, 2) - 0.5)};
 }

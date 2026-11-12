@@ -92,7 +92,14 @@ public:
 		double heightScale() const
 		{
 			const double heaped = 1. - flatness;
-			return (1. - 0.75*flatness)*(1. + 0.15*heaped*heaped)*std::pow(std::max(size, 0.05), -0.7*heaped*heaped);
+			return (1. - 0.75*flatness)*(1. + 0.15*heaped*heaped)*std::pow(std::max(size, 0.05), -0.7*heaped*heaped)*(1. + 3.2*tower());
+		}
+		//! How much the layer towers, from 0 to 1: heaped clouds several km across are cumulus congestus,
+		//! which grow to some 5 km above their base
+		double tower() const
+		{
+			const double t = std::clamp((size - 3.5)/2.5, 0., 1.), heaped = 1. - flatness;
+			return t*t*(3. - 2.*t)*heaped*heaped;
 		}
 		//! A bank shares its broad depth; individual seed heights leave only weak relief.
 		double bodyHeight(double seedHeight, double environment) const
