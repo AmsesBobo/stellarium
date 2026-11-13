@@ -1306,7 +1306,23 @@ void main(void)
 			}
 			// the diffuse aurora, from its equatorward boundary into the discrete oval, pulsating after a substorm
 			highp float latm = 0.5*(lat + latPrev);
-			highp float zone = smoothstep(oval.z, oval.y, latm)*(1. - smoothstep(oval.y + 0.5*width, oval.x + bulge, latm));
+			// omega bands: in the recovery, in the morning sector, the poleward edge of the diffuse and pulsating
+			// aurora rises into bright tongues some 300 km high and 600 to 1000 km apart (inverted omegas), and the
+			// train drifts eastward at about 1 km/s (Akasofu and Kimball 1964; Opgenoorth et al. 1983)
+			highp float edge = oval.y + 0.5*width, top = oval.x + bulge;
+			highp float omega = auroraState.y*smoothstep(0.5, 2.5, mlt)*(1. - smoothstep(6., 8., mlt));
+			highp float tongue = 0.;
+			if (omega > 0.)
+			{
+				highp float phase = mlt/1.1 - auroraTime/720. + 0.37*auroraSeed;
+				// round heads, the gaps between them narrower
+				tongue = smoothstep(-0.4, 0.5, cos(2.*PI*phase));
+				highp float lift = omega*(0.045*tongue - 0.01);
+				edge += lift;
+				top = mix(top + lift, edge + 0.006, omega); // a sharper edge
+			}
+			highp float zone = smoothstep(oval.z, oval.y, latm)*(1. - smoothstep(edge, top, latm));
+			diffuse *= 1. + 1.5*omega*tongue;
 			if (zone > 0.)
 			{
 				highp float hm = 0.5*(h + hPrev);
