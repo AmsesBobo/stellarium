@@ -504,6 +504,16 @@ AuroraMgr::Emission AuroraMgr::emission(double kp, double dst)
 	return e;
 }
 
+AuroraMgr::SarArc AuroraMgr::sarArc(double diffuseBoundary, double dst)
+{
+	SarArc a;
+	a.latitude = diffuseBoundary - 3.;
+	a.width = 1.3;
+	const double d = std::clamp(-dst, 0., 1000.);
+	a.column = d < 40. ? 0. : 300.*(d/100.)*(d/100.)*std::clamp((d - 40.)/40., 0., 1.);
+	return a;
+}
+
 double AuroraMgr::stormShift(double kp, double dst)
 {
 	dst = std::clamp(dst, -1000., 0.);
@@ -889,6 +899,8 @@ uniform highp float auroraExposure;  // exposure time of the camera (s, 0: an in
 uniform highp vec4 auroraSubstorm;   // onset (MLT, h), its spread in MLT (h), activity (0-1), poleward bulge (radians)
 uniform highp vec4 auroraState;      // equatorward drift of the arcs (radians), pulsating aurora (0-1), energetic
                                      // electrons (0-1: the aurora reaches deeper), lowest latitude of the aurorae
+uniform highp vec3 auroraSar;        // the stable auroral red arc: its footprint latitude, its width (standard
+                                     // deviation, radians) and its column of 630.0 nm (R) near midnight; 0 without
 
 const highp float PI = 3.14159265;
 const highp float EARTH_RADIUS = 6371.;
@@ -1123,7 +1135,7 @@ void main(void)
 		}
 	}
 
-	highp float green = 0., red = 0., nitrogen = 0.;
+	highp float green = 0., red = 0., nitrogen = 0., sar = 0.;
 	highp float tPrev = 0., hPrev = 0., latPrev = 0., lonPrev = 0.;
 	highp vec3 xPrev = vec3(0);
 	for (int k = 0; k <= STEPS; ++k)
@@ -1209,6 +1221,16 @@ void main(void)
 				nitrogen += e;
 				red += d*chapman(hm, auroraEmission.w, 60.);
 			}
+			// the stable auroral red arc (SAR arc), equatorward of the diffuse aurora: on the field lines of the
+			// plasmapause, where the ring current heats the electrons of the ionosphere and they excite the red line
+			// of oxygen, high up (350 to 400 km). It is wide, homogeneous and steady: no rays, no folds
+			if (auroraSar.z > 0.)
+			{
+				highp float x0 = latPrev - auroraSar.x, x1 = lat - auroraSar.x;
+				if (x0*x1 <= 0. || min(abs(x0), abs(x1)) < 5.*auroraSar.y)
+					sar += auroraSar.z*(0.6 + 0.4*night)*bandLength(x0, x1, 0., auroraSar.y, len)
+					       *chapman(0.5*(h + hPrev), 380., 60.);
+			}
 		}
 		tPrev = t;
 		hPrev = h;
@@ -1218,7 +1240,7 @@ void main(void)
 	}
 
 	// the parts outside the gamut of the scene are clipped, as by the color matrix of a camera
-	highp vec3 color = max(green*auroraGreenColor + nitrogen*auroraNitrogenColor + auroraEmission.z*red*auroraRedColor, vec3(0));
+	highp vec3 color = max(green*auroraGreenColor + nitrogen*auroraNitrogenColor + (auroraEmission.z*red + sar)*auroraRedColor, vec3(0));
 	if (extinctionEnabled)
 		color *= pow(10., -0.4*extinctionMagnitude(altAz)) * photoExtinctionTint(altAz.z);
 	FRAG_COLOR = vec4(color, 1.);
@@ -1328,6 +1350,15 @@ void AuroraMgr::drawLight(StelCore* core, const Geometry& g)
 	float lowest = oval[0].z();
 	for (const auto& o : oval)
 		lowest = std::min(lowest, o.z());
+	// The stable auroral red arc (SAR arc) in geomagnetic storms: at the plasmapause, equatorward of the diffuse
+	// aurora and of the faint diffuse light between them (Mendillo et al.), a few hundred km wide at 350 to 400 km;
+	// about 300 R in a typical storm, up to several kR in great ones (Mendillo, Baumgardner and Wroten 2016, "SAR arcs
+	// we have seen"). Its column grows with the energy of the ring current (Dst); it lasts for hours to days.
+	const SarArc sar = sarArc(static_cast<double>(lowest)*180./M_PI, getDst());
+	p.setUniformValue("auroraSar", QVector3D(static_cast<float>(sar.latitude*M_PI/180.), static_cast<float>(sar.width*M_PI/180.),
+	                                         static_cast<float>(sar.column)));
+	if (sar.column > 0.)
+		lowest = std::min(lowest, static_cast<float>((sar.latitude - 4.*sar.width)*M_PI/180.));
 	lowest -= static_cast<float>(M_PI/180.);
 	p.setUniformValue("auroraState", QVector4D(static_cast<float>(sub.drift*M_PI/180.), static_cast<float>(sub.pulsating),
 	                                           static_cast<float>(energetic), lowest));

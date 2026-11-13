@@ -138,6 +138,17 @@ public:
 	};
 	static Emission emission(double kp, double dst = 0.);
 
+	//! The stable auroral red arc (SAR arc) of a geomagnetic storm: a wide, homogeneous, purely red (630.0 nm) arc 350
+	//! to 400 km high on the field lines of the plasmapause, equatorward of the diffuse aurora whose lowest boundary
+	//! (degrees of corrected geomagnetic latitude at 115 km) is given. Its footprint latitude and width (standard
+	//! deviation, degrees) and its column (R) near midnight, 0 in quiet times; it grows with the storm index Dst (nT),
+	//! about 300 R at -100 nT to several kR in great storms.
+	struct SarArc
+	{
+		double latitude = 0., width = 0., column = 0.;
+	};
+	static SarArc sarArc(double diffuseBoundary, double dst);
+
 	//! The substorm cycle at the Julian day jd (UT) for the index kp. A substorm comes every 1.7 to 3.5 hours (more
 	//! often in storms): in the growth phase the arcs drift towards the equator; at the onset, near magnetic midnight,
 	//! they brighten suddenly, fold and break up into rays, the oval bulges poleward and the activity spreads in
