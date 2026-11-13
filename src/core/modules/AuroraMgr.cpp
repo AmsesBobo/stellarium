@@ -1032,19 +1032,40 @@ highp float bandCenter(highp float x0, highp float x1, highp float w)
 		return 0.5;
 	return mix(clamp(x0/dx, 0., 1.), 0.5, smoothstep(0.3, 2., w/abs(dx)));
 }
-// Patches of pulsating aurora: brightness against the mean, the patches flicker on and off in a few seconds
-highp float pulsating(highp float lon, highp float lat, highp float amount)
+// Patches of pulsating aurora: energetic electrons (tens of keV) that come and go in a few seconds light patches of some
+// tens of km low in the diffuse aurora, near 100 km: green and the bands of nitrogen, hardly any red. A patch adds its
+// light to the diffuse aurora when it is on and leaves it as it was when it is off. This is its light against the mean
+// of the diffuse aurora (0 to 2, about 0.3 on average over the sky). Each cell of the patches (the cells of their noise)
+// flickers with its own period and phase, and between the cells the flicker is blended as the noise is: within a patch
+// it stays in step. (A period and a phase that changed smoothly from place to place drew fine waves over the sky: the time
+// over the period is thousands of turns, so its smallest change across the sky is many of them.) A piece of the line of
+// sight that spans the given number of cells sees softer edges of the patches, as the mean over its stretch (sharp edges
+// sampled by the pieces would make ripples).
+highp float pulsating(highp float lon, highp float lat, highp float cells)
 {
-	if (amount <= 0.)
-		return 1.;
-	highp float patchMask = smoothstep(0.5, 0.65, auroraNoise(lon*1200. + auroraTime/2000., 1200., lat*180./PI*4.));
-	highp float phase = auroraNoise(lon*2400. + 7., 2400., lat*180./PI*8. + 11.);
-	highp float period = 4. + 8.*auroraNoise(lon*600. + 3., 600., lat*180./PI*2. + 5.);
-	highp float on = smoothstep(-0.3, 0.3, sin(2.*PI*(auroraTime/period + 5.*phase)));
-	// the mean over the exposure of the flicker (as of a sine)
-	highp float x = PI*auroraExposure/period;
-	highp float kept = x > 1e-3 ? abs(sin(x)/x) : 1.;
-	return 1. + amount*kept*patchMask*(2.*on - 1.);
+	highp float x = lon*1200. + auroraTime/2000., y = lat*180./PI*4.;
+	highp float edge = 0.075 + 0.3*cells;
+	highp float patchMask = smoothstep(0.575 - edge, 0.575 + edge, auroraNoise(x, 1200., y));
+	if (patchMask <= 0.)
+		return 0.;
+	highp float ix = floor(x), iy = floor(y);
+	highp float fx = x - ix, fy = y - iy;
+	fx = fx*fx*(3. - 2.*fx);
+	fy = fy*fy*(3. - 2.*fy);
+	highp vec2 s = vec2(auroraSeed, 0.37*auroraSeed);
+	highp vec4 flicker;
+	for (int c = 0; c < 4; ++c)
+	{
+		highp vec2 cell = vec2(mod(ix + float(c - 2*(c/2)), 1200.), iy + float(c/2)) + s;
+		highp float period = 4. + 8.*auroraHash(cell + vec2(3.17, 5.71));
+		highp float phase = auroraHash(cell + vec2(7.33, 11.93));
+		highp float on = smoothstep(-0.3, 0.3, sin(2.*PI*fract(auroraTime/period + phase)));
+		// the mean over the exposure of the flicker (as of a sine): on half of the time
+		highp float e = PI*auroraExposure/period;
+		highp float kept = e > 1e-3 ? abs(sin(e)/e) : 1.;
+		flicker[c] = 1. + kept*(2.*on - 1.);
+	}
+	return patchMask*mix(mix(flicker[0], flicker[1], fx), mix(flicker[2], flicker[3], fx), fy);
 }
 
 // The arcs at a point of the line of sight: the footprint latitude lat (radians) and magnetic longitude lon (turns)
@@ -1170,8 +1191,20 @@ void main(void)
 			if (zone > 0.)
 			{
 				highp float hm = 0.5*(h + hPrev);
-				highp float d = diffuse*len*zone*shellFade(hm)*pulsating(lonm, latm, auroraState.y*smoothstep(0., 0.3, morning));
-				highp float e = d*chapman(hm, 115., 15.);
+				// the patches of pulsating aurora at two points of the piece, each for its half; a piece that
+				// crosses several cells of the patches sees their mean (sampled by the pieces, they would make ripples)
+				highp float pulse = auroraState.y*smoothstep(0., 0.3, morning);
+				highp float patches = 0.;
+				if (pulse > 0.)
+				{
+					highp float cells = 0.5*max(abs(dlon)*1200., abs(lat - latPrev)*180./PI*4.);
+					highp float fade = smoothstep(0.5, 2., cells);
+					highp float seen = fade < 1. ? 0.5*(pulsating(lonPrev + 0.25*dlon, mix(latPrev, lat, 0.25), cells)
+					                                  + pulsating(lonPrev + 0.75*dlon, mix(latPrev, lat, 0.75), cells)) : 0.;
+					patches = pulse*mix(seen, 0.3, fade);
+				}
+				highp float d = diffuse*len*zone*shellFade(hm);
+				highp float e = d*(chapman(hm, 115., 15.) + patches*chapman(hm, 108., 10.));
 				green += e*greenQuenching(hm);
 				nitrogen += e;
 				red += d*chapman(hm, auroraEmission.w, 60.);
