@@ -134,7 +134,8 @@ CloudLight::Light CloudLight::compute(const Sources& s)
 	const double skyLight = skyIlluminance(s.sunAltitude);
 	for (std::size_t i = 0; i < 3; ++i)
 	{
-		const double aboveSky = skyLight*sky[i] + s.moon[i]*std::max(0., s.moonSine);
+		// the aurorae shine from far above the clouds: on their tops as the sky does, on the ground below them
+		const double aboveSky = skyLight*sky[i] + s.moon[i]*std::max(0., s.moonSine) + s.aurora[i];
 		const double aboveSun = SolarIlluminance*sunTop[i]*std::max(0., s.sunSine);
 		const double ground = aboveSky + aboveSun + s.groundExtra[i];
 		light.below[i] = GroundAlbedo*ground/M_PI;
@@ -143,7 +144,7 @@ CloudLight::Light CloudLight::compute(const Sources& s)
 		light.city[i] = cloudLight*s.lamp[i];
 		light.airSky[i] = skyLight*sky[i]/(4.*M_PI) + s.artificial*s.lamp[i];
 		light.airMoon[i] = (s.moonSine > 0. ? 1. : 0.)*s.moon[i]/(4.*M_PI);
-		light.sideSky[i] = SideReflectance*(skyLight*sky[i] + 0.5*GroundAlbedo*ground)/M_PI + 0.5*cloudLight*s.lamp[i];
+		light.sideSky[i] = SideReflectance*(skyLight*sky[i] + s.aurora[i] + 0.5*GroundAlbedo*ground)/M_PI + 0.5*cloudLight*s.lamp[i];
 		light.silverSun[i] = SolarIlluminance*sunTop[i]/(4.*M_PI);
 		light.silverMoon[i] = (s.moonSine > 0. ? 1. : 0.)*s.moon[i]/(4.*M_PI);
 		light.sideMoon[i] = (s.moonSine > 0. ? SideReflectance : 0.)*s.moon[i]/M_PI;

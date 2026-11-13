@@ -70,7 +70,8 @@ public:
 		double top = 2.3;             //!< km: the height of their tops
 		Rgb moon = {0., 0., 0.};      //!< lux on a surface facing the Moon, with the extinction
 		double moonSine = 0.;
-		Rgb groundExtra = {0., 0., 0.}; //!< lux on the ground from other sources (the light domes, the aurorae)
+		Rgb groundExtra = {0., 0., 0.}; //!< lux on the ground from other sources (the light domes of towns)
+		Rgb aurora = {0., 0., 0.};    //!< lux on a level surface from the aurorae, high above the clouds
 		double artificial = 0.;       //!< the artificial luminance of the clear sky at the zenith (cd/m^2)
 		Rgb lamp = {1., 1., 1.};      //!< the color of the street lamps, at unit luminance
 		double extinction = 0.2;      //!< the extinction at the zenith (mag/airmass)

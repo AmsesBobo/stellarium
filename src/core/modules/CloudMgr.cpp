@@ -1781,7 +1781,7 @@ void CloudMgr::setLightUniforms(const StelCore* core, QOpenGLShaderProgram& p, i
 	s.extinction = drawer->getEffectiveExtinctionCoefficient();
 	const Vec3f lamp = LightDomes::lampColor(LightDomes::LampMixed);
 	s.lamp = {static_cast<double>(lamp[0]), static_cast<double>(lamp[1]), static_cast<double>(lamp[2])};
-	// the light domes of towns and the aurorae, on the ground below the clouds
+	// the light domes of towns, on the ground below the clouds; the aurorae, above the clouds
 	static const LightDomes* lightDomes = GETSTELMODULE(LightDomes);
 	if (lightDomes)
 	{
@@ -1795,7 +1795,7 @@ void CloudMgr::setLightUniforms(const StelCore* core, QOpenGLShaderProgram& p, i
 	{
 		const Vec3f E = aurorae->getIlluminance();
 		for (std::size_t i = 0; i < 3; ++i)
-			s.groundExtra[i] += static_cast<double>(E[static_cast<int>(i)]);
+			s.aurora[i] = static_cast<double>(E[static_cast<int>(i)]);
 	}
 
 	const CloudLight::Light light = CloudLight::compute(s);
