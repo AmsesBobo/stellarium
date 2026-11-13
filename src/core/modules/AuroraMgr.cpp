@@ -253,7 +253,7 @@ AuroraMgr::Substorm AuroraMgr::exposedSubstorm(const StelCore* core, double& exp
 	{
 		constexpr int samples = 9;
 		Substorm mean = sub;
-		mean.spread = mean.activity = mean.bulge = mean.drift = mean.pulsating = 0.;
+		mean.spread = mean.activity = mean.bulge = mean.drift = mean.pulsating = mean.steve = mean.picketFence = 0.;
 		for (int i = 0; i < samples; ++i)
 		{
 			const Substorm s = substorm(jd + exposure*((i + 0.5)/samples - 0.5)/86400., kp);
@@ -262,6 +262,8 @@ AuroraMgr::Substorm AuroraMgr::exposedSubstorm(const StelCore* core, double& exp
 			mean.bulge += s.bulge/samples;
 			mean.drift += s.drift/samples;
 			mean.pulsating += s.pulsating/samples;
+			mean.steve += s.steve/samples;
+			mean.picketFence += s.picketFence/samples;
 		}
 		sub = mean;
 	}
@@ -621,6 +623,16 @@ AuroraMgr::Substorm AuroraMgr::substorm(double jd, double kp)
 		s.bulge = maxBulge*(1. - t);
 		s.drift = maxDrift*(1. - t);
 		s.pulsating = strength*std::sin(M_PI*t);
+		// STEVE (Strong Thermal Emission Velocity Enhancement) in the recovery of some strong substorms, more often in
+		// active times: about an hour after the onset, for half an hour to an hour (Gallardo-Lacourt et al. 2018);
+		// in about half of them with its picket fence
+		const double chance = std::clamp(0.12*(kp - 2.), 0., 0.6);
+		if (strength > 0.45 && unitHash(slot, 5) < chance)
+		{
+			const auto smooth = [](double a, double b, double v) {const double y = std::clamp((v - a)/(b - a), 0., 1.); return y*y*(3. - 2.*y);};
+			s.steve = smooth(0.04, 0.12, t)*(1. - smooth(0.35, 0.6, t));
+			s.picketFence = unitHash(slot, 6) < 0.55 ? s.steve : 0.;
+		}
 	}
 	return s;
 }
@@ -899,6 +911,9 @@ uniform highp float auroraExposure;  // exposure time of the camera (s, 0: an in
 uniform highp vec4 auroraSubstorm;   // onset (MLT, h), its spread in MLT (h), activity (0-1), poleward bulge (radians)
 uniform highp vec4 auroraState;      // equatorward drift of the arcs (radians), pulsating aurora (0-1), energetic
                                      // electrons (0-1: the aurora reaches deeper), lowest latitude of the aurorae
+uniform highp vec4 auroraSteve;      // STEVE: its column (of its mauve light) and that of the green of its picket
+                                     // fence (R), its distance equatorward of the diffuse aurora and its width
+                                     // (standard deviation) in footprint latitude (radians)
 uniform highp vec3 auroraSar;        // the stable auroral red arc: its footprint latitude, its width (standard
                                      // deviation, radians) and its column of 630.0 nm (R) near midnight; 0 without
 
@@ -1018,6 +1033,24 @@ highp float rayNoise(highp float lon, highp float o)
 	              + 0.4*auroraNoise(lon*30000. - auroraTime/1.5 + o, 30000., auroraTime/0.8 + o);
 	return 3.*r*r/0.84;
 }
+// The posts of the picket fence of STEVE between the longitudes lon0 and lon1 (turns): green columns along the field
+// lines a few km wide, some 10 km apart (about 2000 a turn at the latitudes of STEVE), 0 to 1, about 0.2 on average. A
+// stretch that spans several posts sees their mean, as the rays.
+highp float picketPosts(highp float lon0, highp float lon1)
+{
+	highp float o = 53.1 + 7.7*auroraSeed;
+	highp float cells = abs(lon1 - lon0)*2000.;
+	if (cells > 6.)
+		return 0.2;
+	highp float m = 0.;
+	for (int i = 0; i < 4; ++i)
+	{
+		highp float lon = mix(lon0, lon1, (float(i) + 0.5)/4.);
+		m += smoothstep(0.55, 0.8, auroraNoise(lon*2000. + o, 2000., o + auroraTime/600.));
+	}
+	return mix(0.25*m, 0.2, smoothstep(1., 6., cells));
+}
+
 highp float arcRays(highp float lon0, highp float lon1, highp float rays, int j)
 {
 	highp float o = float(j)*31.;
@@ -1135,7 +1168,7 @@ void main(void)
 		}
 	}
 
-	highp float green = 0., red = 0., nitrogen = 0., sar = 0.;
+	highp float green = 0., red = 0., nitrogen = 0., sar = 0., steve = 0.;
 	highp float tPrev = 0., hPrev = 0., latPrev = 0., lonPrev = 0.;
 	highp vec3 xPrev = vec3(0);
 	for (int k = 0; k <= STEPS; ++k)
@@ -1231,6 +1264,33 @@ void main(void)
 					sar += auroraSar.z*(0.6 + 0.4*night)*bandLength(x0, x1, 0., auroraSar.y, len)
 					       *chapman(0.5*(h + hPrev), 380., 60.);
 			}
+			// STEVE: a narrow ribbon (some 25 km wide) along the magnetic latitude just equatorward of the diffuse
+			// aurora, on the field lines of a fast westward flow of the ions (a subauroral ion drift), before magnetic
+			// midnight. Its pale mauve light (a continuum of the hot plasma, with some red of oxygen) shines from 130 to
+			// 270 km; below it, in some events, a picket fence of green columns along the field lines (95 to 150 km).
+			if (auroraSteve.x > 0.)
+			{
+				highp float dn = mlt - 21.5;
+				dn -= 24.*floor(dn/24. + 0.5);
+				highp float evening = exp(-dn*dn/6.);
+				highp float a = oval.z - auroraSteve.z;
+				highp float x0 = latPrev - a, x1 = lat - a;
+				if (evening > 0.01 && (x0*x1 <= 0. || min(abs(x0), abs(x1)) < 5.*auroraSteve.w))
+				{
+					highp float s = evening*bandLength(x0, x1, 0., auroraSteve.w, len);
+					highp float c = bandCenter(x0, x1, auroraSteve.w);
+					highp float hc = mix(hPrev, h, c);
+					steve += auroraSteve.x*s*chapman(hc, 200., 40.);
+					if (auroraSteve.y > 0.)
+					{
+						highp float halfSpan = 0.5*dlon*min(1., 3.*auroraSteve.w/max(abs(x0 - x1), 1e-9));
+						highp float lonc = lonPrev + c*dlon;
+						highp float g = auroraSteve.y*s*picketPosts(lonc - halfSpan, lonc + halfSpan)*chapman(hc, 112., 20.);
+						green += g*greenQuenching(hc);
+						nitrogen += 0.5*g;
+					}
+				}
+			}
 		}
 		tPrev = t;
 		hPrev = h;
@@ -1240,7 +1300,10 @@ void main(void)
 	}
 
 	// the parts outside the gamut of the scene are clipped, as by the color matrix of a camera
-	highp vec3 color = max(green*auroraGreenColor + nitrogen*auroraNitrogenColor + (auroraEmission.z*red + sar)*auroraRedColor, vec3(0));
+	// the light of STEVE as the lines of the aurora make it: violet as nitrogen, with some red and green (pale mauve)
+	highp vec3 steveColor = auroraNitrogenColor + 0.1*auroraRedColor + 0.2*auroraGreenColor;
+	highp vec3 color = max(green*auroraGreenColor + nitrogen*auroraNitrogenColor + (auroraEmission.z*red + sar)*auroraRedColor
+	                       + steve*steveColor, vec3(0));
 	if (extinctionEnabled)
 		color *= pow(10., -0.4*extinctionMagnitude(altAz)) * photoExtinctionTint(altAz.z);
 	FRAG_COLOR = vec4(color, 1.);
@@ -1359,6 +1422,13 @@ void AuroraMgr::drawLight(StelCore* core, const Geometry& g)
 	                                         static_cast<float>(sar.column)));
 	if (sar.column > 0.)
 		lowest = std::min(lowest, static_cast<float>((sar.latitude - 4.*sar.width)*M_PI/180.));
+	// STEVE (see the shader): 1.5 degrees equatorward of the diffuse aurora, 0.12 degree wide (standard deviation),
+	// as bright as a faint arc (seen from the side, several kR); its picket fence in green about half as bright
+	const double steveOffset = 1.5, steveWidth = 0.12;
+	p.setUniformValue("auroraSteve", QVector4D(static_cast<float>(5000.*sub.steve), static_cast<float>(2500.*sub.picketFence),
+	                                           static_cast<float>(steveOffset*M_PI/180.), static_cast<float>(steveWidth*M_PI/180.)));
+	if (sub.steve > 0.)
+		lowest -= static_cast<float>((steveOffset + 4.*steveWidth)*M_PI/180.);
 	lowest -= static_cast<float>(M_PI/180.);
 	p.setUniformValue("auroraState", QVector4D(static_cast<float>(sub.drift*M_PI/180.), static_cast<float>(sub.pulsating),
 	                                           static_cast<float>(energetic), lowest));

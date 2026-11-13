@@ -163,6 +163,8 @@ public:
 		double bulge = 0.;       //!< poleward bulge of the oval (degrees)
 		double drift = 0.;       //!< equatorward drift of the arcs (degrees)
 		double pulsating = 0.;   //!< pulsating aurora (0 to 1)
+		double steve = 0.;       //!< STEVE, in the recovery of some strong substorms (0 to 1)
+		double picketFence = 0.; //!< its picket fence (0 to 1)
 		double onset = 0.;       //!< Julian day of the onset of this cycle
 		double nextOnset = 0.;   //!< Julian day of the onset of the next cycle
 	};
