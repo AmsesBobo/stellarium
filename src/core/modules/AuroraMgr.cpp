@@ -921,6 +921,9 @@ uniform highp vec4 auroraState;      // equatorward drift of the arcs (radians),
 uniform highp vec4 auroraSteve;      // STEVE: its column (of its mauve light) and that of the green of its picket
                                      // fence (R), its distance equatorward of the diffuse aurora and its width
                                      // (standard deviation) in footprint latitude (radians)
+uniform highp vec4 auroraPolarCap;   // a polar cap arc (sun-aligned, in quiet times): its column of green (R), red
+                                     // against green, its distance from the noon-midnight meridian towards dawn and
+                                     // its width (standard deviation, radians of the surface)
 uniform highp vec3 auroraSar;        // the stable auroral red arc: its footprint latitude, its width (standard
                                      // deviation, radians) and its column of 630.0 nm (R) near midnight; 0 without
 
@@ -1209,7 +1212,7 @@ void main(void)
 	}
 
 	highp float green = 0., red = 0., nitrogen = 0., sar = 0., steve = 0.;
-	highp float tPrev = 0., hPrev = 0., latPrev = 0., lonPrev = 0., arcLonPrev = 0., nearPrev = 0.;
+	highp float tPrev = 0., hPrev = 0., latPrev = 0., lonPrev = 0., arcLonPrev = 0., nearPrev = 0., capPrev = 0.;
 	highp vec3 xPrev = vec3(0);
 	for (int k = 0; k <= STEPS; ++k)
 	{
@@ -1222,6 +1225,8 @@ void main(void)
 		highp float lat = m.x;
 		highp float lon = m.y; // in turns
 		highp vec3 warp = surgeWarp(lat, lon);
+		// the distance (radians of the surface) to the polar cap arc, from the pole towards dawn
+		highp float cap = -(0.5*PI - lat)*sin(lon*2.*PI - auroraSunLon) - auroraPolarCap.z;
 		highp vec3 x = arcOffsets(warp.x, warp.y);
 		if (k > 0)
 		{
@@ -1242,6 +1247,9 @@ void main(void)
 			highp float arcs = auroraEmission.x*(0.1 + 0.9*night*sqrt(night))*(1. + 6.*activity);
 			highp float morning = 0.5 + 0.5*cos((mlt - 3.)*PI/12.);
 			highp float diffuse = auroraEmission.y*(0.3 + 0.7*morning)*(1. + 1.5*activity);
+			// the dayside aurora around the cusp (9 to 15 h MLT): soft electrons (some 100 eV), mostly the red line of
+			// oxygen at 250 to 300 km, seen from Svalbard at midday in the polar night
+			highp float cusp = smoothstep(0.55, 0.85, 0.5 + 0.5*cos((mlt - 12.)*PI/12.));
 			// rays: a few in quiet arcs, most of the light in active ones
 			highp float rays = 0.15 + 0.85*smoothstep(0.03, 0.4, activity);
 			// in the head of the surge, where the arcs are wound tightly, their rays blend into a glow
@@ -1295,9 +1303,11 @@ void main(void)
 					s *= ray*shellFade(hc);
 					// energetic electrons reach deeper, in storms and substorms
 					highp float e = s*chapman(hc, 110. - 15.*auroraState.z*(0.4 + 0.6*activity), top);
+					// near magnetic noon (the cusp) soft electrons make the arcs red, high up: 3 R of red per R of green
+					e *= 1. - 0.7*cusp;
 					green += e*greenQuenching(hc);
 					nitrogen += e;
-					red += s*chapman(hc, auroraEmission.w, 60.);
+					red += s*(chapman(hc, auroraEmission.w, 60.) + 3.*cusp/max(auroraEmission.z, 0.05)*chapman(hc, 260., 70.));
 				}
 				xa = xb;
 				ta = tb;
@@ -1354,6 +1364,23 @@ void main(void)
 					sar += auroraSar.z*(0.6 + 0.4*night)*bandLength(x0, x1, 0., auroraSar.y, len)
 					       *chapman(0.5*(h + hPrev), 380., 60.);
 			}
+			// a polar cap arc (a theta aurora): in quiet times (the interplanetary field northward), a faint arc across
+			// the polar cap poleward of the oval, aligned with the direction of the Sun, a few tens of km wide, from
+			// soft electrons (green higher than in the oval, much red)
+			if (auroraPolarCap.x > 0. && (capPrev*cap <= 0. || min(abs(capPrev), abs(cap)) < 5.*auroraPolarCap.w))
+			{
+				highp float latc = 0.5*(lat + latPrev);
+				highp float inCap = smoothstep(oval.x + bulge, oval.x + bulge + 0.02, latc);
+				if (inCap > 0.)
+				{
+					highp float s = auroraPolarCap.x*inCap*bandLength(capPrev, cap, 0., auroraPolarCap.w, len);
+					highp float hc = mix(hPrev, h, bandCenter(capPrev, cap, auroraPolarCap.w));
+					highp float e = s*chapman(hc, 130., 20.);
+					green += e*greenQuenching(hc);
+					nitrogen += 0.5*e;
+					red += auroraPolarCap.y/max(auroraEmission.z, 1e-3)*s*chapman(hc, 250., 60.);
+				}
+			}
 			// STEVE: a narrow ribbon (some 25 km wide) along the magnetic latitude just equatorward of the diffuse
 			// aurora, on the field lines of a fast westward flow of the ions (a subauroral ion drift), before magnetic
 			// midnight. Its pale mauve light (a continuum of the hot plasma, with some red of oxygen) shines from 130 to
@@ -1388,6 +1415,7 @@ void main(void)
 		lonPrev = lon;
 		arcLonPrev = warp.y;
 		nearPrev = warp.z;
+		capPrev = cap;
 		xPrev = x;
 	}
 
@@ -1527,6 +1555,19 @@ void AuroraMgr::drawLight(StelCore* core, const Geometry& g)
 	                                         static_cast<float>(sar.column)));
 	if (sar.column > 0.)
 		lowest = std::min(lowest, static_cast<float>((sar.latitude - 4.*sar.width)*M_PI/180.));
+	// A polar cap arc (see the shader) on quiet days (Kp below 3): some hundreds of R of green, half as much red,
+	// 0.25 degree wide, on most of them; it drifts across the cap, dawn to dusk and back, in some 8 hours, about the place
+	// it has that day
+	{
+		const double day = std::floor(jd + 0.5);
+		const int64_t n = static_cast<int64_t>(day);
+		const double quiet = std::clamp((3. - kp)/2., 0., 1.);
+		const double column = unitHash(n, 21) < 0.6 ? 600.*quiet : 0.;
+		const double hours = 24.*(jd + 0.5 - day);
+		const double offset = (unitHash(n, 22) - 0.5)*0.2 + 0.1*std::sin(2.*M_PI*(hours/8. + unitHash(n, 23)));
+		p.setUniformValue("auroraPolarCap", QVector4D(static_cast<float>(column), 0.5f, static_cast<float>(offset),
+		                                              static_cast<float>(0.25*M_PI/180.)));
+	}
 	// STEVE (see the shader): 1.5 degrees equatorward of the diffuse aurora, 0.12 degree wide (standard deviation),
 	// as bright as a faint arc (seen from the side, several kR); its picket fence in green about half as bright
 	const double steveOffset = 1.5, steveWidth = 0.12;
