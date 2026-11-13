@@ -2133,6 +2133,16 @@
               </property>
              </widget>
             </item>
+            <item row="2" column="0">
+             <widget class="QCheckBox" name="cometTailsHalfResolutionCheckBox">
+              <property name="toolTip">
+               <string>Draw the light of the tails at half the resolution of the screen and scale it up: about a quarter of the work for the graphics card where a large tail fills the view, the finest structure of the tails a little softer. The gas coma at the head stays sharp.</string>
+              </property>
+              <property name="text">
+               <string>Half resolution (faster)</string>
+              </property>
+             </widget>
+            </item>
            </layout>
           </widget>
          </item>

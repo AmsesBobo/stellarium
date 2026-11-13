@@ -72,6 +72,7 @@ class CometTailMgr : public StelModule
 	Q_PROPERTY(bool flagShow READ getFlagShow WRITE setFlagShow NOTIFY flagShowChanged)
 	//! Draw the syndynes, synchrones and the direction of the ion tail of the bright comets as lines
 	Q_PROPERTY(bool flagShowGuides READ getFlagShowGuides WRITE setFlagShowGuides NOTIFY flagShowGuidesChanged)
+	Q_PROPERTY(bool flagHalfResolution READ getFlagHalfResolution WRITE setFlagHalfResolution NOTIFY flagHalfResolutionChanged)
 
 public:
 	CometTailMgr();
@@ -84,6 +85,7 @@ public:
 
 	bool getFlagShowGuides() const {return flagShowGuides;}
 	bool getFlagShow() const {return flagShow;}
+	bool getFlagHalfResolution() const {return flagHalfResolution;}
 	//! Whether this module draws the light of the comet now (photographic mode): Comet then draws only its marks
 	bool drawsComet(const StelCore* core, const Comet* comet) const;
 
@@ -101,14 +103,18 @@ public:
 public slots:
 	void setFlagShowGuides(bool b);
 	void setFlagShow(bool b);
+	//! Draw the light of the tails at half the resolution of the screen (the gas coma at the head stays sharp)
+	void setFlagHalfResolution(bool b);
 
 signals:
 	void flagShowGuidesChanged(bool b);
 	void flagShowChanged(bool b);
+	void flagHalfResolutionChanged(bool b);
 
 private:
 	bool flagShowGuides = false;
 	bool flagShow = true;
+	bool flagHalfResolution = false;
 
 	//! The grains of the dust of a comet, computed for one time (they are kept while the time changes little)
 	struct DustGrid
@@ -132,6 +138,12 @@ private:
 	bool splatProgramTried = false;
 	bool initSplats();
 	std::vector<float> vertexData;
+	// At half resolution: the buffer the tails are drawn into, and the program that adds it to the scene
+	std::unique_ptr<class QOpenGLFramebufferObject> lowResBuffer;
+	std::unique_ptr<class QOpenGLShaderProgram> compositeProgram;
+	bool compositeProgramTried = false;
+	bool beginHalfResolution(const float area[4], int previous[5]);
+	void endHalfResolution(const int previous[5]);
 
 	//! A guide line: heliocentric ecliptic positions (AU) of the grains, with a color and a label at its end
 	struct Guide

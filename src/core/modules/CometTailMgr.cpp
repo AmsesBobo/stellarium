@@ -33,6 +33,7 @@
 
 #include <QSettings>
 #include <QOpenGLBuffer>
+#include <QOpenGLFramebufferObject>
 #include <QOpenGLShaderProgram>
 #include <QOpenGLVertexArrayObject>
 #include <QVector4D>
@@ -360,6 +361,7 @@ void CometTailMgr::init()
 	QSettings* conf = StelApp::getInstance().getSettings();
 	setFlagShowGuides(conf->value("comet_tails/flag_show_guides", false).toBool());
 	setFlagShow(conf->value("comet_tails/flag_show", true).toBool());
+	setFlagHalfResolution(conf->value("comet_tails/flag_half_resolution", false).toBool());
 	addAction("actionShow_Comet_Tails", N_("Display Options"), N_("Comet tails (photographic mode)"), "flagShow");
 	addAction("actionShow_Comet_Tail_Guides", N_("Display Options"), N_("Comet tail guide lines"), "flagShowGuides");
 }
@@ -389,6 +391,16 @@ void CometTailMgr::setFlagShow(bool b)
 		flagShow = b;
 		StelApp::immediateSave("comet_tails/flag_show", b);
 		emit flagShowChanged(b);
+	}
+}
+
+void CometTailMgr::setFlagHalfResolution(bool b)
+{
+	if (b != flagHalfResolution)
+	{
+		flagHalfResolution = b;
+		StelApp::immediateSave("comet_tails/flag_half_resolution", b);
+		emit flagHalfResolutionChanged(b);
 	}
 }
 
@@ -736,6 +748,9 @@ void CometTailMgr::drawLight(StelCore* core, const Comet* comet)
 	const DustGrid& grid = dustGrid(comet, jde, lt);
 	const TailModel model = tailModel(comet);
 	const Emissions emissions = emissionColors(drawer);
+	// The narrowest splat (variance, pixels^2): about a pixel; at half resolution a pixel there, so that no splat falls
+	// between its samples (that would lose its light and make the tail sparkle as it moves)
+	const double pixelVariance = flagHalfResolution ? 1.44 : 0.36;
 
 	const StelProjectorP prj = core->getProjection(StelCore::FrameJ2000);
 	const double pixPerRad = static_cast<double>(prj->getPixelPerRadAtCenter());
@@ -861,7 +876,7 @@ void CometTailMgr::drawLight(StelCore* core, const Comet* comet)
 			const Vec3d p = nucleus + grid.offsets[i];
 			const double dist = (p - observer).norm();
 			const double cloud = 0.6*static_cast<double>(grid.spread[i])/dist*pixPerRad;
-			const double iso = cloud*cloud + 0.36;
+			const double iso = cloud*cloud + pixelVariance;
 			const double cxx = 0.36*(a[0]*a[0] + b[0]*b[0]) + iso;
 			const double cxy = 0.36*(a[0]*a[1] + b[0]*b[1]);
 			const double cyy = 0.36*(a[1]*a[1] + b[1]*b[1]) + iso;
@@ -918,7 +933,7 @@ void CometTailMgr::drawLight(StelCore* core, const Comet* comet)
 				a = streamWin[i] - streamWin[i - 1];
 			const double dist = (pos[i] - observer).norm();
 			const double w = width[i]/dist*pixPerRad;
-			const double iso = w*w + 0.36;
+			const double iso = w*w + pixelVariance;
 			const double cxx = 0.36*a[0]*a[0] + iso, cxy = 0.36*a[0]*a[1], cyy = 0.36*a[1]*a[1] + iso;
 			const double det = cxx*cyy - cxy*cxy;
 			const double ex = 3.*std::sqrt(cxx), ey = 3.*std::sqrt(cyy);
@@ -1043,6 +1058,8 @@ void CometTailMgr::drawLight(StelCore* core, const Comet* comet)
 		addStreams(naPos, naLight, naWidth, SodiumAgeCount, sodiumFraction*total*delta*delta/reference, emissions.sodium);
 	}
 
+	// (the splats before this one may be drawn at half resolution, the coma of gas with its sharp center not)
+	const size_t gasStart = vertexData.size();
 	// The gas of the coma: the rest of the light, with the profile of Haser (scale length growing with r^2)
 	if (headVisible && gas > 0.)
 	{
@@ -1081,7 +1098,38 @@ void CometTailMgr::drawLight(StelCore* core, const Comet* comet)
 	}
 	gl.glEnable(GL_BLEND);
 	gl.glBlendFunc(GL_ONE, GL_ONE);
-	gl.glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vertexData.size()/FloatsPerVertex));
+	const GLsizei count = static_cast<GLsizei>(vertexData.size()/FloatsPerVertex);
+	GLsizei first = 0;
+	// At half resolution (not into the image of a trail or of a blurred lens): the dust, the ions and the sodium into
+	// a buffer of a quarter of the pixels, then scaled up and added to the scene; the coma of gas as usual
+	int previous[5];
+	const GLsizei lowCount = static_cast<GLsizei>(gasStart/FloatsPerVertex);
+	// the part of the viewport they cover (-1 to 1), with a margin for the filter that scales them up: only that is
+	// cleared and added to the scene
+	float area[4] = {1.f, 1.f, -1.f, -1.f};
+	for (size_t v = 0; v < gasStart; v += FloatsPerVertex)
+	{
+		const float x = static_cast<float>((vertexData[v] - viewX)/viewW*2. - 1.), y = static_cast<float>((vertexData[v + 1] - viewY)/viewH*2. - 1.);
+		area[0] = std::min(area[0], x);
+		area[1] = std::min(area[1], y);
+		area[2] = std::max(area[2], x);
+		area[3] = std::max(area[3], y);
+	}
+	const float marginX = static_cast<float>(4./viewW), marginY = static_cast<float>(4./viewH);
+	area[0] = std::max(area[0] - marginX, -1.f);
+	area[1] = std::max(area[1] - marginY, -1.f);
+	area[2] = std::min(area[2] + marginX, 1.f);
+	area[3] = std::min(area[3] + marginY, 1.f);
+	const bool low = flagHalfResolution && !image && lowCount > 0 && area[2] > area[0] && area[3] > area[1]
+	                 && beginHalfResolution(area, previous);
+	if (low)
+	{
+		gl.glDrawArrays(GL_TRIANGLES, 0, lowCount);
+		endHalfResolution(previous);
+		first = lowCount;
+	}
+	if (count > first)
+		gl.glDrawArrays(GL_TRIANGLES, first, count - first);
 	gl.glDisable(GL_BLEND);
 	for (int a = 0; a < 5; ++a)
 		gl.glDisableVertexAttribArray(a);
@@ -1089,12 +1137,119 @@ void CometTailMgr::drawLight(StelCore* core, const Comet* comet)
 	splatVao->release();
 	splatProgram->release();
 
+	if (low && compositeProgram)
+	{
+		// a quad over the part with the tails, with the buffer scaled up (linear filter)
+		const float quad[12] = {area[0], area[1], area[2], area[1], area[2], area[3], area[0], area[1], area[2], area[3], area[0], area[3]};
+		compositeProgram->bind();
+		splatVao->bind();
+		splatBuffer->bind();
+		splatBuffer->allocate(quad, static_cast<int>(sizeof(quad)));
+		gl.glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
+		gl.glEnableVertexAttribArray(0);
+		gl.glActiveTexture(GL_TEXTURE0);
+		gl.glBindTexture(GL_TEXTURE_2D, lowResBuffer->texture());
+		compositeProgram->setUniformValue("lightTex", 0);
+		gl.glEnable(GL_BLEND);
+		gl.glBlendFunc(GL_ONE, GL_ONE);
+		gl.glDrawArrays(GL_TRIANGLES, 0, 6);
+		gl.glDisable(GL_BLEND);
+		gl.glBindTexture(GL_TEXTURE_2D, 0);
+		gl.glDisableVertexAttribArray(0);
+		splatBuffer->release();
+		splatVao->release();
+		compositeProgram->release();
+	}
+
 	if (image)
 		drawer->endPhotoBodyImage();
 }
 
+bool CometTailMgr::beginHalfResolution(const float area[4], int previous[5])
+{
+	auto& gl = *QOpenGLContext::currentContext()->functions();
+	if (!compositeProgramTried)
+	{
+		compositeProgramTried = true;
+		const QByteArray vert = StelOpenGL::globalShaderPrefix(StelOpenGL::VERTEX_SHADER) + R"(
+ATTRIBUTE highp vec2 position;
+VARYING highp vec2 texCoord;
+void main(void)
+{
+	gl_Position = vec4(position, 0., 1.);
+	texCoord = 0.5*position + 0.5;
+}
+)";
+		const QByteArray frag = StelOpenGL::globalShaderPrefix(StelOpenGL::FRAGMENT_SHADER) + R"(
+VARYING highp vec2 texCoord;
+uniform sampler2D lightTex;
+void main(void)
+{
+	FRAG_COLOR = vec4(texture2D(lightTex, texCoord).rgb, 1.);
+}
+)";
+		std::unique_ptr<QOpenGLShaderProgram> program(new QOpenGLShaderProgram);
+		program->bindAttributeLocation("position", 0);
+		if (program->addShaderFromSourceCode(QOpenGLShader::Vertex, vert)
+		    && program->addShaderFromSourceCode(QOpenGLShader::Fragment, frag) && program->link())
+			compositeProgram = std::move(program);
+		else
+			qWarning() << "CometTailMgr: cannot build the program that adds the tails at half resolution:" << program->log();
+	}
+	if (!compositeProgram)
+		return false;
+	gl.glGetIntegerv(GL_FRAMEBUFFER_BINDING, &previous[0]);
+	gl.glGetIntegerv(GL_VIEWPORT, &previous[1]);
+	const QSize size(std::max(1, (previous[3] + 1)/2), std::max(1, (previous[4] + 1)/2));
+	if (!lowResBuffer || lowResBuffer->size() != size)
+	{
+		QOpenGLFramebufferObjectFormat format;
+		format.setInternalTextureFormat(GL_RGBA16F);
+		lowResBuffer.reset(new QOpenGLFramebufferObject(size, format));
+		if (!lowResBuffer->isValid())
+		{
+			lowResBuffer.reset();
+			return false;
+		}
+		gl.glBindTexture(GL_TEXTURE_2D, lowResBuffer->texture());
+		gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		gl.glBindTexture(GL_TEXTURE_2D, 0);
+	}
+	// (the splats map the viewport onto the whole buffer, see the vertex shader)
+	gl.glBindFramebuffer(GL_FRAMEBUFFER, lowResBuffer->handle());
+	gl.glViewport(0, 0, size.width(), size.height());
+	// cleared where the tails are, a texel more on each side (what the filter reads around the quad that adds them)
+	const int x0 = std::max(0, static_cast<int>(std::floor((0.5f*area[0] + 0.5f)*size.width())) - 1);
+	const int y0 = std::max(0, static_cast<int>(std::floor((0.5f*area[1] + 0.5f)*size.height())) - 1);
+	const int x1 = std::min(size.width(), static_cast<int>(std::ceil((0.5f*area[2] + 0.5f)*size.width())) + 1);
+	const int y1 = std::min(size.height(), static_cast<int>(std::ceil((0.5f*area[3] + 0.5f)*size.height())) + 1);
+	const GLboolean scissor = gl.glIsEnabled(GL_SCISSOR_TEST);
+	GLint box[4];
+	gl.glGetIntegerv(GL_SCISSOR_BOX, box);
+	gl.glEnable(GL_SCISSOR_TEST);
+	gl.glScissor(x0, y0, std::max(0, x1 - x0), std::max(0, y1 - y0));
+	gl.glClearColor(0.f, 0.f, 0.f, 0.f);
+	gl.glClear(GL_COLOR_BUFFER_BIT);
+	gl.glScissor(box[0], box[1], box[2], box[3]);
+	if (!scissor)
+		gl.glDisable(GL_SCISSOR_TEST);
+	return true;
+}
+
+void CometTailMgr::endHalfResolution(const int previous[5])
+{
+	auto& gl = *QOpenGLContext::currentContext()->functions();
+	gl.glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(previous[0]));
+	gl.glViewport(previous[1], previous[2], previous[3], previous[4]);
+}
+
 void CometTailMgr::draw(StelCore* core)
 {
+	if (!flagHalfResolution)
+		lowResBuffer.reset();
 	const bool photo = flagShow && core->getSkyDrawer()->getFlagPhotographicModeActive();
 	if (!flagShowGuides && !photo)
 		return;
