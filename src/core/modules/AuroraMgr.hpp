@@ -165,6 +165,7 @@ public:
 		double pulsating = 0.;   //!< pulsating aurora (0 to 1)
 		double steve = 0.;       //!< STEVE, in the recovery of some strong substorms (0 to 1)
 		double picketFence = 0.; //!< its picket fence (0 to 1)
+		double surge = 0.;       //!< the westward travelling surge: how far its head is rolled up (0 to 1)
 		double onset = 0.;       //!< Julian day of the onset of this cycle
 		double nextOnset = 0.;   //!< Julian day of the onset of the next cycle
 	};

@@ -253,7 +253,7 @@ AuroraMgr::Substorm AuroraMgr::exposedSubstorm(const StelCore* core, double& exp
 	{
 		constexpr int samples = 9;
 		Substorm mean = sub;
-		mean.spread = mean.activity = mean.bulge = mean.drift = mean.pulsating = mean.steve = mean.picketFence = 0.;
+		mean.spread = mean.activity = mean.bulge = mean.drift = mean.pulsating = mean.steve = mean.picketFence = mean.surge = 0.;
 		for (int i = 0; i < samples; ++i)
 		{
 			const Substorm s = substorm(jd + exposure*((i + 0.5)/samples - 0.5)/86400., kp);
@@ -264,6 +264,7 @@ AuroraMgr::Substorm AuroraMgr::exposedSubstorm(const StelCore* core, double& exp
 			mean.pulsating += s.pulsating/samples;
 			mean.steve += s.steve/samples;
 			mean.picketFence += s.picketFence/samples;
+			mean.surge += s.surge/samples;
 		}
 		sub = mean;
 	}
@@ -613,6 +614,8 @@ AuroraMgr::Substorm AuroraMgr::substorm(double jd, double kp)
 		s.spread = 0.7 + 2.5*t;
 		s.bulge = maxBulge*std::sqrt(t);
 		s.drift = maxDrift;
+		// the westward travelling surge rolls the arcs up at the western end of the bulge
+		s.surge = strength*std::min(1., 2.*t);
 	}
 	else
 	{
@@ -623,6 +626,7 @@ AuroraMgr::Substorm AuroraMgr::substorm(double jd, double kp)
 		s.bulge = maxBulge*(1. - t);
 		s.drift = maxDrift*(1. - t);
 		s.pulsating = strength*std::sin(M_PI*t);
+		s.surge = strength*(1. - t)*(1. - t)*(1. - t);
 		// STEVE (Strong Thermal Emission Velocity Enhancement) in the recovery of some strong substorms, more often in
 		// active times: about an hour after the onset, for half an hour to an hour (Gallardo-Lacourt et al. 2018);
 		// in about half of them with its picket fence
@@ -909,6 +913,9 @@ uniform highp float auroraTime;      // seconds since 0h UT
 uniform highp float auroraSeed;      // from the date
 uniform highp float auroraExposure;  // exposure time of the camera (s, 0: an instant): what changes faster is averaged
 uniform highp vec4 auroraSubstorm;   // onset (MLT, h), its spread in MLT (h), activity (0-1), poleward bulge (radians)
+uniform highp float auroraPixel;     // the angle of a pixel of the view (radians, at its center)
+uniform highp vec4 auroraSurge;      // the head of the westward travelling surge: MLT (h), latitude, radius (radians),
+                                     // how far the arcs are wound around it (radians, 0: none)
 uniform highp vec4 auroraState;      // equatorward drift of the arcs (radians), pulsating aurora (0-1), energetic
                                      // electrons (0-1: the aurora reaches deeper), lowest latitude of the aurorae
 uniform highp vec4 auroraSteve;      // STEVE: its column (of its mauve light) and that of the green of its picket
@@ -1027,11 +1034,17 @@ highp float arcFold(highp float lon, highp float activity, int j)
 // of the line of sight sees of an arc, for the share of rays in the arc; the cells are 0.04 and 0.012 degrees of
 // longitude (2 and 0.7 km in the oval), and they drift along the arc. The pieces of a line that runs along an arc lie
 // side by side: each takes the mean over its own stretch, so that they do not sample the rays like a comb (moire).
-highp float rayNoise(highp float lon, highp float o)
+// blur: the stretch of longitude (turns) one sample stands for. Each octave fades to its mean where its cells are
+// smaller than that (sampled more sparsely than its cells, it would make moire), and the mean stays 1.
+highp float rayNoise(highp float lon, highp float o, highp float blur)
 {
-	highp float r = 0.6*auroraNoise(lon*9000. + auroraTime/3. + o, 9000., auroraTime/2.5 + o)
-	              + 0.4*auroraNoise(lon*30000. - auroraTime/1.5 + o, 30000., auroraTime/0.8 + o);
-	return 3.*r*r/0.84;
+	highp float a1 = 1. - smoothstep(0.25, 1., blur*9000.);
+	highp float a2 = 1. - smoothstep(0.25, 1., blur*30000.);
+	highp float n1 = a1 > 0. ? auroraNoise(lon*9000. + auroraTime/3. + o, 9000., auroraTime/2.5 + o) : 0.5;
+	highp float n2 = a2 > 0. ? auroraNoise(lon*30000. - auroraTime/1.5 + o, 30000., auroraTime/0.8 + o) : 0.5;
+	highp float r = 0.6*mix(0.5, n1, a1) + 0.4*mix(0.5, n2, a2);
+	// the mean of r^2: the value noise has a variance of 0.0457
+	return r*r/(0.25 + 0.0457*(0.36*a1*a1 + 0.16*a2*a2));
 }
 // The posts of the picket fence of STEVE between the longitudes lon0 and lon1 (turns): green columns along the field
 // lines a few km wide, some 10 km apart (about 2000 a turn at the latitudes of STEVE), 0 to 1, about 0.2 on average. A
@@ -1051,18 +1064,20 @@ highp float picketPosts(highp float lon0, highp float lon1)
 	return mix(0.25*m, 0.2, smoothstep(1., 6., cells));
 }
 
-highp float arcRays(highp float lon0, highp float lon1, highp float rays, int j)
+// pixel: the stretch of longitude (turns) a pixel spans there: finer rays blend (far away, near the horizon, they
+// would make moire)
+highp float arcRays(highp float lon0, highp float lon1, highp float rays, int j, highp float pixel)
 {
 	highp float o = float(j)*31.;
 	highp float cells = abs(lon1 - lon0)*9000.;
 	highp float m = 1.;
 	if (cells < 0.3)
-		m = rayNoise(0.5*(lon0 + lon1), o);
+		m = rayNoise(0.5*(lon0 + lon1), o, max(abs(lon1 - lon0), pixel));
 	else if (cells < 16.)
 	{
 		m = 0.;
 		for (int i = 0; i < 4; ++i)
-			m += 0.25*rayNoise(mix(lon0, lon1, (float(i) + 0.5)/4.), o);
+			m += 0.25*rayNoise(mix(lon0, lon1, (float(i) + 0.5)/4.), o, max(0.25*abs(lon1 - lon0), pixel));
 		// a long stretch sees the mean of many rays
 		m = mix(m, 1., smoothstep(4., 16., cells));
 	}
@@ -1115,6 +1130,31 @@ highp float pulsating(highp float lon, highp float lat, highp float cells)
 
 // The arcs at a point of the line of sight: the footprint latitude lat (radians) and magnetic longitude lon (turns)
 // against the latitudes of the three arcs there (with their folds): the folds are only computed near an arc
+// The head of the westward travelling surge in a substorm: the arcs roll up into a spiral some hundreds of km across,
+// counterclockwise seen from above in the north (along the field lines, as in the south), and travel westward with the
+// western end of the bulge (Akasofu 1964; Davis and Hallinan 1976). Around the head the arcs are those of the place
+// turned back by an angle that grows towards its center: lines become spirals. The latitude and longitude (turns)
+// where the arcs of a place are found, and how close the place is to the head (0 to 1).
+highp vec3 surgeWarp(highp float lat, highp float lon)
+{
+	if (auroraSurge.w <= 0.)
+		return vec3(lat, lon, 0.);
+	highp float mlt = mod(12. + (lon*2.*PI - auroraSunLon)*12./PI, 24.);
+	highp float dh = mlt - auroraSurge.x;
+	dh -= 24.*floor(dh/24. + 0.5);
+	highp float scale = cos(auroraSurge.y)*PI/12.; // radians of the surface per hour of MLT
+	highp vec2 q = vec2(dh*scale, lat - auroraSurge.y);
+	highp float r2 = dot(q, q)/(auroraSurge.z*auroraSurge.z);
+	if (r2 >= 9.)
+		return vec3(lat, lon, 0.);
+	highp float near = exp(-r2);
+	highp float a = -auroraSurge.w*near;
+	highp float c = cos(a), sn = sin(a);
+	q = vec2(c*q.x - sn*q.y, sn*q.x + c*q.y);
+	return vec3(auroraSurge.y + q.y, lon + (q.x/scale - dh)/24., near);
+}
+
+// The distances in latitude to the three arcs (at the place where the arcs are found, see surgeWarp())
 highp vec3 arcOffsets(highp float lat, highp float lon)
 {
 	highp float mlt = mod(12. + (lon*2.*PI - auroraSunLon)*12./PI, 24.);
@@ -1169,7 +1209,7 @@ void main(void)
 	}
 
 	highp float green = 0., red = 0., nitrogen = 0., sar = 0., steve = 0.;
-	highp float tPrev = 0., hPrev = 0., latPrev = 0., lonPrev = 0.;
+	highp float tPrev = 0., hPrev = 0., latPrev = 0., lonPrev = 0., arcLonPrev = 0., nearPrev = 0.;
 	highp vec3 xPrev = vec3(0);
 	for (int k = 0; k <= STEPS; ++k)
 	{
@@ -1181,7 +1221,8 @@ void main(void)
 		highp vec2 m = magneticCoordinates(p);
 		highp float lat = m.x;
 		highp float lon = m.y; // in turns
-		highp vec3 x = arcOffsets(lat, lon);
+		highp vec3 warp = surgeWarp(lat, lon);
+		highp vec3 x = arcOffsets(warp.x, warp.y);
 		if (k > 0)
 		{
 			highp float len = t - tPrev;
@@ -1203,32 +1244,65 @@ void main(void)
 			highp float diffuse = auroraEmission.y*(0.3 + 0.7*morning)*(1. + 1.5*activity);
 			// rays: a few in quiet arcs, most of the light in active ones
 			highp float rays = 0.15 + 0.85*smoothstep(0.03, 0.4, activity);
+			// in the head of the surge, where the arcs are wound tightly, their rays blend into a glow
+			rays *= 1. - 0.8*warp.z*min(auroraSurge.w/3., 1.);
 
 			// three arcs in the discrete oval, the brightest near its equatorward edge; they drift towards the
 			// equator before a substorm and fill the bulge of the oval in it. The distance to an arc is known at
-			// both ends of the piece: the line cannot miss it where it folds
-			for (int j = 0; j < 3; ++j)
+			// both ends of the piece: the line cannot miss it where it folds. Near the head of the surge, where the
+			// arcs turn, the piece is cut in four (straight between the ends, the distances would make moire).
+			int parts = auroraSurge.w > 0. && max(warp.z, nearPrev) > 0.02 ? 4 : 1;
+			highp vec3 xa = xPrev;
+			highp float ta = tPrev, ha = hPrev, la = arcLonPrev;
+			for (int q = 1; q <= 4; ++q)
 			{
-				highp float w = (j == 0 ? 4. : (j == 1 ? 6. : 8.))/FOOT_RADIUS;
-				highp float x0 = xPrev[j], x1 = x[j];
-				if (x0*x1 > 0. && min(abs(x0), abs(x1)) > 5.*w)
-					continue; // far from this arc
-				highp float strength = j == 0 ? 1. : (j == 1 ? 0.45 : 0.25);
-				highp float s = arcs*strength*bandLength(x0, x1, 0., w, len);
-				highp float c = bandCenter(x0, x1, w);
-				highp float hc = mix(hPrev, h, c);
-				// the stretch of the arc in this piece: all of it along the arc, about 3 widths across it
-				highp float halfSpan = 0.5*dlon*min(1., 3.*w/max(abs(x0 - x1), 1e-9));
-				highp float lonc = lonPrev + c*dlon;
-				highp float ray = arcRays(lonc - halfSpan, lonc + halfSpan, rays, j);
-				// the rays reach higher than the arc
-				highp float top = 12. + 30.*rays*min(ray, 2.);
-				s *= ray*shellFade(hc);
-				// energetic electrons reach deeper, in storms and substorms
-				highp float e = s*chapman(hc, 110. - 15.*auroraState.z*(0.4 + 0.6*activity), top);
-				green += e*greenQuenching(hc);
-				nitrogen += e;
-				red += s*chapman(hc, auroraEmission.w, 60.);
+				if (q > parts)
+					break;
+				highp vec3 xb = x;
+				highp float tb = t, hb = h, lb = warp.y;
+				if (q < parts)
+				{
+					tb = mix(tPrev, t, float(q)/float(parts));
+					highp vec3 pb = p0 + tb*dir;
+					hb = length(pb) - EARTH_RADIUS;
+					highp vec2 mb = magneticCoordinates(pb);
+					highp vec3 wb = surgeWarp(mb.x, mb.y);
+					xb = arcOffsets(wb.x, wb.y);
+					lb = wb.y;
+				}
+				highp float lenq = tb - ta;
+				highp float dla = lb - la;
+				dla -= floor(dla + 0.5);
+				for (int j = 0; j < 3; ++j)
+				{
+					highp float w = (j == 0 ? 4. : (j == 1 ? 6. : 8.))/FOOT_RADIUS;
+					highp float x0 = xa[j], x1 = xb[j];
+					if (x0*x1 > 0. && min(abs(x0), abs(x1)) > 5.*w)
+						continue; // far from this arc
+					highp float strength = j == 0 ? 1. : (j == 1 ? 0.45 : 0.25);
+					highp float s = arcs*strength*bandLength(x0, x1, 0., w, lenq);
+					highp float c = bandCenter(x0, x1, w);
+					highp float hc = mix(ha, hb, c);
+					// the stretch of the arc in this piece: all of it along the arc, about 3 widths across it
+					// (along the arcs where the surge turns them)
+					highp float halfSpan = 0.5*dla*min(1., 3.*w/max(abs(x0 - x1), 1e-9));
+					highp float lonc = la + c*dla;
+					// the longitude a pixel spans there: its width over the distance from the axis
+					highp float pixel = auroraPixel*mix(ta, tb, c)/(2.*PI*max(length(p.xy), 100.));
+					highp float ray = arcRays(lonc - halfSpan, lonc + halfSpan, rays, j, pixel);
+					// the rays reach higher than the arc
+					highp float top = 12. + 30.*rays*min(ray, 2.);
+					s *= ray*shellFade(hc);
+					// energetic electrons reach deeper, in storms and substorms
+					highp float e = s*chapman(hc, 110. - 15.*auroraState.z*(0.4 + 0.6*activity), top);
+					green += e*greenQuenching(hc);
+					nitrogen += e;
+					red += s*chapman(hc, auroraEmission.w, 60.);
+				}
+				xa = xb;
+				ta = tb;
+				ha = hb;
+				la = lb;
 			}
 			// the diffuse aurora, from its equatorward boundary into the discrete oval, pulsating after a substorm
 			highp float latm = 0.5*(lat + latPrev);
@@ -1296,6 +1370,8 @@ void main(void)
 		hPrev = h;
 		latPrev = lat;
 		lonPrev = lon;
+		arcLonPrev = warp.y;
+		nearPrev = warp.z;
 		xPrev = x;
 	}
 
@@ -1360,6 +1436,7 @@ void AuroraMgr::drawLight(StelCore* core, const Geometry& g)
 	QOpenGLShaderProgram& p = *lightProgram;
 	p.bind();
 	p.setUniformValue("projectionMatrixInverse", prj->getProjectionMatrix().toQMatrix().inverted());
+	p.setUniformValue("auroraPixel", static_cast<float>((flagHalfResolution ? 2. : 1.)/std::max(static_cast<double>(prj->getPixelPerRadAtCenter()), 1e-6)));
 	prj->setUnProjectUniforms(p);
 	extinction.setForwardTransformUniforms(p);
 	drawer->setPhotoExtinctionUniforms(p, 1);
@@ -1408,6 +1485,18 @@ void AuroraMgr::drawLight(StelCore* core, const Geometry& g)
 	p.setUniformValue("auroraSeed", static_cast<float>(std::fmod(std::floor(jd + 0.5), 997.)));
 	p.setUniformValue("auroraSubstorm", QVector4D(static_cast<float>(sub.onsetMLT), static_cast<float>(sub.spread),
 	                                              static_cast<float>(sub.activity), static_cast<float>(sub.bulge*M_PI/180.)));
+	// The head of the westward travelling surge at the western end of the bulge (where the activity is down to 1/e),
+	// on the arcs there: 1.6 degrees in radius, wound by up to 0.9 turn
+	{
+		const double mltHead = std::fmod(sub.onsetMLT - sub.spread + 24., 24.);
+		const OvalBoundaries b = ovalBoundaries(kp, mltHead, getDst());
+		const double headActivity = sub.activity*std::exp(-1.);
+		const double bulge = sub.activity > 1e-3 ? sub.bulge*headActivity/sub.activity : 0.;
+		const double width = std::max(b.poleward - b.equatorward, 0.29) + bulge;
+		const double headLat = b.equatorward + 0.3*width - sub.drift*(1. - headActivity);
+		p.setUniformValue("auroraSurge", QVector4D(static_cast<float>(mltHead), static_cast<float>(headLat*M_PI/180.),
+		                                           static_cast<float>(1.6*M_PI/180.), static_cast<float>(2.*M_PI*0.9*sub.surge)));
+	}
 	const double energetic = std::clamp((kp - 3.5)/4.5, 0., 1.);
 	// Lines of sight that stay equatorward of the diffuse aurora are left out
 	float lowest = oval[0].z();
