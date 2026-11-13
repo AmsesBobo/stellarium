@@ -193,11 +193,8 @@ void main(void)
 	highp float w = shape.y;
 	highp float cn = 1. / (1. + coreDiskTerm*R/coreAlpha + (coreBeta-1.)*R*R/(coreAlpha*coreAlpha));
 	highp float hn = 1. / (1. + haloDiskTerm*Rh/haloAlpha + (haloBeta-1.)*Rh*Rh/(haloAlpha*haloAlpha));
-	// A spike becomes a band as wide as the lit part
-	highp float s1 = sqrt(2.*PI_V)*spikeSigma;
-	highp float s2 = PI_V*spikeLength;
-	highp float sn = (s1*s2) / ((s1 + 2.*Rs) * (s2 + 2.*Rs));
-	vNorm = vec4(w*cn, hn, sn, w);
+	// The spikes of a disk are those of each of its points, added up (see the fragment shader): that keeps their light
+	vNorm = vec4(w*cn, hn, 1., w);
 }
 )";
 	const char* fsrc = R"(
@@ -337,6 +334,22 @@ highp float defocusDisk(highp vec2 p, highp float R)
 }
 // The core of one color with the chromatic aberration: its image shifted along the radial direction, and a small
 // blur disk that widens it (as a small defocus widens the core, see main())
+// The light of a spike between the offsets lo and hi along it, from the points of the source: the integral of the
+// Lorentzian 1/(1 + s^2/l^2) over [lo, hi], without the part |s| < S that the image already holds (with bloom, see
+// StelPhotoBloom). atan(a/l) - atan(b/l) = atan(l (a - b), l^2 + a b) for a >= b, which stays exact far out along the
+// spike, where both angles are almost pi/2.
+highp float spikeSpan(highp float lo, highp float hi, highp float S, highp float l)
+{
+	highp float sum = 0.;
+	highp float a = max(lo, S);
+	if (hi > a)
+		sum += atan(l*(hi - a), l*l + hi*a);
+	highp float b = min(hi, -S);
+	if (b > lo)
+		sum += atan(l*(b - lo), l*l + b*lo);
+	return l*sum;
+}
+
 highp vec2 chromaOffset(highp float shift)
 {
 	return vOffset - vLens.yz * (shift * vLens.x);
@@ -571,23 +584,30 @@ void main(void)
 		highp float lineNorm = vNorm.z * spikeFraction / (float(spikeLines) * sqrt(2.*PI) * spikeSigma * PI * spikeLength);
 		if (brightness * lineNorm > visibleThreshold)
 		{
-			// Spikes start from the lit part (or the blur disk): around its photocenter, as wide as it
-			highp vec2 p = spikeP;
+			// A disk: the spikes of all its points added up. Every chord of the disk along a line spreads its light along
+			// that line, so across the spike the light follows the length of the chord (round, not a flat band), and
+			// along it the spike tapers smoothly from the disk outwards. (A band of the full height that started a fixed
+			// distance from the edge of the disk drew the ends of the overlapping bands as a wreath around a large disk.)
+			// A point gets a thin line instead of the Gaussian: rho0 = 2 s1/pi, a chord profile with the same peak and light.
+			highp float s1 = sqrt(2.*PI) * spikeSigma;
+			highp float rho0 = 2.*s1/PI;
+			highp float rho = sqrt(spikeR*spikeR + rho0*rho0);
+			highp float spanNorm = lineNorm * s1 / (PI * rho * rho);
+			highp vec2 p = spikeP; // from the photocenter of the lit part (or of the blur disk)
 			for (int k = 0; k < 9; ++k)
 			{
 				if (k >= spikeLines) break;
 				highp vec2 dir = spikeDirs[k];
-				highp float acrossC = abs(dot(p, vec2(-dir.y, dir.x)));
-				highp float along = max(0., abs(dot(p, dir)) - sqrt(max(0., spikeR*spikeR - acrossC*acrossC)));
-				highp float across = max(0., acrossC - spikeR);
-				highp float line = lineNorm * exp(-0.5 * across * across / (spikeSigma * spikeSigma))
-				                            / (1. + along * along / (spikeLength * spikeLength));
-				if (spikeStart > 0.)
-					line *= smoothstep(spikeStart - 0.5, spikeStart + 0.5, along);
+				highp float across = dot(p, vec2(-dir.y, dir.x));
+				highp float halfChord = sqrt(max(0., rho*rho - across*across));
+				if (halfChord <= 0.)
+					continue;
+				highp float along = dot(p, dir);
+				highp float line = spanNorm * spikeSpan(along - halfChord, along + halfChord, spikeStart, spikeLength);
 				// Trailed: a spike across the trail is swept over it, its light spread over the trail length
 				if (trailLength > 0.)
 				{
-					highp float width = sqrt(2.*PI) * spikeSigma + 2.*spikeR;
+					highp float width = 2.*rho;
 					line *= width / (width + trailLength * abs(dot(dir, trailNormal)));
 				}
 				profile += line;
@@ -843,7 +863,8 @@ bool StelSkyDrawer::computePhotoRCMag(float mag, RCMag* rcMag) const
 		const float length = getPhotoSpikeLength();
 		const float s1 = std::sqrt(2.f*M_PIf)*sigma;
 		const float s2 = M_PIf*length;
-		const float norm = (s1*s2)/((s1+2.f*defocusR)*(s2+2.f*defocusR)); // a band as wide as the blur disk
+		const float rho0 = 2.f*s1/M_PIf;
+		const float norm = rho0/std::sqrt(defocusR*defocusR + rho0*rho0); // spread across the blur disk (see the shader)
 		const float peak = flux*spikeFraction*norm / (lines * s1 * s2);
 		if (peak > photoVisibleThreshold)
 			rSpike = defocusR + length * std::sqrt(peak/photoVisibleThreshold - 1.f);
@@ -979,7 +1000,8 @@ bool StelSkyDrawer::drawPhotoBody(StelPainter* sPainter, const Vec3d& v, float d
 		const float length = getPhotoSpikeLength();
 		const float s1 = std::sqrt(2.f*M_PIf)*sigma;
 		const float s2 = M_PIf*length;
-		const float norm = (s1*s2)/((s1+2.f*R)*(s2+2.f*R));
+		const float rho0 = 2.f*s1/M_PIf;
+		const float norm = rho0/std::sqrt(R*R + rho0*rho0); // spread across the disk (see the shader)
 		const float peak = flux*spikeFraction*norm / (lines * s1 * s2);
 		if (peak > photoVisibleThreshold)
 			rSpike = length * std::sqrt(peak/photoVisibleThreshold - 1.f);
