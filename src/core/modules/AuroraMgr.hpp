@@ -252,7 +252,8 @@ private:
 		std::vector<bool> visible;
 		Vec3f color;
 	};
-	std::vector<OvalLine> computeOvalLines(const Geometry& g) const;
+	//! The boundaries of the ovals; with the stable auroral red arc in storms, and STEVE (steve: 0 to 1) where it shines
+	std::vector<OvalLine> computeOvalLines(const Geometry& g, double steve) const;
 	void drawOval(StelCore* core, const Geometry& g) const;
 
 	//! The light of the aurorae (photographic mode), in a full screen pass that follows the line of sight of each pixel

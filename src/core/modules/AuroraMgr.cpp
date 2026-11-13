@@ -767,31 +767,41 @@ AuroraMgr::Geometry AuroraMgr::computeGeometry(const StelCore* core) const
 	return g;
 }
 
-std::vector<AuroraMgr::OvalLine> AuroraMgr::computeOvalLines(const Geometry& g) const
+std::vector<AuroraMgr::OvalLine> AuroraMgr::computeOvalLines(const Geometry& g, double steve) const
 {
 	const double kp = getKp();
 	std::vector<OvalLine> lines;
 	struct LineSpec
 	{
-		int boundary; // 0 poleward, 1 equatorward, 2 diffuse
+		int boundary; // 0 poleward, 1 equatorward, 2 diffuse, 3 the SAR arc, 4 STEVE
 		double height;
 		Vec3f color;
 	};
-	const std::array<LineSpec, 4> specs = {{
+	const std::array<LineSpec, 6> specs = {{
 		{0, GreenHeight, Vec3f(0.35f, 1.0f, 0.45f)},
 		{1, GreenHeight, Vec3f(0.35f, 1.0f, 0.45f)},
 		{2, GreenHeight, Vec3f(0.15f, 0.45f, 0.20f)},
-		{1, RedHeight,   Vec3f(1.0f, 0.30f, 0.30f)}
+		{1, RedHeight,   Vec3f(1.0f, 0.30f, 0.30f)},
+		{3, 380.,        Vec3f(1.0f, 0.55f, 0.15f)},
+		{4, 200.,        Vec3f(0.80f, 0.55f, 0.95f)}
 	}};
 
 	std::array<OvalBoundaries, PointsPerLine+1> boundaries;
+	double lowest = 90.;
 	for (int i = 0; i <= PointsPerLine; ++i)
+	{
 		boundaries[static_cast<size_t>(i)] = ovalBoundaries(kp, 24.*i/PointsPerLine, getDst());
+		lowest = std::min(lowest, boundaries[static_cast<size_t>(i)].diffuse);
+	}
+	// as in the light (see drawLight()): the SAR arc in storms, STEVE before magnetic midnight while it shines
+	const SarArc sar = sarArc(lowest, getDst());
 
 	for (const double hemisphere : {1., -1.})
 	{
 		for (const auto& spec : specs)
 		{
+			if ((spec.boundary == 3 && sar.column <= 0.) || (spec.boundary == 4 && steve <= 0.01))
+				continue;
 			OvalLine line;
 			line.color = spec.color;
 			line.points.reserve(PointsPerLine+1);
@@ -800,14 +810,22 @@ std::vector<AuroraMgr::OvalLine> AuroraMgr::computeOvalLines(const Geometry& g) 
 			{
 				const double mlt = 24.*i/PointsPerLine;
 				const OvalBoundaries& b = boundaries[static_cast<size_t>(i)];
-				const double latDeg = spec.boundary == 0 ? b.poleward : (spec.boundary == 1 ? b.equatorward : b.diffuse);
+				double latDeg = spec.boundary == 0 ? b.poleward : (spec.boundary == 1 ? b.equatorward : b.diffuse);
+				if (spec.boundary == 3)
+					latDeg = sar.latitude;
+				// STEVE: 1.5 degrees equatorward of the diffuse aurora, from about 18 to 1 h MLT
+				double dn = mlt - 21.5;
+				dn -= 24.*std::floor(dn/24. + 0.5);
+				const bool shines = spec.boundary != 4 || std::fabs(dn) < 3.5;
+				if (spec.boundary == 4)
+					latDeg = b.diffuse - 1.5;
 				const double lon = g.sunMagLon + (mlt - 12.)*M_PI/12.;
 				const Vec3d point = correctedToGeographic(g.frame, hemisphere*latDeg*M_PI/180., lon, spec.height)*(EarthRadius + spec.height);
 
 				// In sight unless the line of sight passes below the surface of the Earth
 				const Vec3d d = point - g.observer;
 				const double s = -(g.observer*d)/(d*d);
-				line.visible.push_back(s <= 0. || (g.observer + d*std::min(s, 1.)).norm() >= EarthRadius);
+				line.visible.push_back(shines && (s <= 0. || (g.observer + d*std::min(s, 1.)).norm() >= EarthRadius));
 
 				Vec3d altAz(-(g.north*d), g.east*d, g.up*d);
 				altAz.normalize();
@@ -835,7 +853,8 @@ void AuroraMgr::draw(StelCore* core)
 
 void AuroraMgr::drawOval(StelCore* core, const Geometry& g) const
 {
-	const std::vector<OvalLine> lines = computeOvalLines(g);
+	double exposure = 0.;
+	const std::vector<OvalLine> lines = computeOvalLines(g, exposedSubstorm(core, exposure).steve);
 	const StelProjectorP prj = core->getProjection(StelCore::FrameAltAz, StelCore::RefractionAuto);
 	StelPainter painter(prj);
 	painter.setBlending(true);
