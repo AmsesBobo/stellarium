@@ -924,6 +924,9 @@ uniform highp vec4 auroraSteve;      // STEVE: its column (of its mauve light) a
 uniform highp vec4 auroraPolarCap;   // a polar cap arc (sun-aligned, in quiet times): its column of green (R), red
                                      // against green, its distance from the noon-midnight meridian towards dawn and
                                      // its width (standard deviation, radians of the surface)
+uniform highp vec4 auroraDunes;      // auroral dunes: how much (0-1), their phase (turns), the direction they travel
+                                     // (radians from magnetic east towards the pole), the MLT (h) of the middle of the
+                                     // field
 uniform highp vec3 auroraSar;        // the stable auroral red arc: its footprint latitude, its width (standard
                                      // deviation, radians) and its column of 630.0 nm (R) near midnight; 0 without
 
@@ -1250,6 +1253,23 @@ void main(void)
 			// the dayside aurora around the cusp (9 to 15 h MLT): soft electrons (some 100 eV), mostly the red line of
 			// oxygen at 250 to 300 km, seen from Svalbard at midday in the polar night
 			highp float cusp = smoothstep(0.55, 0.85, 0.5 + 0.5*cos((mlt - 12.)*PI/12.));
+			// auroral dunes (Palmroth et al. 2020): a mesospheric bore, a wave front in a layer of the mesosphere,
+			// gathers the atomic oxygen near 100 km into crests some 45 km apart: the green there shines in parallel
+			// stripes across a field some hundreds of km wide (here at 106 km, in the lowest green that is not quenched).
+			// A piece that spans a crest sees the mean.
+			highp float duneWave = 0.;
+			if (auroraDunes.x > 0.)
+			{
+				highp float dd = mlt - auroraDunes.w;
+				dd -= 24.*floor(dd/24. + 0.5);
+				highp float field = exp(-dd*dd/2.);
+				highp vec2 along = vec2(cos(auroraDunes.z), sin(auroraDunes.z));
+				highp float latc = 0.5*(lat + latPrev);
+				highp float east = 2.*PI*FOOT_RADIUS*cos(latc);
+				highp float crests = dot(vec2(lonm*east, latc*FOOT_RADIUS), along)/45.;
+				highp float span = abs(dot(vec2(dlon*east, (lat - latPrev)*FOOT_RADIUS), along))/45.;
+				duneWave = auroraDunes.x*field*(1. - smoothstep(0.3, 1., span))*cos(2.*PI*(crests + auroraDunes.y));
+			}
 			// rays: a few in quiet arcs, most of the light in active ones
 			highp float rays = 0.15 + 0.85*smoothstep(0.03, 0.4, activity);
 			// in the head of the surge, where the arcs are wound tightly, their rays blend into a glow
@@ -1305,7 +1325,7 @@ void main(void)
 					highp float e = s*chapman(hc, 110. - 15.*auroraState.z*(0.4 + 0.6*activity), top);
 					// near magnetic noon (the cusp) soft electrons make the arcs red, high up: 3 R of red per R of green
 					e *= 1. - 0.7*cusp;
-					green += e*greenQuenching(hc);
+					green += e*greenQuenching(hc)*(1. + 0.8*duneWave*exp(-(hc - 106.)*(hc - 106.)/100.));
 					nitrogen += e;
 					red += s*(chapman(hc, auroraEmission.w, 60.) + 3.*cusp/max(auroraEmission.z, 0.05)*chapman(hc, 260., 70.));
 				}
@@ -1350,7 +1370,7 @@ void main(void)
 				}
 				highp float d = diffuse*len*zone*shellFade(hm);
 				highp float e = d*(chapman(hm, 115., 15.) + patches*chapman(hm, 108., 10.));
-				green += e*greenQuenching(hm);
+				green += e*greenQuenching(hm)*(1. + 0.8*duneWave*exp(-(hm - 106.)*(hm - 106.)/100.));
 				nitrogen += e;
 				red += d*chapman(hm, auroraEmission.w, 60.);
 			}
@@ -1555,6 +1575,18 @@ void AuroraMgr::drawLight(StelCore* core, const Geometry& g)
 	                                         static_cast<float>(sar.column)));
 	if (sar.column > 0.)
 		lowest = std::min(lowest, static_cast<float>((sar.latitude - 4.*sar.width)*M_PI/180.));
+	// Auroral dunes (see the shader) on some nights (1 in 7), for an hour or two about a time between 18 and 4 h UT,
+	// in a field centered at 21 to 1 h MLT, travelling some 30 m/s (a crest every 25 minutes)
+	{
+		const double night = std::floor(jd);
+		const int64_t n = static_cast<int64_t>(night);
+		const double hours = 24.*(jd - night); // since noon UT
+		const double center = 6. + 10.*unitHash(n, 31);
+		const double x = (hours - center)/0.8;
+		const double amount = unitHash(n, 32) < 0.15 ? std::exp(-x*x) : 0.;
+		p.setUniformValue("auroraDunes", QVector4D(static_cast<float>(amount), static_cast<float>(std::fmod(hours*3600./1500., 1.)),
+		                                           static_cast<float>(M_PI*unitHash(n, 33)), static_cast<float>(21. + 4.*unitHash(n, 34))));
+	}
 	// A polar cap arc (see the shader) on quiet days (Kp below 3): some hundreds of R of green, half as much red,
 	// 0.25 degree wide, on most of them; it drifts across the cap, dawn to dusk and back, in some 8 hours, about the place
 	// it has that day
