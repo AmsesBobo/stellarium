@@ -444,9 +444,16 @@ public:
 	//! ShowMySky models. meanSkyLuminance: of the sky that lights it (cd/m^2); addLight: whether this pass adds the
 	//! light of the haze (one pass of the Sun and the Moon)
 	void setPhotoHazeUniforms(QOpenGLShaderProgram& program, double meanSkyLuminance, bool addLight) const;
-	//! The share of the light that the haze scatters into the aureole, against the light that comes straight through,
-	//! on a grid of gw x gh cells over the scene image (w x h pixels, from the lower left): it grows with the airmass
-	std::vector<float> getPhotoAureoleMap(int gw, int gh, int w, int h) const;
+	//! The share of the light that the haze scatters into the aureole, against the light that comes straight through:
+	//! it grows with the airmass, steeply near the horizon. Since a grid over the screen would smooth that, unevenly
+	//! as the horizon moves across its cells when panning, the screen gets the altitude (getPhotoAureoleAltitudes())
+	//! and the share is read for each pixel from a table against the altitude (getPhotoAureoleShareTable()).
+	//! The apparent altitude (radians) of the centers of a grid of gw x gh cells over the scene image (w x h pixels,
+	//! from the lower left)
+	std::vector<float> getPhotoAureoleAltitudes(int gw, int gh, int w, int h) const;
+	//! The share at n apparent altitudes limb + (pi/2 - limb) (i/(n-1))^2, dense near the horizon; limb: the apparent
+	//! altitude of the true horizon (below it the ground: no share)
+	std::vector<float> getPhotoAureoleShareTable(int n, float& limb) const;
 	//! Optical vignetting: offset of the pupil image against the lens barrel in the corner of the frame,
 	//! in units of the barrel radius. 0.81 gives half the light in the corner when wide open.
 	static constexpr float PHOTO_VIGNETTING_SHIFT = 0.81f;

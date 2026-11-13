@@ -1482,21 +1482,28 @@ void StelApp::highGraphicsModeDraw()
 			photoBloom.reset(new StelPhotoBloom);
 		const bool spikes = bloomActive && skyDrawer->getPhotoSpikeFractionEffective() > 0.f;
 		const StelSkyDrawer::PhotoHalationParams halation = skyDrawer->getPhotoHalationParams(*core->getProjection(StelCore::FrameJ2000));
-		float aureoleCore = 0.f, aureoleExtent = 0.f;
+		float aureoleCore = 0.f, aureoleExtent = 0.f, aureoleLimb = 0.f;
 		if (aureoleActive)
 		{
 			skyDrawer->getPhotoAureoleSize(*core->getProjection(StelCore::FrameAltAz), aureoleCore, aureoleExtent);
-			// the share of the light of each point that goes into its aureole (from its airmass)
-			constexpr int GW = 64, GH = 36;
-			const std::vector<float> share = skyDrawer->getPhotoAureoleMap(GW, GH, static_cast<int>(w), static_cast<int>(h));
-			if (!photoAureoleMapTex)
-				GL(gl->glGenTextures(1, &photoAureoleMapTex));
-			GL(gl->glBindTexture(GL_TEXTURE_2D, photoAureoleMapTex));
-			GL(gl->glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, GW, GH, 0, GL_RED, GL_FLOAT, share.data()));
-			GL(gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR));
-			GL(gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR));
-			GL(gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE));
-			GL(gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE));
+			// the share of the light of each point that goes into its aureole (from its airmass): the altitude over
+			// the screen (smooth: a coarse grid holds it), and the share against the altitude (steep near the horizon:
+			// read for each pixel)
+			constexpr int GW = 64, GH = 36, TABLE = StelPhotoBloom::AUREOLE_TABLE_SIZE;
+			const std::vector<float> altitudes = skyDrawer->getPhotoAureoleAltitudes(GW, GH, static_cast<int>(w), static_cast<int>(h));
+			const std::vector<float> table = skyDrawer->getPhotoAureoleShareTable(TABLE, aureoleLimb);
+			const auto upload = [&](GLuint& tex, int tw, int th, const float* data) {
+				if (!tex)
+					GL(gl->glGenTextures(1, &tex));
+				GL(gl->glBindTexture(GL_TEXTURE_2D, tex));
+				GL(gl->glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, tw, th, 0, GL_RED, GL_FLOAT, data));
+				GL(gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR));
+				GL(gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR));
+				GL(gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE));
+				GL(gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE));
+			};
+			upload(photoAureoleMapTex, GW, GH, altitudes.data());
+			upload(photoAureoleTableTex, TABLE, 1, table.data());
 			GL(gl->glBindTexture(GL_TEXTURE_2D, 0));
 		}
 		bloomDone = photoBloom->process(sceneFBO->texture(), static_cast<int>(w), static_cast<int>(h),
@@ -1504,7 +1511,8 @@ void StelApp::highGraphicsModeDraw()
 		                                spikes ? skyDrawer->getPhotoSpikeLines() : 0,
 		                                StelSkyDrawer::getPhotoSpikeAngle(), skyDrawer->getPhotoSpikeLength(),
 		                                postProcessorVAO.get(), bloomActive ? halation.radius : 0.f, halation.density,
-		                                aureoleCore, aureoleExtent, aureoleActive ? photoAureoleMapTex : 0);
+		                                aureoleCore, aureoleExtent, aureoleActive ? photoAureoleMapTex : 0,
+		                                aureoleActive ? photoAureoleTableTex : 0, aureoleLimb);
 	}
 
 	// The meter and the luminance probe need a plain texture: the multisampled scene resolved into sceneFBO (once)

@@ -490,45 +490,48 @@ void StelSkyDrawer::getPhotoAureoleSize(const StelProjector& prj, float& coreSiz
 	extent = static_cast<float>(AUREOLE_EXTENT*ppr);
 }
 
-std::vector<float> StelSkyDrawer::getPhotoAureoleMap(int gw, int gh, int w, int h) const
+std::vector<float> StelSkyDrawer::getPhotoAureoleAltitudes(int gw, int gh, int w, int h) const
 {
 	std::vector<float> map(static_cast<size_t>(gw)*gh, 0.f);
-	const double forward = photoAerosol.depth*photoAerosol.albedo*photoAerosol.asymmetry*photoAerosol.asymmetry;
 	const StelProjectorP prj = core->getProjection(StelCore::FrameAltAz, StelCore::RefractionOff);
-	constexpr double RH = 6371./1.2;
-	// With the ray-traced extinction: the aerosols along the line of sight of the boundary layer of the model, down to
-	// the true horizon
-	const StelRefractionModel* model = extinction.getModel();
-	if (model)
-	{
-		const double perColumn = extinction.getAerosolSeaLevelDepth()*photoAerosol.albedo*photoAerosol.asymmetry*photoAerosol.asymmetry;
-		for (int j=0; j<gh; ++j)
-			for (int i=0; i<gw; ++i)
-			{
-				Vec3d v;
-				prj->unProject((i + 0.5)*w/gw, (j + 0.5)*h/gh, v);
-				v.normalize();
-				const double a = std::asin(qBound(-1., v[2], 1.));
-				if (a < model->getHorizonApparent())
-					continue;  // the ground
-				const double depth = perColumn*model->columns(a).aerosol;
-				map[static_cast<size_t>(j)*gw + i] = qMin(AUREOLE_MAX, static_cast<float>(std::expm1(depth)));
-			}
-		return map;
-	}
 	for (int j=0; j<gh; ++j)
 		for (int i=0; i<gw; ++i)
 		{
 			Vec3d v;
 			prj->unProject((i + 0.5)*w/gw, (j + 0.5)*h/gh, v);
 			v.normalize();
-			if (v[2] < 0.)
-				continue;  // the ground: no haze between it and the observer
-			const double s = v[2];
-			const double airmass = std::sqrt(RH*s*RH*s + 2.*RH + 1.) - RH*s;
-			map[static_cast<size_t>(j)*gw + i] = qMin(AUREOLE_MAX, static_cast<float>(std::expm1(forward*airmass)));
+			map[static_cast<size_t>(j)*gw + i] = static_cast<float>(std::asin(qBound(-1., v[2], 1.)));
 		}
 	return map;
+}
+
+std::vector<float> StelSkyDrawer::getPhotoAureoleShareTable(int n, float& limb) const
+{
+	std::vector<float> table(static_cast<size_t>(n), 0.f);
+	// With the ray-traced extinction: the aerosols along the line of sight of the boundary layer of the model, down to
+	// the true horizon; else a layer of 1.2 km over a spherical Earth, down to 0 degrees
+	const StelRefractionModel* model = extinction.getModel();
+	const double horizon = model ? model->getHorizonApparent() : 0.;
+	limb = static_cast<float>(horizon);
+	const double span = M_PI_2 - horizon;
+	const double perColumn = model ? extinction.getAerosolSeaLevelDepth()*photoAerosol.albedo*photoAerosol.asymmetry*photoAerosol.asymmetry : 0.;
+	const double forward = photoAerosol.depth*photoAerosol.albedo*photoAerosol.asymmetry*photoAerosol.asymmetry;
+	constexpr double RH = 6371./1.2;
+	for (int i=0; i<n; ++i)
+	{
+		const double u = static_cast<double>(i)/(n - 1);
+		const double a = horizon + span*u*u + (i == 0 ? 1e-7 : 0.);
+		double depth;
+		if (model)
+			depth = perColumn*model->columns(a).aerosol;
+		else
+		{
+			const double s = std::sin(a);
+			depth = forward*(std::sqrt(RH*s*RH*s + 2.*RH + 1.) - RH*s);
+		}
+		table[static_cast<size_t>(i)] = qMin(AUREOLE_MAX, static_cast<float>(std::expm1(depth)));
+	}
+	return table;
 }
 
 void StelSkyDrawer::setPhotoHazeUniforms(QOpenGLShaderProgram& program, double meanSkyLuminance, bool addLight) const

@@ -62,13 +62,17 @@ public:
 	//! @param halationDensity film only: optical density of the antihalation layer (one pass, at normal incidence)
 	//! @param aureoleCore, aureoleExtent the atmospheric aureole (see aureoleTexture()): the radius of its core and its
 	//! extent, pixels; 0: none
-	//! @param aureoleShare a texture over the scene (red): the share of the light of each point that goes into its
-	//! aureole (it depends on the airmass; 0 for the ground)
+	//! @param aureoleShare a texture over the scene (red): the apparent altitude (radians) of each point
+	//! @param aureoleShareTable a texture of n x 1 (red): the share of the light of a point that goes into its aureole
+	//! (it depends on the airmass) at the altitudes limb + (pi/2 - limb) (i/(n-1))^2; none below aureoleLimb (the ground)
 	//! The halo is left out when haloAlpha is 0 (only the aureole).
 	bool process(GLuint sceneTexture, int w, int h, float haloAlpha, float haloBeta,
 	             int spikeLines, float spikeAngle, float spikeLength, QOpenGLVertexArrayObject* vao,
 	             float halationRadius = 0.f, float halationDensity = 0.f,
-	             float aureoleCore = 0.f, float aureoleExtent = 0.f, GLuint aureoleShare = 0);
+	             float aureoleCore = 0.f, float aureoleExtent = 0.f, GLuint aureoleShare = 0,
+	             GLuint aureoleShareTable = 0, float aureoleLimb = 0.f);
+	//! The number of entries of the table of the share of the aureole (aureoleShareTable)
+	static constexpr int AUREOLE_TABLE_SIZE = 256;
 	//! The aureole of the haze (full resolution), or 0: the light scattered forwards by the aerosols around every bright
 	//! point (stars, planets, the Moon: the scene above its smooth background, so that the sky does not get an aureole
 	//! of its own), each point times its share (aureoleShare), spread with the profile 1/(r^2 + core^2) out to about the

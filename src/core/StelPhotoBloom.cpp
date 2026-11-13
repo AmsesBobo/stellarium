@@ -89,20 +89,28 @@ void main()
 )";
 
 // The light that gets an aureole: the scene above its smooth background (a coarse level of the pyramid), times the
-// share of its light that the haze scatters forwards
+// share of its light that the haze scatters forwards: from the altitude of the point (smooth over the screen) and a
+// table of the share against the altitude (steep near the horizon, where a coarse grid of the share itself would
+// change unevenly as the horizon moves across it, and the glow of the towns there would flicker when panning)
 const char* aureoleSourceSource = R"(
 VARYING vec2 texcoord;
 uniform sampler2D scene;
 uniform sampler2D background;
 uniform vec2 backgroundScale; // scene texture coordinates -> those of the background level
-uniform sampler2D share;
+uniform sampler2D share;      // the altitude (radians)
+uniform sampler2D shareTable; // the share at the altitudes limb + (pi/2 - limb) (i/(n-1))^2
+uniform highp float limb;
+uniform highp float tableSize;
 highp float sane(highp float x) { return (x >= 0.) ? min(x, 1e30) : 0.; }
 void main()
 {
 	highp vec3 c = texture2D(scene, texcoord).rgb;
 	c = vec3(sane(c.r), sane(c.g), sane(c.b));
 	highp vec3 b = texture2D(background, texcoord * backgroundScale).rgb;
-	FRAG_COLOR = vec4(max(c - b, vec3(0.)) * texture2D(share, texcoord).r, 1.);
+	highp float alt = texture2D(share, texcoord).r;
+	highp float u = sqrt(clamp((alt - limb)/(1.5707963 - limb), 0., 1.));
+	highp float s = alt < limb ? 0. : texture2D(shareTable, vec2((u*(tableSize - 1.) + 0.5)/tableSize, 0.5)).r;
+	FRAG_COLOR = vec4(max(c - b, vec3(0.)) * s, 1.);
 }
 )";
 
@@ -456,7 +464,8 @@ void StelPhotoBloom::computeHalationWeights(float density)
 
 bool StelPhotoBloom::process(GLuint sceneTexture, int w, int h, float haloAlpha, float haloBeta,
                              int spikeLines, float spikeAngle, float spikeLength, QOpenGLVertexArrayObject* vao,
-                             float halationRadius, float halationDensity, float aureoleCore, float aureoleExtent, GLuint aureoleShare)
+                             float halationRadius, float halationDensity, float aureoleCore, float aureoleExtent, GLuint aureoleShare,
+                             GLuint aureoleShareTable, float aureoleLimb)
 {
 	spikesDone = false;
 	halationDone = false;
@@ -467,7 +476,7 @@ bool StelPhotoBloom::process(GLuint sceneTexture, int w, int h, float haloAlpha,
 		initShaders();
 	}
 	const bool halo = haloAlpha > 0.f && haloBeta > 1.f;
-	const bool aureole = aureoleExtent > 0.f && aureoleCore > 0.f && aureoleShare != 0;
+	const bool aureole = aureoleExtent > 0.f && aureoleCore > 0.f && aureoleShare != 0 && aureoleShareTable != 0;
 	if (!shadersOk || !vao || w < 8 || h < 8 || !(halo || aureole))
 		return false;
 	if (w != sceneW || h != sceneH || levels.empty())
@@ -664,6 +673,8 @@ bool StelPhotoBloom::process(GLuint sceneTexture, int w, int h, float haloAlpha,
 		if (!aureoleSourceFBO)
 			aureoleSourceFBO = makeFBO(gl, w, h);
 		aureoleSourceProgram->bind();
+		gl.glActiveTexture(GL_TEXTURE3);
+		gl.glBindTexture(GL_TEXTURE_2D, aureoleShareTable);
 		gl.glActiveTexture(GL_TEXTURE2);
 		gl.glBindTexture(GL_TEXTURE_2D, aureoleShare);
 		gl.glActiveTexture(GL_TEXTURE1);
@@ -673,9 +684,14 @@ bool StelPhotoBloom::process(GLuint sceneTexture, int w, int h, float haloAlpha,
 		aureoleSourceProgram->setUniformValue("scene", 0);
 		aureoleSourceProgram->setUniformValue("background", 1);
 		aureoleSourceProgram->setUniformValue("share", 2);
+		aureoleSourceProgram->setUniformValue("shareTable", 3);
+		aureoleSourceProgram->setUniformValue("limb", aureoleLimb);
+		aureoleSourceProgram->setUniformValue("tableSize", static_cast<float>(AUREOLE_TABLE_SIZE));
 		const float f = static_cast<float>(1 << L);
 		aureoleSourceProgram->setUniformValue("backgroundScale", static_cast<float>(w)/(f*static_cast<float>(bg.w)), static_cast<float>(h)/(f*static_cast<float>(bg.h)));
 		drawQuad(aureoleSourceFBO.get(), w, h);
+		gl.glActiveTexture(GL_TEXTURE3);
+		gl.glBindTexture(GL_TEXTURE_2D, 0);
 		gl.glActiveTexture(GL_TEXTURE2);
 		gl.glBindTexture(GL_TEXTURE_2D, 0);
 		gl.glActiveTexture(GL_TEXTURE0);
