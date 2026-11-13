@@ -170,11 +170,7 @@ void LocationDialog::createDialogContent()
 	}
 
 #ifdef ENABLE_GPS
-#ifdef Q_OS_WIN
-	ui->gpsToolButton->setText(q_("Get location from GPS or system service"));
-#else
-	ui->gpsToolButton->setText(q_("Get location from GPS"));
-#endif
+	ui->gpsToolButton->setText(q_("Get location from the GPS receiver"));
 	connect(ui->gpsToolButton, &QToolButton::toggled, this, &LocationDialog::gpsEnableQueryLocation);
 	connect(locMgr, &StelLocationMgr::gpsQueryFinished, this, &LocationDialog::gpsReturn);
 #else
@@ -253,11 +249,7 @@ void LocationDialog::reloadLocations()
 void LocationDialog::populateTooltips()
 {
 	ui->resetListPushButton->setToolTip(q_("Reset location list to show all known locations"));
-#ifdef Q_OS_WIN
-	ui->gpsToolButton->setToolTip(QString("<p>%1</p>").arg(q_("Toggle fetching location from GPS or system location service. (Does not change time zone!) When satisfied, toggle off to let other programs access the GPS device.")));
-#else
 	ui->gpsToolButton->setToolTip(QString("<p>%1</p>").arg(q_("Toggle fetching GPS location. (Does not change time zone!) When satisfied, toggle off to let other programs access the GPS device.")));
-#endif
 }
 
 // Update the widget to make sure it is synchrone if the location is changed programmatically
@@ -918,7 +910,7 @@ void LocationDialog::ipQueryLocation(bool state)
 	disconnectEditSignals();
 	resetLocationList(); // in case we are on Moon/Mars, we must get list back to show all (earth) locations...
 	StelLocationMgr &locMgr=StelApp::getInstance().getLocationMgr();
-	locMgr.locationFromIP(); // This just triggers asynchronous lookup.
+	if (state) locMgr.locationFromIP(); // This just triggers asynchronous lookup.
 	// NOTE: These steps seem to assume IP lookup is successful!
 	ui->useAsDefaultLocationCheckBox->setChecked(false);
 	ui->useAsDefaultLocationCheckBox->setEnabled(!state);
@@ -997,11 +989,7 @@ void LocationDialog::gpsReturn(bool success)
 void LocationDialog::resetGPSbuttonLabel()
 {
 	ui->gpsToolButton->setChecked(false);
-#ifdef Q_OS_WIN
-	ui->gpsToolButton->setText(q_("Get location from GPS or system service"));
-#else
-	ui->gpsToolButton->setText(q_("Get location from GPS"));
-#endif
+	ui->gpsToolButton->setText(q_("Get location from the GPS receiver"));
 	ui->gpsToolButton->setStyleSheet("");
 }
 #endif

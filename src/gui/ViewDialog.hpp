@@ -117,6 +117,7 @@ private slots:
 	void updateHips();
 	void updateHipsText();
 	void updateHipsControls();
+	void scheduleHipsUpdate();
 	void filterSurveys();
 	void hipsListItemChanged(QTreeWidgetItem* item);
 	void hipsDisplaySettingsChanged();
