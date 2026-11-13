@@ -45,24 +45,28 @@ void main()
 }
 )";
 
-// Exact 2x2 box downsampling (each level is half the size of the previous one, rounded up; the
-// missing texels at an odd edge repeat the last one). Guards against infinities and NaN from
-// overflowing sources, which would spread over the whole halo.
+// Downsampling by 2 with a tent of 4x4 texels (1 3 3 1)/8 along each axis (each level is half the size of the
+// previous one, rounded up; the texels beyond an edge repeat the last one). A box of 2x2 texels would put all of
+// a point into one coarser texel wherever it lies in it: the halo from that level would jump by its texels as the
+// point moves (up to 2^(k-1) pixels at level k), and wander around a planet when panning. With the tent the light
+// of a point is shared between neighbors in proportion to where it lies, and the halo stays centered on it.
+// Guards against infinities and NaN from overflowing sources, which would spread over the whole halo.
 const char* downSource = R"(
 uniform sampler2D src;
 uniform ivec2 srcSize;
 highp float sane(highp float x) { return (x >= 0.) ? min(x, 1e30) : 0.; }
+highp float tent(int i) { return (i == 0 || i == 3) ? 1. : 3.; }
 void main()
 {
-	ivec2 base = 2*ivec2(gl_FragCoord.xy);
+	ivec2 base = 2*ivec2(gl_FragCoord.xy) - ivec2(1);
 	highp vec3 c = vec3(0);
-	for (int dy = 0; dy < 2; ++dy)
-		for (int dx = 0; dx < 2; ++dx)
+	for (int dy = 0; dy < 4; ++dy)
+		for (int dx = 0; dx < 4; ++dx)
 		{
-			highp vec3 t = texelFetch(src, min(base + ivec2(dx, dy), srcSize - ivec2(1)), 0).rgb;
-			c += vec3(sane(t.r), sane(t.g), sane(t.b));
+			highp vec3 t = texelFetch(src, clamp(base + ivec2(dx, dy), ivec2(0), srcSize - ivec2(1)), 0).rgb;
+			c += tent(dx)*tent(dy)*vec3(sane(t.r), sane(t.g), sane(t.b));
 		}
-	FRAG_COLOR = vec4(0.25*c, 1.);
+	FRAG_COLOR = vec4(c/64., 1.);
 }
 )";
 
@@ -280,14 +284,15 @@ void StelPhotoBloom::resize(int w, int h)
 	aureoleWeightsCore = -1.f;
 }
 
-// Width (sigma, scene pixels) of the effective Gaussian of level k: the 2x2 box downsamplings
-// (variance 4^(j-1)/4 each), the blur at that level, and the bilinear upsamplings back to the
-// scene resolution (a tent of half width 2^j adds the variance 4^j/6).
+// Width (sigma, scene pixels) of the effective Gaussian of level k: the downsamplings with a tent
+// of 4 texels (variance 3/4 texel^2 of the finer level, 0.75*4^(j-1) each), the blur at that level,
+// and the bilinear upsamplings back to the scene resolution (a tent of half width 2^j adds the
+// variance 4^j/6).
 double StelPhotoBloom::levelSigma(int k)
 {
 	double var = static_cast<double>(BLUR_SIGMA)*BLUR_SIGMA*std::pow(4., k);
 	for (int j=1; j<=k; ++j)
-		var += std::pow(4., j-1)/4. + std::pow(4., j)/6.;
+		var += 0.75*std::pow(4., j-1) + std::pow(4., j)/6.;
 	return std::sqrt(var);
 }
 
