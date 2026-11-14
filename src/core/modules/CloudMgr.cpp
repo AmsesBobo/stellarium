@@ -867,7 +867,7 @@ uniform highp vec3 cloudAbove;
 uniform highp vec3 cloudCity;
 uniform highp vec3 sideSunLog[5];   // the logarithm of the light of CloudLight::Light::sideSun
 uniform highp vec2 sideSunOffset;   // the first offset of its altitude and its step (degrees)
-uniform highp vec3 sideMoon;
+uniform highp vec3 sideMoonLog[5];  // the same for CloudLight::Light::sideMoon, from the altitude of the Moon
 uniform highp vec3 silverSun;
 uniform highp vec3 silverMoon;
 uniform highp vec3 airSky;
@@ -1288,6 +1288,14 @@ highp vec3 cloudSunlight(highp float offset)
 	return exp(mix(sideSunLog[i], sideSunLog[i + 1], x - float(i)));
 }
 
+// The same for the moonlight
+highp vec3 cloudMoonlight(highp float offset)
+{
+	highp float x = clamp((offset - sideSunOffset.x)/sideSunOffset.y, 0., 3.999);
+	highp int i = int(x);
+	return exp(mix(sideMoonLog[i], sideMoonLog[i + 1], x - float(i)));
+}
+
 highp float shellDistance(highp float b, highp float c)
 {
 	// from inside the shell, in this form to keep the precision over short ways
@@ -1335,6 +1343,7 @@ void main(void)
 	highp float towardKey = smoothstep(0.3, 0.9, dot(altAz, cloudKey));
 	highp float keyUp = smoothstep(-0.05, 0.02, cloudKey.z);
 	highp vec2 sunWay = cloudSun.xy/max(length(cloudSun.xy), 0.01);
+	highp vec2 moonWay = cloudMoon.xy/max(length(cloudMoon.xy), 0.01);
 	// A broad forward lobe for the light that many scatterings send on. The narrow silver lining comes below
 	highp float sunPhase = 0.65 + 0.35*exp(-(1. - sunCos)/0.25);
 	highp float moonPhase = 0.65 + 0.35*exp(-(1. - moonCos)/0.25);
@@ -1594,9 +1603,10 @@ void main(void)
 					// The light of the sky comes from above through the cloud in the same way, that of the ground from below
 					diffuse += weight*(0.5*(cloudAbove*fromAbove + cloudBelow*fromBelow) + cloudCity*fromBelow);
 					highp vec3 sunlight = cloudSunlight(dot(here.xy, sunWay)*57.3/7433. + 0.35*heightHere);
+					highp vec3 moonlight = cloudMoonlight(dot(here.xy, moonWay)*57.3/7433. + 0.35*heightHere);
 					scattered *= 0.3 + 0.7*facing;
 					direct += weight*(sunlight*(sunPhase*mix(1., scattered, keyIsSun) + diffused*keyIsSun)
-					                  + sideMoon*(moonPhase*mix(scattered, 1., keyIsSun) + diffused*(1. - keyIsSun)));
+					                  + moonlight*(moonPhase*mix(scattered, 1., keyIsSun) + diffused*(1. - keyIsSun)));
 					single += weight*exp(-extinction*seen);
 					hitT += weight*uHere;
 					hitWeight += weight;
@@ -1757,17 +1767,8 @@ void CloudMgr::setLightUniforms(const StelCore* core, QOpenGLShaderProgram& p, i
 	const SolarSystem* ssystem = GETSTELMODULE(SolarSystem);
 	CloudLight::Sources s;
 
-	// The Sun and the Moon: lux on a surface facing them, from their magnitude with the extinction, and its color
-	const auto body = [core, drawer](const PlanetP& planet, CloudLight::Rgb& light, double& sine) {
-		Vec3d direction = planet->getAltAzPosGeometric(core);
-		direction.normalize();
-		sine = direction[2];
-		const double lux = 2.54e-6*std::pow(10., -0.4*static_cast<double>(planet->getVMagnitudeWithExtinction(core)));
-		const Vec3f tint = drawer->getPhotoExtinctionTint(direction);
-		for (std::size_t i = 0; i < 3; ++i)
-			light[i] = lux*static_cast<double>(tint[static_cast<int>(i)]);
-		return direction;
-	};
+	// The Sun and the Moon: their altitudes, and the lux of the Moon above the air (its way through the air to the clouds
+	// is that of the sunlight, down to the horizon of the clouds)
 	Vec3d sun = ssystem->getSun()->getAltAzPosGeometric(core);
 	sun.normalize();
 	s.sunSine = sun[2];
@@ -1775,7 +1776,12 @@ void CloudMgr::setLightUniforms(const StelCore* core, QOpenGLShaderProgram& p, i
 	const CloudShape::Layer& layer = layers[i];
 	s.base = layer.base;
 	s.top = layer.base + 0.6*layer.size*layer.heightScale();
-	const Vec3d moon = body(ssystem->getMoon(), s.moon, s.moonSine);
+	Vec3d moon = ssystem->getMoon()->getAltAzPosGeometric(core);
+	moon.normalize();
+	s.moonSine = moon[2];
+	s.moonAltitude = std::asin(std::clamp(s.moonSine, -1., 1.));
+	s.moonLux = 2.54e-6*std::pow(10., -0.4*static_cast<double>(ssystem->getMoon()->getVMagnitude(core)));
+	s.observer = std::max(0., core->getCurrentLocation().altitude*0.001);
 
 	s.artificial = drawer->getLightPollutionLuminance();
 	s.extinction = drawer->getEffectiveExtinctionCoefficient();
@@ -1807,7 +1813,7 @@ void CloudMgr::setLightUniforms(const StelCore* core, QOpenGLShaderProgram& p, i
 	p.setUniformValue("cloudSun", direction(sun));
 	p.setUniformValue("cloudMoon", direction(moon));
 	// The shadows follow the Sun while it lights the clouds, and otherwise the Moon
-	p.setUniformValue("cloudKey", direction(light.sideSun[3][1] > light.sideMoon[1] ? sun : moon));
+	p.setUniformValue("cloudKey", direction(light.sideSun[3][1] > light.sideMoon[3][1] ? sun : moon));
 	// (the clouds shade the ground below them, which then sends less light back up to their bases)
 	CloudLight::Rgb below = light.below;
 	const double groundShade = 1. - 0.7*std::clamp(currentCovers[i], 0., 1.);
@@ -1816,17 +1822,19 @@ void CloudMgr::setLightUniforms(const StelCore* core, QOpenGLShaderProgram& p, i
 	p.setUniformValue("cloudBelow", scene(below));
 	p.setUniformValue("cloudAbove", scene(light.above));
 	p.setUniformValue("cloudCity", scene(light.city));
-	QVector3D sideSunLog[5];
+	QVector3D sideSunLog[5], sideMoonLog[5];
 	for (std::size_t k = 0; k < 5; ++k)
 	{
 		const QVector3D v = scene(light.sideSun[k]);
 		sideSunLog[k] = QVector3D(std::log(std::max(v.x(), 1e-30f)), std::log(std::max(v.y(), 1e-30f)), std::log(std::max(v.z(), 1e-30f)));
+		const QVector3D m = scene(light.sideMoon[k]);
+		sideMoonLog[k] = QVector3D(std::log(std::max(m.x(), 1e-30f)), std::log(std::max(m.y(), 1e-30f)), std::log(std::max(m.z(), 1e-30f)));
 	}
 	p.setUniformValueArray("sideSunLog", sideSunLog, 5);
+	p.setUniformValueArray("sideMoonLog", sideMoonLog, 5);
 	p.setUniformValue("sideSunOffset", QVector2D(static_cast<float>(CloudLight::SunOffsetStart), static_cast<float>(CloudLight::SunOffsetStep)));
 	p.setUniformValue("silverSun", scene(light.silverSun));
 	p.setUniformValue("silverMoon", scene(light.silverMoon));
-	p.setUniformValue("sideMoon", scene(light.sideMoon));
 	p.setUniformValue("airSky", scene(light.airSky));
 	p.setUniformValue("airMoon", scene(light.airMoon));
 	p.setUniformValue("airExtinction", QVector3D(static_cast<float>(light.extinction[0]), static_cast<float>(light.extinction[1]), static_cast<float>(light.extinction[2])));
@@ -2153,7 +2161,8 @@ uniform highp vec3 cirrusSun;       // unit vectors towards the Sun and the Moon
 uniform highp vec3 cirrusMoon;
 uniform highp vec3 cirrusSunLog[33];// the logarithm of the sunlight on the layer over 4 pi, against the altitude of the Sun
                                     // seen from the place: from -5 degrees in steps of 0.5 degree
-uniform highp vec3 cirrusMoonLight; // the moonlight over 4 pi
+uniform highp vec3 cirrusMoonLight; // the moonlight over 4 pi on the air below the cirrus
+uniform highp float cirrusMoonLog;  // the logarithm of the ratio of the moonlight to the sunlight above the air
 uniform highp vec3 cirrusSky;       // the light of the sky, the ground and the towns over 4 pi
 uniform highp vec3 cirrusAir;       // foreground air radiance at large optical depth
 uniform highp vec3 cirrusTau;       // the optical depth of the air at the zenith
@@ -2208,6 +2217,11 @@ void main(void)
 	highp float x = clamp((localSun + 5.)/0.5, 0., 31.999);
 	highp int i = int(x);
 	highp vec3 sunlight = exp(mix(cirrusSunLog[i], cirrusSunLog[i + 1], x - float(i)));
+	// The moonlight in the same way: the Moon lights the cirrus down to their horizon, far below that of the observer
+	highp float localMoon = degrees(asin(clamp(dot(up, cirrusMoon), -1., 1.)));
+	highp float xMoon = clamp((localMoon + 5.)/0.5, 0., 31.999);
+	highp int iMoon = int(xMoon);
+	highp vec3 moonlight = exp(mix(cirrusSunLog[iMoon], cirrusSunLog[iMoon + 1], xMoon - float(iMoon)) + cirrusMoonLog);
 	// Scattered once, the light goes where the crystals send it: mostly forwards, around the Sun, and little to the sides.
 	// That is all there is to a thin veil, which is faint away from the Sun. The denser tufts and streaks scatter the
 	// light many times, until it has lost its direction and comes out below to all sides alike: this is what makes
@@ -2219,8 +2233,8 @@ void main(void)
 	highp float many = 1. - exp(-tauUp);
 	highp float diffusedSun = 4.*muSun*max(1./(1. + 0.19*tauUp) - exp(-tauUp/muSun), 0.)*many;
 	highp float diffusedMoon = 4.*muMoon*max(1./(1. + 0.19*tauUp) - exp(-tauUp/muMoon), 0.)*many;
-	highp vec3 light = (1. - T)*(sunlight*cirrusPhase(dot(dir, cirrusSun)) + cirrusMoonLight*cirrusPhase(dot(dir, cirrusMoon)) + cirrusSky)
-	                 + sunlight*diffusedSun + cirrusMoonLight*diffusedMoon;
+	highp vec3 light = (1. - T)*(sunlight*cirrusPhase(dot(dir, cirrusSun)) + moonlight*cirrusPhase(dot(dir, cirrusMoon)) + cirrusSky)
+	                 + sunlight*diffusedSun + moonlight*diffusedMoon;
 	// The air below the cirrus dims them (Rozenberg's air mass)
 	highp float sine = max(altAz.z, 0.);
 	highp vec3 way = exp(-cirrusTau/(sine + 0.025*exp(-11.*sine)));
@@ -2298,11 +2312,14 @@ void CloudMgr::drawCirrus(StelCore* core, const StelProjector& prj)
 		sunLog[k] = QVector3D(lg(t[0]), lg(t[1]), lg(t[2]));
 	}
 	p.setUniformValueArray("cirrusSunLog", sunLog, 33);
-	const double moonLux = moon[2] > 0. ? 2.54e-6*std::pow(10., -0.4*static_cast<double>(ssystem->getMoon()->getVMagnitudeWithExtinction(core))) : 0.;
-	const Vec3f moonTint = drawer->getPhotoExtinctionTint(moon);
-	p.setUniformValue("cirrusMoonLight", QVector3D(static_cast<float>(moonLux*scale/(4.*M_PI)*static_cast<double>(moonTint[0])),
-	                                               static_cast<float>(moonLux*scale/(4.*M_PI)*static_cast<double>(moonTint[1])),
-	                                               static_cast<float>(moonLux*scale/(4.*M_PI)*static_cast<double>(moonTint[2]))));
+	// The Moon above the air (its phase and eclipses): on the cirrus through the same air as the sunlight, and on the air
+	// below them down to the horizon of the observer
+	const double moonLux = 2.54e-6*std::pow(10., -0.4*static_cast<double>(ssystem->getMoon()->getVMagnitude(core)));
+	p.setUniformValue("cirrusMoonLog", static_cast<float>(std::log(std::max(moonLux/133000., 1e-30))));
+	const CloudLight::Rgb moonAir = CloudLight::sunlightTransmission(std::asin(std::clamp(moon[2], -1., 1.)), std::max(0., location.altitude*0.001), extinction);
+	p.setUniformValue("cirrusMoonLight", QVector3D(static_cast<float>(moonLux*scale/(4.*M_PI)*moonAir[0]),
+	                                               static_cast<float>(moonLux*scale/(4.*M_PI)*moonAir[1]),
+	                                               static_cast<float>(moonLux*scale/(4.*M_PI)*moonAir[2])));
 	const double sunAltitude = std::asin(std::clamp(sun[2], -1., 1.));
 	const double skyLux = CloudLight::skyIlluminance(sunAltitude);
 	const CloudLight::Rgb skyColor = CloudLight::skyColor(sunAltitude);

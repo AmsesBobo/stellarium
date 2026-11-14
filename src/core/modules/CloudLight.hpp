@@ -66,9 +66,11 @@ public:
 	{
 		double sunAltitude = 0.;      //!< radians
 		double sunSine = 0.;          //!< the sine of the altitude of the Sun
-		double base = 1.5;            //!< km: the height of the base of the clouds over the ground
+		double base = 1.5;            //!< km: the height of the base of the clouds over the sea
 		double top = 2.3;             //!< km: the height of their tops
-		Rgb moon = {0., 0., 0.};      //!< lux on a surface facing the Moon, with the extinction
+		double observer = 0.;         //!< km: the height of the observer over the sea
+		double moonLux = 0.;          //!< lux on a surface facing the Moon above the air (its phase and eclipses, no extinction)
+		double moonAltitude = 0.;     //!< radians, geometric
 		double moonSine = 0.;
 		Rgb groundExtra = {0., 0., 0.}; //!< lux on the ground from other sources (the light domes of towns)
 		Rgb aurora = {0., 0., 0.};    //!< lux on a level surface from the aurorae, high above the clouds
@@ -94,12 +96,15 @@ public:
 		//! The same in sunlight, on a side that faces the Sun, at the base over the observer. Clouds far away see the Sun at
 		//! another altitude, and so do their tops: the values are for its altitude plus SunOffsetStart + i SunOffsetStep degrees
 		std::array<Rgb, 5> sideSun = {};
-		Rgb sideMoon = {0., 0., 0.};    //!< the same in moonlight
+		//! The same in moonlight, for the same offsets from the altitude of the Moon. Like the Sun, the Moon lights a cloud
+		//! as long as it stands above the horizon of the cloud, which lies lower than that of the observer
+		std::array<Rgb, 5> sideMoon = {};
 	};
 
 	static Light compute(const Sources& sources);
 
-	//! The transmission of the air for sunlight at a height (km) with the Sun at an altitude (radians) as seen from the ground
+	//! The transmission of the air for sunlight (or moonlight) at a height (km) with the Sun at an altitude (radians) as seen
+	//! from the ground, over the sea. Below the horizon it lasts as long as the ray passes over the Earth
 	static Rgb sunlightTransmission(double sunAltitude, double height, double extinction);
 	//! The color of the light of the sky (at unit luminance) with the Sun at this altitude (radians)
 	static Rgb skyColor(double sunAltitude);

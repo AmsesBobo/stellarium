@@ -127,7 +127,19 @@ CloudLight::Light CloudLight::compute(const Sources& s)
 		for (std::size_t i = 0; i < 3; ++i)
 			light.sideSun[k][i] = SideReflectance*SolarIlluminance*t[i]/M_PI;
 	}
+	// The Moon as the Sun: its light falls on the cloud through the air above the cloud, and down to the horizon of the
+	// cloud, not that of the observer (which is the geometric one over the sea, or lower on a mountain)
+	for (std::size_t k = 0; k < light.sideMoon.size(); ++k)
+	{
+		const double offset = SunOffsetStart + SunOffsetStep*static_cast<double>(k);
+		const Rgb t = sunlightTransmission(s.moonAltitude + offset*DegreesToRadians, s.base, s.extinction);
+		for (std::size_t i = 0; i < 3; ++i)
+			light.sideMoon[k][i] = SideReflectance*s.moonLux*t[i]/M_PI;
+	}
 	const Rgb sunTop = sunlightTransmission(s.sunAltitude, s.top, s.extinction);
+	const Rgb moonTop = sunlightTransmission(s.moonAltitude, s.top, s.extinction);
+	// (the air between the observer and the cloud is moonlit down to the horizon of the observer)
+	const Rgb moonAir = sunlightTransmission(s.moonAltitude, s.observer, s.extinction);
 	light.airSunlit = smooth(-1.5*DegreesToRadians, 0.5*DegreesToRadians, s.sunAltitude);
 	const double hazeDepth = std::max(0., s.extinction - ExtinctionOfCleanAir)/1.086;
 	const double cloudLight = cloudAmplification(s.artificial)*s.artificial;
@@ -135,7 +147,7 @@ CloudLight::Light CloudLight::compute(const Sources& s)
 	for (std::size_t i = 0; i < 3; ++i)
 	{
 		// the aurorae shine from far above the clouds: on their tops as the sky does, on the ground below them
-		const double aboveSky = skyLight*sky[i] + s.moon[i]*std::max(0., s.moonSine) + s.aurora[i];
+		const double aboveSky = skyLight*sky[i] + s.moonLux*moonTop[i]*std::max(0., s.moonSine) + s.aurora[i];
 		const double aboveSun = SolarIlluminance*sunTop[i]*std::max(0., s.sunSine);
 		const double ground = aboveSky + aboveSun + s.groundExtra[i];
 		light.below[i] = GroundAlbedo*ground/M_PI;
@@ -143,11 +155,10 @@ CloudLight::Light CloudLight::compute(const Sources& s)
 		light.aboveSun[i] = aboveSun/M_PI;
 		light.city[i] = cloudLight*s.lamp[i];
 		light.airSky[i] = skyLight*sky[i]/(4.*M_PI) + s.artificial*s.lamp[i];
-		light.airMoon[i] = (s.moonSine > 0. ? 1. : 0.)*s.moon[i]/(4.*M_PI);
+		light.airMoon[i] = s.moonLux*moonAir[i]/(4.*M_PI);
 		light.sideSky[i] = SideReflectance*(skyLight*sky[i] + s.aurora[i] + 0.5*GroundAlbedo*ground)/M_PI + 0.5*cloudLight*s.lamp[i];
 		light.silverSun[i] = SolarIlluminance*sunTop[i]/(4.*M_PI);
-		light.silverMoon[i] = (s.moonSine > 0. ? 1. : 0.)*s.moon[i]/(4.*M_PI);
-		light.sideMoon[i] = (s.moonSine > 0. ? SideReflectance : 0.)*s.moon[i]/M_PI;
+		light.silverMoon[i] = s.moonLux*moonTop[i]/(4.*M_PI);
 		light.extinction[i] = RayleighDepth[i]/RayleighHeight + hazeDepth*HazeColor[i]*(1. - std::exp(-1.))/HazeHeight;
 	}
 	return light;
