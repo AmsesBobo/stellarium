@@ -64,6 +64,7 @@
 	{
 		"imageCredits": {"short" : "Dylan O'Donnell", "infoUrl": "http://deography.com/m8-lagoon-nebula-ngc6559/"},
 		"imageUrl" : "m8.png",
+        "photoShown" : true,
 		"halphaScale" : 7.301e+04,
 		"worldCoords" :	[[[272.9501,-25.1911], [270.2975,-25.3538], [270.1469,-22.9536], [272.7492,-22.7959]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
@@ -163,6 +164,7 @@
 	{
 		"imageCredits": {"short" : "Hewholooks","infoUrl":"https://commons.wikimedia.org/wiki/File:TrifidHunterWilson.jpg"},
 		"imageUrl" : "m20.png",
+        "photoShown" : true,
 		"halphaScale" : 3.104e+04,
 		"worldCoords" :	[[[270.8906,-23.2528], [270.2961,-23.2424], [270.309,-22.6959], [270.9014,-22.7064]]],
 		"textureCoords" : [[[0,0], [1,0], [1,1], [0,1]]],
