@@ -32,6 +32,7 @@ class SpecificTimeMgr : public StelModule
 {
 	Q_OBJECT
 	Q_PROPERTY(double twilightAltitude READ getTwilightAltitude WRITE setTwilightAltitude NOTIFY twilightAltitudeChanged)
+	Q_PROPERTY(bool flagTwilightApparent READ getFlagTwilightApparent WRITE setFlagTwilightApparent NOTIFY flagTwilightApparentChanged)
 
 public:
 	enum Equinox
@@ -60,6 +61,12 @@ public:
 
 	//! Get twilight altitude [degrees]
 	double getTwilightAltitude() const {return twilightAltitude;}
+	//! Whether the twilight altitude is the apparent altitude of the Sun (with the refraction of the atmosphere, as
+	//! shown) rather than its geometric altitude
+	bool getFlagTwilightApparent() const {return flagTwilightApparent;}
+	//! The geometric altitude of the Sun [degrees] for the twilight altitude: the twilight altitude itself, or, when
+	//! it is apparent (and there is an atmosphere), the geometric altitude that the refraction lifts to it
+	double getTwilightGeometricAltitude() const;
 
 	//! Compute the time of equinoxe for specific year
 	//! Source: J. Meeus "Astronomical Algorithms" (2nd ed., 1998) ch. 27
@@ -80,6 +87,8 @@ public:
 public slots:
 	//! Set twilight altitude [degrees]
 	void setTwilightAltitude(double alt);
+	//! Set whether the twilight altitude is apparent (with the refraction) rather than geometric
+	void setFlagTwilightApparent(bool b);
 
 	//! Set simulation time to the time of next transit of selected object
 	void nextTransit();
@@ -171,6 +180,7 @@ public slots:
 signals:
 	//! Signal that the configurable twilight altitude for the sun has changed.
 	void twilightAltitudeChanged(double alt);
+	void flagTwilightApparentChanged(bool b);
 	void eventYearChanged();
 
 private:
@@ -181,6 +191,8 @@ private:
 
 	//! configurable altitude for the sun for "goto next twilight" actions
 	double twilightAltitude;
+	//! whether it is the apparent altitude
+	bool flagTwilightApparent = false;
 };
 
 #endif /* SPECIFICTIMEMGR_HPP */

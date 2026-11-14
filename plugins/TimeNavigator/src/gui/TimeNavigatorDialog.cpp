@@ -168,6 +168,7 @@ void TimeNavigatorDialog::createDialogContent()
 
 	// Twilight - wire the altitude spinbox directly to SpecificTimeMgr property
 	connectTwilightAltitudeSpinBox();
+	connectBoolProperty(ui->checkBoxTwilightApparent, "SpecificTimeMgr.flagTwilightApparent");
 	connect(ui->btnPreviousMorningTwilight, &QPushButton::clicked, this, [=](){specMgr->previousMorningTwilight();});
 	connect(ui->btnThisDateMorningTwilight,    &QPushButton::clicked, this, [=](){specMgr->todayMorningTwilight();});
 	connect(ui->btnNextMorningTwilight,     &QPushButton::clicked, this, [=](){specMgr->nextMorningTwilight();});

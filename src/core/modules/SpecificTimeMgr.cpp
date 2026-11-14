@@ -26,6 +26,8 @@
 #include "SpecificTimeMgr.hpp"
 #include "StelActionMgr.hpp"
 #include "StelTranslator.hpp"
+#include "StelSkyDrawer.hpp"
+#include "RefractionExtinction.hpp"
 
 #include <QSettings>
 
@@ -97,6 +99,7 @@ void SpecificTimeMgr::init()
 	addAction("actionPrevious_December_Solstice", timeGroup, N_("December solstice at previous year"), this, "previousDecemberSolstice()");
 
 	setTwilightAltitude(conf->value("astro/twilight_altitude", -6.).toDouble());
+	setFlagTwilightApparent(conf->value("astro/flag_twilight_apparent", false).toBool());
 }
 
 void SpecificTimeMgr::deinit()
@@ -118,6 +121,30 @@ void SpecificTimeMgr::setTwilightAltitude(double alt)
 		StelApp::immediateSave("astro/twilight_altitude", alt);
 		emit twilightAltitudeChanged(alt);
 	}
+}
+
+void SpecificTimeMgr::setFlagTwilightApparent(bool b)
+{
+	if (b != flagTwilightApparent)
+	{
+		flagTwilightApparent = b;
+		StelApp::immediateSave("astro/flag_twilight_apparent", b);
+		emit flagTwilightApparentChanged(b);
+	}
+}
+
+double SpecificTimeMgr::getTwilightGeometricAltitude() const
+{
+	const StelSkyDrawer* drawer = core->getSkyDrawer();
+	if (!flagTwilightApparent || !drawer || !drawer->getFlagHasAtmosphere())
+		return twilightAltitude;
+	// the refraction (with the ray-traced model where it is in use) of the altitude at which the Sun is seen
+	const double a = twilightAltitude*M_PI_180;
+	Vec3d v(std::cos(a), 0., std::sin(a));
+	drawer->getRefraction().backward(v);
+	const double geometric = std::asin(qBound(-1., v[2]/v.norm(), 1.))*M_180_PI;
+	// 0 asks getRTSTime() for the rising and the setting (with the refraction at the horizon and the semidiameter)
+	return geometric == 0. ? -1e-9 : geometric;
 }
 
 void SpecificTimeMgr::nextTransit()
@@ -287,14 +314,14 @@ void SpecificTimeMgr::todaySetting()
 
 void SpecificTimeMgr::todayMorningTwilight()
 {
-	Vec4d rts = sun->getRTSTime(core, twilightAltitude);
+	Vec4d rts = sun->getRTSTime(core, getTwilightGeometricAltitude());
 	if (rts[3]>-1000.)
 		core->setJD(rts[0]);
 }
 
 void SpecificTimeMgr::todayEveningTwilight()
 {
-	Vec4d rts = sun->getRTSTime(core, twilightAltitude);
+	Vec4d rts = sun->getRTSTime(core, getTwilightGeometricAltitude());
 	if (rts[3]>-1000.)
 		core->setJD(rts[2]);
 }
@@ -303,7 +330,7 @@ void SpecificTimeMgr::previousMorningTwilight()
 {
 	core->addSolarDays(-1.0);
 	core->update(0);
-	Vec4d rts = sun->getRTSTime(core, twilightAltitude);
+	Vec4d rts = sun->getRTSTime(core, getTwilightGeometricAltitude());
 	if (rts[3]>-1000.)
 		core->setJD(rts[0]);
 }
@@ -312,7 +339,7 @@ void SpecificTimeMgr::previousEveningTwilight()
 {
 	core->addSolarDays(-1.0);
 	core->update(0);
-	Vec4d rts = sun->getRTSTime(core, twilightAltitude);
+	Vec4d rts = sun->getRTSTime(core, getTwilightGeometricAltitude());
 	if (rts[3]>-1000.)
 		core->setJD(rts[2]);
 }
@@ -321,7 +348,7 @@ void SpecificTimeMgr::nextMorningTwilight()
 {
 	core->addSolarDays(1.0);
 	core->update(0);
-	Vec4d rts = sun->getRTSTime(core, twilightAltitude);
+	Vec4d rts = sun->getRTSTime(core, getTwilightGeometricAltitude());
 	if (rts[3]>-1000.)
 		core->setJD(rts[0]);
 }
@@ -330,7 +357,7 @@ void SpecificTimeMgr::nextEveningTwilight()
 {
 	core->addSolarDays(1.0);
 	core->update(0);
-	Vec4d rts = sun->getRTSTime(core, twilightAltitude);
+	Vec4d rts = sun->getRTSTime(core, getTwilightGeometricAltitude());
 	if (rts[3]>-1000.)
 		core->setJD(rts[2]);
 }

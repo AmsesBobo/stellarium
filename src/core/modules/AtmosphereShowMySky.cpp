@@ -758,10 +758,31 @@ void AtmosphereShowMySky::computeColor(StelCore* core, const double JD, const Pl
 			return;
 		}
 
-		const auto sunAzimuth = std::atan2(sunDir[1], sunDir[0]);
-		const auto sunZenithAngle = std::acos(sunDir[2]);
-		const auto moonAzimuth = std::atan2(moonDir[1], moonDir[0]);
-		const auto moonZenithAngle = std::acos(moonDir[2]);
+		// The direction of the Sun (and the Moon) for the lookup of the sky: the model of ShowMySky has straight rays,
+		// its twilight is for the geometric altitude of the Sun. With the apparent (refracted) altitude, the twilight
+		// sky was too bright (at 2600 m, a geometric altitude of -6.00° is an apparent one of -5.77°, and the zenith had
+		// 0.62 instead of 0.46 cd/m²), and this sets the exposure of the camera.
+		// Near and above the horizon, the glow around the Sun stays centred on its seen (refracted) disk: from a
+		// geometric altitude of -4° to -1°, the direction goes smoothly from the geometric to the apparent one.
+		const auto skyLookupDir = [&](const Planet& body, const Vec3d& apparentDir) -> Vec3d
+		{
+			Vec3d geo = body.getAltAzPosGeometric(core);
+			if (std::isnan(geo.norm()) || geo.norm() <= 0.)
+				return apparentDir;
+			geo /= geo.norm();
+			const double geoAlt = std::asin(qBound(-1., geo[2], 1.));
+			const double t = qBound(0., (geoAlt - (-4.*M_PI_180)) / (3.*M_PI_180), 1.);
+			const double w = t*t*(3. - 2.*t); // smoothstep
+			Vec3d dir = geo*(1.-w) + apparentDir*w;
+			const double n = dir.norm();
+			return n > 0. ? dir/n : apparentDir;
+		};
+		const Vec3d sunSkyDir = skyLookupDir(sun, sunDir);
+		const Vec3d moonSkyDir = moon ? skyLookupDir(*moon, moonDir) : moonDir;
+		const auto sunAzimuth = std::atan2(sunSkyDir[1], sunSkyDir[0]);
+		const auto sunZenithAngle = std::acos(qBound(-1., sunSkyDir[2], 1.));
+		const auto moonAzimuth = std::atan2(moonSkyDir[1], moonSkyDir[0]);
+		const auto moonZenithAngle = std::acos(qBound(-1., moonSkyDir[2], 1.));
 
 		// Photographic mode with the airglow: the light pollution setting is the whole night sky, of which the
 		// airglow is the natural part (see StelSkyDrawer::getPhotoAirglowZenithLuminance())

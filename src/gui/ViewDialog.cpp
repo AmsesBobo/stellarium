@@ -264,6 +264,7 @@ void ViewDialog::createDialogContent()
 	connectDoubleProperty(ui->zodiacalLightBrightnessDoubleSpinBox, "ZodiacalLight.intensity");
 	connectBoolProperty(ui->adaptationCheckbox, "StelSkyDrawer.flagLuminanceAdaptation");
 	connectDoubleProperty(ui->twilightAltitudeDoubleSpinBox, "SpecificTimeMgr.twilightAltitude");
+	connectBoolProperty(ui->twilightApparentCheckBox, "SpecificTimeMgr.flagTwilightApparent");
 
 	LandscapeMgr* lmgr = GETSTELMODULE(LandscapeMgr);
 	Q_ASSERT(lmgr);

@@ -1061,6 +1061,16 @@
              </widget>
             </item>
             <item>
+             <widget class="QCheckBox" name="checkBoxTwilightApparent">
+              <property name="toolTip">
+               <string>The solar altitude is the apparent altitude (with the atmospheric refraction) instead of the geometric one (synced with View → Sky). The twilight definitions (civil, nautical, astronomical) are for the geometric altitude.</string>
+              </property>
+              <property name="text">
+               <string>Apparent</string>
+              </property>
+             </widget>
+            </item>
+            <item>
              <spacer>
               <property name="orientation">
                <enum>Qt::Horizontal</enum>

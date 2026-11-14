@@ -662,6 +662,21 @@ QString StelObject::getCommonInfoString(const StelCore *core, const InfoStringGr
 			res += QString("<tr><td>%1:</td><td style='text-align:right;'>%2/</td><td style='text-align:right;'>%3</td><td>%4</td></tr>").arg(AzAlt, firstCoordinate, secondCoordinate, apparent + trueHorizonNote);
 		else
 			res += QString("%1: %2/%3 %4<br/>").arg(AzAlt, firstCoordinate, secondCoordinate, apparent + trueHorizonNote);
+		if (withAtmosphere)
+		{
+			// Both altitudes, also below the horizon: the geometric altitude (without the refraction)
+			// is what the twilight definitions and the sky models use, the apparent one is where the object is seen.
+			const QString geoStr = withDecimalDegreeCoords ? StelUtils::radToDecDegStr(alt) : StelUtils::radToDmsStr(alt, true);
+			const QString appStr = withDecimalDegreeCoords ? StelUtils::radToDecDegStr(alt_app) : StelUtils::radToDmsStr(alt_app, true);
+			// TRANSLATORS: the apparent altitude below the horizon is computed by the refraction formula, but no direct ray reaches the observer
+			const QString note = alt_app > minAltitude ? QString() : QString(" (%1)").arg(q_("extrapolated"));
+			// TRANSLATORS: the altitude without and with the atmospheric refraction, e.g. "Alt. geometric/apparent: -6.00°/-5.77°"
+			const QString label = q_("Alt. geometric/apparent");
+			if (withTables)
+				res += QString("<tr><td>%1:</td><td style='text-align:right;'>%2/</td><td style='text-align:right;'>%3</td><td>%4</td></tr>").arg(label, geoStr, appStr, note);
+			else
+				res += QString("%1: %2/%3%4<br/>").arg(label, geoStr, appStr, note);
+		}
 		res += getExtraInfoStrings(AltAzi).join("");
 	}
 
@@ -990,22 +1005,25 @@ QString StelObject::getCommonInfoString(const StelCore *core, const InfoStringGr
 		{
 			QString sMTwilight = qc_("Morning twilight", "celestial event");
 			QString sETwilight = qc_("Evening twilight", "celestial event");
-			const double twilightAltitude = GETSTELMODULE(SpecificTimeMgr)->getTwilightAltitude();
-			QString alt = QString::number(twilightAltitude, 'f', 1);
-			Vec4d twilight = getRTSTime(core, twilightAltitude);
+			const SpecificTimeMgr* specificTime = GETSTELMODULE(SpecificTimeMgr);
+			const double twilightAltitude = specificTime->getTwilightAltitude();
+			// (h=-6.0°, or h=-6.0° apparent: with the refraction)
+			QString alt = QString::number(twilightAltitude, 'f', 1) + QChar(0x00B0)
+			              + (specificTime->getFlagTwilightApparent() ? " " + q_("apparent") : QString());
+			Vec4d twilight = getRTSTime(core, specificTime->getTwilightGeometricAltitude());
 			if (twilight[3]==0.)
 			{
 				hour = StelUtils::getHoursFromJulianDay(twilight[0]+utcShift);
 				if (withTables)
-					res += QString("<tr><td>%1 (h=%2°):</td><td style='text-align:right;'>%3</td></tr>").arg(sMTwilight, alt, StelUtils::hoursToHmsStr(hour, true));
+					res += QString("<tr><td>%1 (h=%2):</td><td style='text-align:right;'>%3</td></tr>").arg(sMTwilight, alt, StelUtils::hoursToHmsStr(hour, true));
 				else
-					res += QString("%1 (h=%2°): %3<br/>").arg(sMTwilight, alt, StelUtils::hoursToHmsStr(hour, true));
+					res += QString("%1 (h=%2): %3<br/>").arg(sMTwilight, alt, StelUtils::hoursToHmsStr(hour, true));
 
 				hour = StelUtils::getHoursFromJulianDay(twilight[2]+utcShift);
 				if (withTables)
-					res += QString("<tr><td>%1 (h=%2°):</td><td style='text-align:right;'>%3</td></tr>").arg(sETwilight, alt, StelUtils::hoursToHmsStr(hour, true));
+					res += QString("<tr><td>%1 (h=%2):</td><td style='text-align:right;'>%3</td></tr>").arg(sETwilight, alt, StelUtils::hoursToHmsStr(hour, true));
 				else
-					res += QString("%1 (h=%2°): %3<br/>").arg(sETwilight, alt, StelUtils::hoursToHmsStr(hour, true));
+					res += QString("%1 (h=%2): %3<br/>").arg(sETwilight, alt, StelUtils::hoursToHmsStr(hour, true));
 			}
 			double lengthOfDay = StelUtils::fmodpos(sunset - sunrise, 24.); // prevent negative value
 			if (lengthOfDay<24. && rts[3]==0.) // avoid showing Daytime: 0h 00m
@@ -1551,9 +1569,10 @@ QString StelObject::getCommonNarration(const StelCore *core, const InfoStringGro
 
 		if (isSun)
 		{
-			const double twilightAltitude = GETSTELMODULE(SpecificTimeMgr)->getTwilightAltitude();
+			const SpecificTimeMgr* specificTime = GETSTELMODULE(SpecificTimeMgr);
+			const double twilightAltitude = specificTime->getTwilightAltitude();
 			QString alt = QString::number(twilightAltitude, 'f', 1);
-			Vec4d twilight = getRTSTime(core, twilightAltitude);
+			Vec4d twilight = getRTSTime(core, specificTime->getTwilightGeometricAltitude());
 			if (twilight[3]==0.)
 			{
 				QString sMTwilight = qc_("Morning twilight for a Solar altitude of %1 degrees begins at %2. ", "celestial event");
