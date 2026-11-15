@@ -369,7 +369,10 @@ public:
 	//! @param posJ2000 position of the body, @param radius its radius on the screen with rings (pixels)
 	//! @param glow false: the disk of a body, trailed and blurred, covering what is behind it. true: light that
 	//! arises in the lens (the halo and the spikes of a bright body), only trailed and added to the scene.
-	bool beginPhotoBodyImage(const Vec3d& posJ2000, float radius, bool glow = false);
+	//! The disk of a body also goes through the aberrations of the lens (coma, astigmatism, chromatic aberration,
+	//! see getPhotoLens()), as the stars. @param aberrations false: not for them alone (a body that cannot be drawn
+	//! into the image as well as directly, e.g. a 3D model), only along with a trail or a defocused lens.
+	bool beginPhotoBodyImage(const Vec3d& posJ2000, float radius, bool glow = false, bool aberrations = true);
 	//! Photographic mode: the apparent motion of the body drawn next against the stars (the change of its unit
 	//! direction per second, J2000 frame), e.g. the Moon, about 0.5 degrees per hour. During the exposure it adds to
 	//! the turn of the sky (a fixed tripod), or makes the only trail (a star tracker follows the stars, not the
@@ -1009,7 +1012,8 @@ public slots:
 	//! the light from where the aberrations of its place in the field bring it. Only for images that add light.
 	//! Returns false (draw directly) when the aberrations are too small to show, or the image cannot be made.
 	bool beginPhotoLensImage();
-	void endPhotoLensImage();
+	//! @param maxSamples the most samples of the spread of the lens per pixel (fewer for smooth images)
+	void endPhotoLensImage(int maxSamples = 48);
 	//! An image was drawn into the offscreen image of beginPhotoLensImage() (without, it is not put into the scene)
 	void notePhotoLensImageDrawn() {photoLensImage.drawn = true;}
 	//! Set how the sensor noise is shown (see PhotoNoise)
@@ -1868,6 +1872,8 @@ private:
 		Vec4f trail;                        //!< offsets at the start and the end of the exposure (pixels)
 		Vec3f logStart, logEnd;             //!< log of the extinction along the trail
 		float defocus = 0.f;                //!< signed radius of the blur disk (pixels)
+		bool lens = false;                  //!< through the aberrations of the lens
+		float lensReach = 0.f;              //!< how far they spread the image there (pixels)
 		bool glow = false;                  //!< light of the lens: added, not covering (see beginPhotoBodyImage())
 		int previousFbo = 0;
 		int viewport[4] = {0, 0, 0, 0};

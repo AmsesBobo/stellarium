@@ -666,12 +666,21 @@ void main(void)
 		photoTex->getDimensions(texWidth, texHeight);
 		drawer->setPhotoSkyTrailUniforms(*renderProgram, modelView, texWidth/(2.*M_PI));
 		auto& glf = *QOpenGLContext::currentContext()->functions();
+		// Through the aberrations of the lens, as the stars (a smooth image: fewer samples of them)
+		const bool lensImage = drawer->beginPhotoLensImage();
+		if (lensImage)
+			drawer->notePhotoLensImageDrawn();
 		glf.glEnable(GL_BLEND);
 		glf.glBlendFunc(GL_ONE,GL_ONE);
 		bindVAO();
 		glf.glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 		releaseVAO();
 		glf.glDisable(GL_BLEND);
+		if (lensImage)
+		{
+			renderProgram->release();
+			drawer->endPhotoLensImage(24);
+		}
 		return;
 	}
 

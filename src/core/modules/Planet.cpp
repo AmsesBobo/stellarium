@@ -4764,7 +4764,8 @@ void Planet::draw3dModel(StelCore* core, StelProjector::ModelViewTranformP trans
 			if (rings)
 				outerRadius = qMax(outerRadius, std::atan2(rings->getSize()*sphereScale, getJ2000EquatorialPos(core).norm()));
 			const double pixPerRad = static_cast<double>(core->getProjection(StelCore::FrameJ2000)->getPixelPerRadAtCenter());
-			photoBodyImage = skyDrawer->beginPhotoBodyImage(getJ2000EquatorialPos(core), static_cast<float>(outerRadius*pixPerRad));
+			// (the aberrations of the lens alone do not turn the 3D model of the Moon into a sphere)
+			photoBodyImage = skyDrawer->beginPhotoBodyImage(getJ2000EquatorialPos(core), static_cast<float>(outerRadius*pixPerRad), false, !useObjModel);
 		}
 
 		if (!survey || survey.colors->getInterstate() < 1.0f)

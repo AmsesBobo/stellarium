@@ -130,7 +130,16 @@ void main(void)
 	return std::isfinite(mean) && std::isfinite(meanSquare);
 }
 
-bool StelSkyDrawer::beginPhotoBodyImage(const Vec3d& posJ2000, float radius, bool glow)
+// How far the aberrations of the lens spread the image of a point at the distance rho from the center of the image
+// (in half diagonals, see getPhotoLens()): the coma (its circles out to three times their radius), the astigmatism
+// and the chromatic aberration (pixels)
+static float photoLensReach(const StelSkyDrawer::PhotoLens& lens, float rho)
+{
+	return 3.f*lens.coma*rho + lens.astigmatism*rho*rho + qMax(std::fabs(lens.chromaShift[0]), std::fabs(lens.chromaShift[2]))*rho
+	       + qMax(lens.chromaBlur[0], lens.chromaBlur[2]);
+}
+
+bool StelSkyDrawer::beginPhotoBodyImage(const Vec3d& posJ2000, float radius, bool glow, bool aberrations)
 {
 	PhotoBodyImage& im = photoBodyImage;
 	im.active = false;
@@ -145,11 +154,15 @@ bool StelSkyDrawer::beginPhotoBodyImage(const Vec3d& posJ2000, float radius, boo
 	const float length = computePhotoTrail(*prj, posJ2000, win, 1e30f, 0.f, trailInfo);
 	// The halo and the spikes are already images of the blurred lens
 	const float defocus = glow ? 0.f : photoLensCache.defocus;
-	if (length < 0.75f && std::fabs(defocus) < 0.5f)
+	// The aberrations of the lens, out to the far edge of the disk
+	const float edge = (Vec2f(static_cast<float>(win[0]), static_cast<float>(win[1])) - photoLensCache.center).norm() + radius;
+	const float lensReach = glow ? 0.f : photoLensReach(photoLensCache, edge/qMax(1.f, photoLensCache.corner));
+	const bool lens = lensReach >= 0.5f;
+	if (length < 0.75f && std::fabs(defocus) < 0.5f && !(lens && aberrations))
 		return false;
 	const Vec2f A(trailInfo.trail[0], trailInfo.trail[1]), B(trailInfo.trail[2], trailInfo.trail[3]);
 	const Vec2f C = -0.5f*(A + B);
-	const float reach = qMax(qMax(A.norm(), B.norm()), C.norm()) + std::fabs(defocus) + 2.f;
+	const float reach = qMax(qMax(A.norm(), B.norm()), C.norm()) + std::fabs(defocus) + (lens ? lensReach : 0.f) + 2.f;
 	// The sharp image: the disk with a border, but only what can reach the viewport
 	const int vx = prj->getViewportPosX(), vy = prj->getViewportPosY();
 	const int vw = prj->getViewportWidth(), vh = prj->getViewportHeight();
@@ -192,7 +205,22 @@ uniform highp float straightness;
 uniform highp float rotation;
 uniform int samples;
 uniform highp float lod;
+uniform highp vec3 lodRGB;      // with the aberrations of the lens: for red, green and blue (blurred differently)
+// The aberrations of the lens (see the lens image, StelSkyDrawer::beginPhotoLensImage())
+uniform bool lensOn;
+uniform highp vec2 lensCenter;   // window pixels
+uniform highp float lensCorner;  // half diagonal of the image (pixels)
+uniform highp float comaLength;  // in the corner (pixels)
+uniform highp float astigLength;
+uniform highp vec3 chromaShift;  // radial shift of red, green, blue in the corner (pixels, outwards positive)
+uniform highp vec3 chromaBlur;   // radius of their blur disks (pixels)
 const highp float PI = 3.14159265358979;
+highp vec4 sharpImage(highp vec2 p, highp float level)
+{
+	if (p.x >= 0. && p.y >= 0. && p.x <= imageSize.x && p.y <= imageSize.y)
+		return textureLod(tex, p / texSize, level);
+	return vec4(0.);
+}
 void main(void)
 {
 	highp vec2 A = trail.xy;
@@ -201,6 +229,15 @@ void main(void)
 	highp vec4 sum = vec4(0.);
 	highp float weights = 0.;
 	highp float n = float(samples);
+	// the aberrations at this place of the field
+	highp vec2 dc = vWin - lensCenter;
+	highp float dist = length(dc);
+	highp float rho = dist / lensCorner;
+	highp vec2 er = dist > 0. ? dc / dist : vec2(1., 0.);
+	highp vec2 et = vec2(-er.y, er.x);
+	highp float coma = comaLength * rho;
+	highp float astig = astigLength * rho * rho;
+	highp vec3 shift = chromaShift * rho;
 	for (int i = 0; i < 1024; ++i)
 	{
 		if (i >= samples) break;
@@ -227,9 +264,25 @@ void main(void)
 		}
 		// the light here comes from the point of the sharp image that was offset onto it
 		highp vec2 p = vWin - offset - origin;
-		highp vec4 c = vec4(0.);
-		if (p.x >= 0. && p.y >= 0. && p.x <= imageSize.x && p.y <= imageSize.y)
-			c = textureLod(tex, p / texSize, lod);
+		highp vec4 c;
+		if (lensOn)
+		{
+			// a point of the spread of the lens: the coma, the astigmatism, and for red and blue their own shift
+			// and blur (low-discrepancy points, not tied to those of the trail and of the blur disk)
+			highp float zone = fract(0.5 + fi*0.7548776662);
+			highp float theta = 2.*PI*fract(0.5 + fi*0.5698402910);
+			highp float ring = coma * zone * zone;
+			p -= er*(2.*ring + ring*cos(theta)) + et*(ring*sin(theta) + astig*(2.*fract(fi*0.3247179572) - 1.));
+			highp float rd = sqrt(fract(fi*0.4142135624));
+			highp float ad = 2.*PI*fract(fi*0.7236067977);
+			highp vec2 disk = rd * vec2(cos(ad), sin(ad));
+			highp vec4 cr = sharpImage(p - er*shift.r - disk*chromaBlur.r, lodRGB.r);
+			highp vec4 cg = sharpImage(p - er*shift.g - disk*chromaBlur.g, lodRGB.g);
+			highp vec4 cb = sharpImage(p - er*shift.b - disk*chromaBlur.b, lodRGB.b);
+			c = vec4(cr.r, cg.g, cb.b, (cr.a + cg.a + cb.a)/3.);
+		}
+		else
+			c = sharpImage(p, lod);
 		highp vec3 tint = exp(logStart*((1.-t)*(1.-2.*t)) + logEnd*(t*(2.*t-1.)));
 		sum += w * vec4(c.rgb*tint, c.a);
 		weights += w;
@@ -289,6 +342,8 @@ void main(void)
 		im.logEnd[c] = std::log(qMax(1e-9f, trailInfo.trailEnd[c]));
 	}
 	im.defocus = std::fabs(defocus) >= 0.5f ? defocus : 0.f;
+	im.lens = lens;
+	im.lensReach = lens ? lensReach : 0.f;
 	im.glow = glow;
 	im.active = true;
 	return true;
@@ -317,9 +372,11 @@ void StelSkyDrawer::endPhotoBodyImage()
 	const Vec2f A(im.trail[0], im.trail[1]), B(im.trail[2], im.trail[3]);
 	const float length = A.norm() + B.norm();
 	const float R = std::fabs(im.defocus);
-	// Samples: about one per pixel along the trail and per two square pixels of the blur disk
-	const int samples = qBound(8, static_cast<int>(std::ceil(length + 0.5f*M_PIf*R*R)), 256);
-	const float area = length*qMax(1.f, 2.f*R) + M_PIf*R*R;
+	// Samples: about one per pixel along the trail and per two square pixels of the blur disk, and two per pixel of
+	// the spread of the lens
+	const float L = im.lensReach;
+	const int samples = qBound(8, static_cast<int>(std::ceil(qMax(length + 0.5f*M_PIf*R*R, 2.f*L))), 256);
+	const float area = length*qMax(1.f, 2.f*qMax(R, L)) + M_PIf*qMax(R*R, L*L);
 	const float lod = 0.5f*std::log2(qMax(1.f, area/static_cast<float>(samples)));
 
 	auto& prog = *photoBodyProgram;
@@ -342,6 +399,27 @@ void StelSkyDrawer::endPhotoBodyImage()
 	prog.setUniformValue("rotation", PHOTO_SPIKE_ANGLE - 0.5f*sector);
 	prog.setUniformValue("samples", samples);
 	prog.setUniformValue("lod", lod);
+	const PhotoLens& lens = photoLensCache;
+	// With the aberrations of the lens each color has its own spread (the red and the blue focus behind the green)
+	float lodRGB[3] = {lod, lod, lod};
+	if (im.lens)
+	{
+		const float shared = im.lensReach - qMax(std::fabs(lens.chromaShift[0]), std::fabs(lens.chromaShift[2])) - qMax(lens.chromaBlur[0], lens.chromaBlur[2]);
+		for (int c=0; c<3; ++c)
+		{
+			const float Lc = qMax(0.f, shared) + std::fabs(lens.chromaShift[c]) + lens.chromaBlur[c];
+			const float areaC = length*qMax(1.f, 2.f*qMax(R, Lc)) + M_PIf*qMax(R*R, Lc*Lc);
+			lodRGB[c] = 0.5f*std::log2(qMax(1.f, areaC/static_cast<float>(samples)));
+		}
+	}
+	prog.setUniformValue("lodRGB", QVector3D(lodRGB[0], lodRGB[1], lodRGB[2]));
+	prog.setUniformValue("lensOn", im.lens);
+	prog.setUniformValue("lensCenter", QVector2D(lens.center[0], lens.center[1]));
+	prog.setUniformValue("lensCorner", qMax(1.f, lens.corner));
+	prog.setUniformValue("comaLength", lens.coma);
+	prog.setUniformValue("astigLength", lens.astigmatism);
+	prog.setUniformValue("chromaShift", QVector3D(lens.chromaShift[0], lens.chromaShift[1], lens.chromaShift[2]));
+	prog.setUniformValue("chromaBlur", QVector3D(lens.chromaBlur[0], lens.chromaBlur[1], lens.chromaBlur[2]));
 
 	// The quad: the image and how far the trail and the blur reach
 	const float m = im.margin;
@@ -668,11 +746,8 @@ bool StelSkyDrawer::beginPhotoLensImage()
 	im.active = false;
 	if (!getFlagPhotographicModeActive())
 		return false;
-	// How far the aberrations reach in the corner (the coma: its circles out to three times their radius)
-	const PhotoLens& lens = photoLensCache;
-	const float reach = 3.f*lens.coma + lens.astigmatism + qMax(std::fabs(lens.chromaShift[0]), std::fabs(lens.chromaShift[2]))
-	                    + qMax(lens.chromaBlur[0], lens.chromaBlur[2]);
-	if (reach < 0.5f)
+	// How far the aberrations reach in the corner
+	if (photoLensReach(photoLensCache, 1.f) < 0.5f)
 		return false;
 	auto& gl = *QOpenGLContext::currentContext()->extraFunctions();
 	GLint viewport[4];
@@ -711,6 +786,7 @@ uniform highp float comaLength;  // in the corner (pixels)
 uniform highp float astigLength;
 uniform highp vec3 chromaShift;  // radial shift of red, green, blue in the corner (pixels, outwards positive)
 uniform highp vec3 chromaBlur;   // radius of their blur disks (pixels)
+uniform int maxSamples;
 const highp float PI = 3.14159265358979;
 void main(void)
 {
@@ -730,8 +806,11 @@ void main(void)
 	}
 	// about two samples per pixel of the spread; where they lie farther apart (a long lens wide open: large blur
 	// disks of red and blue), they read a correspondingly smoothed image (mipmaps)
-	int n = int(clamp(ceil(2.*reach), 4., 48.));
-	highp float lod = max(0., 0.5*log2(PI*reach*reach/float(n)) - 1.);
+	int n = int(clamp(ceil(2.*reach), 4., float(maxSamples)));
+	// each color by its own spread (the red and the blue focus behind the green)
+	highp float shared = 3.*coma + astig;
+	highp vec3 reachRGB = vec3(shared) + abs(shift) + chromaBlur;
+	highp vec3 lod = max(vec3(0.), 0.5*log2(PI*reachRGB*reachRGB/float(n) + 1e-6) - 1.);
 	highp vec3 sum = vec3(0.);
 	for (int i = 0; i < 64; ++i)
 	{
@@ -745,9 +824,9 @@ void main(void)
 		highp float rd = sqrt(fract(fi*0.4142135624));
 		highp float ad = fi*2.39996323;
 		highp vec2 disk = rd * vec2(cos(ad), sin(ad));
-		sum.r += textureLod(tex, (vWin - o - er*shift.r - disk*chromaBlur.r) / texSize, lod).r;
-		sum.g += textureLod(tex, (vWin - o - er*shift.g - disk*chromaBlur.g) / texSize, lod).g;
-		sum.b += textureLod(tex, (vWin - o - er*shift.b - disk*chromaBlur.b) / texSize, lod).b;
+		sum.r += textureLod(tex, (vWin - o - er*shift.r - disk*chromaBlur.r) / texSize, lod.r).r;
+		sum.g += textureLod(tex, (vWin - o - er*shift.g - disk*chromaBlur.g) / texSize, lod.g).g;
+		sum.b += textureLod(tex, (vWin - o - er*shift.b - disk*chromaBlur.b) / texSize, lod.b).b;
 	}
 	FRAG_COLOR = vec4(sum / float(n), 0.);
 }
@@ -796,7 +875,7 @@ void main(void)
 	return true;
 }
 
-void StelSkyDrawer::endPhotoLensImage()
+void StelSkyDrawer::endPhotoLensImage(int maxSamples)
 {
 	PhotoLensImage& im = photoLensImage;
 	if (!im.active)
@@ -825,6 +904,7 @@ void StelSkyDrawer::endPhotoLensImage()
 	prog.setUniformValue("astigLength", lens.astigmatism);
 	prog.setUniformValue("chromaShift", QVector3D(lens.chromaShift[0], lens.chromaShift[1], lens.chromaShift[2]));
 	prog.setUniformValue("chromaBlur", QVector3D(lens.chromaBlur[0], lens.chromaBlur[1], lens.chromaBlur[2]));
+	prog.setUniformValue("maxSamples", qBound(4, maxSamples, 64));
 
 	const float x0 = static_cast<float>(im.viewport[0]), y0 = static_cast<float>(im.viewport[1]);
 	const float x1 = x0 + static_cast<float>(im.viewport[2]), y1 = y0 + static_cast<float>(im.viewport[3]);
