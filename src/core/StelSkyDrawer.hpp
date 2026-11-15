@@ -1011,7 +1011,9 @@ public slots:
 	//! between these calls, which endPhotoLensImage() then adds to the scene through the lens: each pixel gathers
 	//! the light from where the aberrations of its place in the field bring it. Only for images that add light.
 	//! Returns false (draw directly) when the aberrations are too small to show, or the image cannot be made.
-	bool beginPhotoLensImage();
+	//! @param region if given, the part of the window (x0, y0, x1, y1, pixels) that the images cover: only it (with
+	//! the reach of the aberrations) is put into the scene
+	bool beginPhotoLensImage(const Vec4f* region = nullptr);
 	//! @param maxSamples the most samples of the spread of the lens per pixel (fewer for smooth images)
 	void endPhotoLensImage(int maxSamples = 48);
 	//! An image was drawn into the offscreen image of beginPhotoLensImage() (without, it is not put into the scene)
@@ -1836,6 +1838,7 @@ private:
 	{
 		bool active = false;
 		bool drawn = false;
+		Vec4f quad;  //!< the part of the window put into the scene (x0, y0, x1, y1)
 		int previousFbo = 0;
 		int viewport[4] = {0, 0, 0, 0};
 		float clearColor[4] = {0.f, 0.f, 0.f, 0.f};

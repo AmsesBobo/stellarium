@@ -740,18 +740,29 @@ void StelSkyDrawer::endPhotoGroundImage()
 	prog.release();
 }
 
-bool StelSkyDrawer::beginPhotoLensImage()
+bool StelSkyDrawer::beginPhotoLensImage(const Vec4f* region)
 {
 	PhotoLensImage& im = photoLensImage;
 	im.active = false;
 	if (!getFlagPhotographicModeActive())
 		return false;
 	// How far the aberrations reach in the corner
-	if (photoLensReach(photoLensCache, 1.f) < 0.5f)
+	const float reach = photoLensReach(photoLensCache, 1.f);
+	if (reach < 0.5f)
 		return false;
 	auto& gl = *QOpenGLContext::currentContext()->extraFunctions();
 	GLint viewport[4];
 	gl.glGetIntegerv(GL_VIEWPORT, viewport);
+	im.quad.set(static_cast<float>(viewport[0]), static_cast<float>(viewport[1]),
+	            static_cast<float>(viewport[0] + viewport[2]), static_cast<float>(viewport[1] + viewport[3]));
+	if (region)
+	{
+		// what the images cover and how far the lens spreads them, in the viewport
+		im.quad.set(qMax(im.quad[0], (*region)[0] - reach - 1.f), qMax(im.quad[1], (*region)[1] - reach - 1.f),
+		            qMin(im.quad[2], (*region)[2] + reach + 1.f), qMin(im.quad[3], (*region)[3] + reach + 1.f));
+		if (!(im.quad[2] > im.quad[0] && im.quad[3] > im.quad[1]))
+			return false;
+	}
 	// The image covers the window up to the viewport: texel = window pixel, nothing else changes
 	const int w = viewport[0] + viewport[2], h = viewport[1] + viewport[3];
 	if (w <= 0 || h <= 0 || w > 16384 || h > 16384)
@@ -906,8 +917,8 @@ void StelSkyDrawer::endPhotoLensImage(int maxSamples)
 	prog.setUniformValue("chromaBlur", QVector3D(lens.chromaBlur[0], lens.chromaBlur[1], lens.chromaBlur[2]));
 	prog.setUniformValue("maxSamples", qBound(4, maxSamples, 64));
 
-	const float x0 = static_cast<float>(im.viewport[0]), y0 = static_cast<float>(im.viewport[1]);
-	const float x1 = x0 + static_cast<float>(im.viewport[2]), y1 = y0 + static_cast<float>(im.viewport[3]);
+	// the viewport, or the part of it that the images cover
+	const float x0 = im.quad[0], y0 = im.quad[1], x1 = im.quad[2], y1 = im.quad[3];
 	const GLfloat quad[] = { x0, y0,   x1, y0,   x0, y1,   x1, y1 };
 	GLint previousVao = 0;
 	gl.glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &previousVao);

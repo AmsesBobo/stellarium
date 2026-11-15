@@ -1080,6 +1080,23 @@ void CometTailMgr::drawLight(StelCore* core, const Comet* comet)
 	// With a star trail or a lens out of focus, the light is drawn into an image of its own that is then trailed
 	// (and added to the scene, see StelSkyDrawer::beginPhotoBodyImage())
 	const bool image = headVisible && drawer->beginPhotoBodyImage(StelCore::matVsop87ToJ2000.multiplyWithoutTranslation(sight), static_cast<float>(reach), true);
+	// Otherwise through the aberrations of the lens, as the stars (only over the part of the window with the comet,
+	// the head of the comet needs enough samples of the spread: its center is sharp)
+	bool lensImage = false;
+	if (!image)
+	{
+		Vec4f region(1e30f, 1e30f, -1e30f, -1e30f);
+		for (size_t v = 0; v < vertexData.size(); v += FloatsPerVertex)
+		{
+			region[0] = std::min(region[0], vertexData[v]);
+			region[1] = std::min(region[1], vertexData[v + 1]);
+			region[2] = std::max(region[2], vertexData[v]);
+			region[3] = std::max(region[3], vertexData[v + 1]);
+		}
+		lensImage = drawer->beginPhotoLensImage(&region);
+		if (lensImage)
+			drawer->notePhotoLensImageDrawn();
+	}
 
 	auto& gl = *QOpenGLContext::currentContext()->functions();
 	splatProgram->bind();
@@ -1161,6 +1178,8 @@ void CometTailMgr::drawLight(StelCore* core, const Comet* comet)
 		compositeProgram->release();
 	}
 
+	if (lensImage)
+		drawer->endPhotoLensImage(32);
 	if (image)
 		drawer->endPhotoBodyImage();
 }
