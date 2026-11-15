@@ -24,6 +24,7 @@
 #include "StelSkyImageTile.hpp"
 #include "StelModuleMgr.hpp"
 #include "StelPainter.hpp"
+#include "StelSkyDrawer.hpp"
 #include "MilkyWay.hpp"
 #include "StelTranslator.hpp"
 #include "StelProgressController.hpp"
@@ -228,16 +229,23 @@ void StelSkyLayerMgr::draw(StelCore* core)
 	if (!flagShow)
 		return;
 
-	StelPainter sPainter(core->getProjection(StelCore::FrameJ2000));
-	sPainter.setBlending(true, GL_ONE, GL_ONE); //additive blending
-	for (auto* s : std::as_const(allSkyLayers))
+	// Photographic mode: the images through the aberrations of the lens, as the stars (they add light to the sky)
+	StelSkyDrawer* drawer = core->getSkyDrawer();
+	const bool lensImage = drawer->beginPhotoLensImage();
 	{
-		if (s->show) 
+		StelPainter sPainter(core->getProjection(StelCore::FrameJ2000));
+		sPainter.setBlending(true, GL_ONE, GL_ONE); //additive blending
+		for (auto* s : std::as_const(allSkyLayers))
 		{
-			sPainter.setProjector(core->getProjection(s->layer->getFrameType()));
-			s->layer->draw(core, sPainter, 1.);
+			if (s->show)
+			{
+				sPainter.setProjector(core->getProjection(s->layer->getFrameType()));
+				s->layer->draw(core, sPainter, 1.);
+			}
 		}
 	}
+	if (lensImage)
+		drawer->endPhotoLensImage();
 }
 
 void noDelete(StelSkyLayer*) {}

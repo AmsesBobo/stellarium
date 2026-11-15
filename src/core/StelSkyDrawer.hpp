@@ -1003,6 +1003,15 @@ public slots:
 	//! when the camera does not follow the sky, the motion is too small to show, or the image cannot be made.
 	bool beginPhotoGroundImage();
 	void endPhotoGroundImage();
+	//! Photographic mode: the aberrations of the lens (coma, astigmatism, chromatic aberration) on extended images,
+	//! as the stars get them (see getPhotoLens()). The images (pictures of nebulae) are drawn into an offscreen image
+	//! between these calls, which endPhotoLensImage() then adds to the scene through the lens: each pixel gathers
+	//! the light from where the aberrations of its place in the field bring it. Only for images that add light.
+	//! Returns false (draw directly) when the aberrations are too small to show, or the image cannot be made.
+	bool beginPhotoLensImage();
+	void endPhotoLensImage();
+	//! An image was drawn into the offscreen image of beginPhotoLensImage() (without, it is not put into the scene)
+	void notePhotoLensImageDrawn() {photoLensImage.drawn = true;}
 	//! Set how the sensor noise is shown (see PhotoNoise)
 	void setPhotoNoise(int mode);
 	int getPhotoNoise() const {return photoNoise;}
@@ -1815,6 +1824,18 @@ private:
 		int viewport[4] = {0, 0, 0, 0};
 		float clearColor[4] = {0.f, 0.f, 0.f, 0.f};
 	} photoGroundImage;
+	//! Offscreen image of the pictures of nebulae (see beginPhotoLensImage())
+	std::unique_ptr<class QOpenGLFramebufferObject> photoLensFbo;
+	std::unique_ptr<class QOpenGLShaderProgram> photoLensProgram;
+	bool photoLensTried = false;
+	struct PhotoLensImage
+	{
+		bool active = false;
+		bool drawn = false;
+		int previousFbo = 0;
+		int viewport[4] = {0, 0, 0, 0};
+		float clearColor[4] = {0.f, 0.f, 0.f, 0.f};
+	} photoLensImage;
 	//! Sensor noise
 	int photoNoise = PhotoNoiseImage;
 	//! Sensor format

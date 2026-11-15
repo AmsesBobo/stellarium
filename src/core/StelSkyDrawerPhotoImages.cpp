@@ -661,3 +661,208 @@ void StelSkyDrawer::endPhotoGroundImage()
 	gl.glBindBuffer(GL_ARRAY_BUFFER, static_cast<GLuint>(previousBuffer));
 	prog.release();
 }
+
+bool StelSkyDrawer::beginPhotoLensImage()
+{
+	PhotoLensImage& im = photoLensImage;
+	im.active = false;
+	if (!getFlagPhotographicModeActive())
+		return false;
+	// How far the aberrations reach in the corner (the coma: its circles out to three times their radius)
+	const PhotoLens& lens = photoLensCache;
+	const float reach = 3.f*lens.coma + lens.astigmatism + qMax(std::fabs(lens.chromaShift[0]), std::fabs(lens.chromaShift[2]))
+	                    + qMax(lens.chromaBlur[0], lens.chromaBlur[2]);
+	if (reach < 0.5f)
+		return false;
+	auto& gl = *QOpenGLContext::currentContext()->extraFunctions();
+	GLint viewport[4];
+	gl.glGetIntegerv(GL_VIEWPORT, viewport);
+	// The image covers the window up to the viewport: texel = window pixel, nothing else changes
+	const int w = viewport[0] + viewport[2], h = viewport[1] + viewport[3];
+	if (w <= 0 || h <= 0 || w > 16384 || h > 16384)
+		return false;
+
+	if (!photoLensTried)
+	{
+		photoLensTried = true;
+		const char* vsrc = R"(
+ATTRIBUTE highp vec2 position; // window coordinates
+uniform highp vec4 viewport;
+VARYING highp vec2 vWin;
+void main(void)
+{
+	vWin = position;
+	gl_Position = vec4((position - viewport.xy) / viewport.zw * 2. - 1., 0., 1.);
+}
+)";
+		// The light of a pixel comes from the points of the sharp image that the lens spreads onto it: from p - o
+		// for each offset o of the image of a point (its point spread function), here a set of samples of it.
+		// As for the stars (see aberratedCore() and chromaOffset() in the star shader): the coma, circles whose
+		// radius grows with the square of the zone of the aperture and whose centers lie outwards by twice that;
+		// the astigmatism, a line across the radial direction; the chromatic aberration, the red and the blue
+		// image shifted along the radial direction (lateral) and blurred by their focus behind the green (axial).
+		const char* fsrc = R"(
+VARYING highp vec2 vWin;
+uniform sampler2D tex;
+uniform highp vec2 texSize;
+uniform highp vec2 lensCenter;   // window pixels
+uniform highp float lensCorner;  // half diagonal of the image (pixels)
+uniform highp float comaLength;  // in the corner (pixels)
+uniform highp float astigLength;
+uniform highp vec3 chromaShift;  // radial shift of red, green, blue in the corner (pixels, outwards positive)
+uniform highp vec3 chromaBlur;   // radius of their blur disks (pixels)
+const highp float PI = 3.14159265358979;
+void main(void)
+{
+	highp vec2 d = vWin - lensCenter;
+	highp float dist = length(d);
+	highp float rho = dist / lensCorner;
+	highp vec2 er = dist > 0. ? d / dist : vec2(1., 0.);
+	highp vec2 et = vec2(-er.y, er.x);
+	highp float coma = comaLength * rho;
+	highp float astig = astigLength * rho * rho;
+	highp vec3 shift = chromaShift * rho;
+	highp float reach = 3.*coma + astig + max(abs(shift.r), abs(shift.b)) + max(chromaBlur.r, chromaBlur.b);
+	if (reach < 0.25)
+	{
+		FRAG_COLOR = vec4(textureLod(tex, vWin / texSize, 0.).rgb, 0.);
+		return;
+	}
+	// about two samples per pixel of the spread; where they lie farther apart (a long lens wide open: large blur
+	// disks of red and blue), they read a correspondingly smoothed image (mipmaps)
+	int n = int(clamp(ceil(2.*reach), 4., 48.));
+	highp float lod = max(0., 0.5*log2(PI*reach*reach/float(n)) - 1.);
+	highp vec3 sum = vec3(0.);
+	for (int i = 0; i < 64; ++i)
+	{
+		if (i >= n) break;
+		highp float fi = float(i) + 0.5;
+		// low-discrepancy points (the zone and the angle of the coma: the R2 sequence)
+		highp float zone = fract(0.5 + fi*0.7548776662);
+		highp float theta = 2.*PI*fract(0.5 + fi*0.5698402910);
+		highp float ring = coma * zone * zone;
+		highp vec2 o = er*(2.*ring + ring*cos(theta)) + et*(ring*sin(theta) + astig*(2.*fract(fi*0.6180339887) - 1.));
+		highp float rd = sqrt(fract(fi*0.4142135624));
+		highp float ad = fi*2.39996323;
+		highp vec2 disk = rd * vec2(cos(ad), sin(ad));
+		sum.r += textureLod(tex, (vWin - o - er*shift.r - disk*chromaBlur.r) / texSize, lod).r;
+		sum.g += textureLod(tex, (vWin - o - er*shift.g - disk*chromaBlur.g) / texSize, lod).g;
+		sum.b += textureLod(tex, (vWin - o - er*shift.b - disk*chromaBlur.b) / texSize, lod).b;
+	}
+	FRAG_COLOR = vec4(sum / float(n), 0.);
+}
+)";
+		auto program = std::make_unique<QOpenGLShaderProgram>();
+		if (program->addShaderFromSourceCode(QOpenGLShader::Vertex, StelOpenGL::globalShaderPrefix(StelOpenGL::VERTEX_SHADER) + vsrc) &&
+		    program->addShaderFromSourceCode(QOpenGLShader::Fragment, StelOpenGL::globalShaderPrefix(StelOpenGL::FRAGMENT_SHADER) + fsrc))
+		{
+			program->bindAttributeLocation("position", 0);
+			if (StelPainter::linkProg(program.get(), "photographic lens image"))
+				photoLensProgram = std::move(program);
+		}
+		if (!photoLensProgram)
+			qWarning() << "Photographic mode: the lens aberrations cannot be applied to the images of nebulae";
+	}
+	if (!photoLensProgram)
+		return false;
+	if (!photoLensFbo || photoLensFbo->width() != w || photoLensFbo->height() != h)
+	{
+		QOpenGLFramebufferObjectFormat format;
+		format.setInternalTextureFormat(GL_RGBA16F);
+		format.setMipmap(true);
+		photoLensFbo.reset(new QOpenGLFramebufferObject(w, h, format));
+		if (!photoLensFbo->isValid())
+		{
+			photoLensFbo.reset();
+			return false;
+		}
+		gl.glBindTexture(GL_TEXTURE_2D, photoLensFbo->texture());
+		gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+		gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		gl.glBindTexture(GL_TEXTURE_2D, 0);
+	}
+	gl.glGetIntegerv(GL_FRAMEBUFFER_BINDING, &im.previousFbo);
+	for (int i=0; i<4; ++i)
+		im.viewport[i] = viewport[i];
+	gl.glGetFloatv(GL_COLOR_CLEAR_VALUE, im.clearColor);
+	photoLensFbo->bind();
+	gl.glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
+	gl.glClearColor(0.f, 0.f, 0.f, 0.f);
+	gl.glClear(GL_COLOR_BUFFER_BIT);
+	im.active = true;
+	im.drawn = false;
+	return true;
+}
+
+void StelSkyDrawer::endPhotoLensImage()
+{
+	PhotoLensImage& im = photoLensImage;
+	if (!im.active)
+		return;
+	im.active = false;
+	auto& gl = *QOpenGLContext::currentContext()->extraFunctions();
+	gl.glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(im.previousFbo));
+	gl.glViewport(im.viewport[0], im.viewport[1], im.viewport[2], im.viewport[3]);
+	gl.glClearColor(im.clearColor[0], im.clearColor[1], im.clearColor[2], im.clearColor[3]);
+	// nothing in view: nothing to add
+	if (!im.drawn)
+		return;
+
+	const PhotoLens& lens = photoLensCache;
+	auto& prog = *photoLensProgram;
+	prog.bind();
+	gl.glActiveTexture(GL_TEXTURE0);
+	gl.glBindTexture(GL_TEXTURE_2D, photoLensFbo->texture());
+	gl.glGenerateMipmap(GL_TEXTURE_2D);
+	prog.setUniformValue("viewport", QVector4D(im.viewport[0], im.viewport[1], im.viewport[2], im.viewport[3]));
+	prog.setUniformValue("tex", 0);
+	prog.setUniformValue("texSize", QVector2D(photoLensFbo->width(), photoLensFbo->height()));
+	prog.setUniformValue("lensCenter", QVector2D(lens.center[0], lens.center[1]));
+	prog.setUniformValue("lensCorner", qMax(1.f, lens.corner));
+	prog.setUniformValue("comaLength", lens.coma);
+	prog.setUniformValue("astigLength", lens.astigmatism);
+	prog.setUniformValue("chromaShift", QVector3D(lens.chromaShift[0], lens.chromaShift[1], lens.chromaShift[2]));
+	prog.setUniformValue("chromaBlur", QVector3D(lens.chromaBlur[0], lens.chromaBlur[1], lens.chromaBlur[2]));
+
+	const float x0 = static_cast<float>(im.viewport[0]), y0 = static_cast<float>(im.viewport[1]);
+	const float x1 = x0 + static_cast<float>(im.viewport[2]), y1 = y0 + static_cast<float>(im.viewport[3]);
+	const GLfloat quad[] = { x0, y0,   x1, y0,   x0, y1,   x1, y1 };
+	GLint previousVao = 0;
+	gl.glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &previousVao);
+	GLint previousBuffer = 0;
+	gl.glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &previousBuffer);
+	if (!photoBodyVao)
+	{
+		photoBodyVao.reset(new QOpenGLVertexArrayObject);
+		photoBodyVao->create();
+	}
+	photoBodyVao->bind();
+	GLuint vbo = 0;
+	gl.glGenBuffers(1, &vbo);
+	gl.glBindBuffer(GL_ARRAY_BUFFER, vbo);
+	gl.glBufferData(GL_ARRAY_BUFFER, sizeof(quad), quad, GL_STREAM_DRAW);
+	gl.glEnableVertexAttribArray(0);
+	gl.glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
+	const GLboolean blend = gl.glIsEnabled(GL_BLEND);
+	const GLboolean depth = gl.glIsEnabled(GL_DEPTH_TEST);
+	GLint blendSrcRGB, blendDstRGB, blendSrcA, blendDstA;
+	gl.glGetIntegerv(GL_BLEND_SRC_RGB, &blendSrcRGB);
+	gl.glGetIntegerv(GL_BLEND_DST_RGB, &blendDstRGB);
+	gl.glGetIntegerv(GL_BLEND_SRC_ALPHA, &blendSrcA);
+	gl.glGetIntegerv(GL_BLEND_DST_ALPHA, &blendDstA);
+	gl.glEnable(GL_BLEND);
+	gl.glDisable(GL_DEPTH_TEST);
+	gl.glBlendFuncSeparate(GL_ONE, GL_ONE, GL_ZERO, GL_ONE); // light added to the scene
+	gl.glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+	gl.glBlendFuncSeparate(static_cast<GLenum>(blendSrcRGB), static_cast<GLenum>(blendDstRGB), static_cast<GLenum>(blendSrcA), static_cast<GLenum>(blendDstA));
+	if (!blend) gl.glDisable(GL_BLEND);
+	if (depth) gl.glEnable(GL_DEPTH_TEST);
+	gl.glDisableVertexAttribArray(0);
+	gl.glDeleteBuffers(1, &vbo);
+	gl.glBindVertexArray(static_cast<GLuint>(previousVao));
+	gl.glBindBuffer(GL_ARRAY_BUFFER, static_cast<GLuint>(previousBuffer));
+	gl.glBindTexture(GL_TEXTURE_2D, 0);
+	prog.release();
+}

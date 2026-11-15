@@ -563,6 +563,7 @@ bool StelSkyImageTile::drawTile(StelCore* core, StelPainter& sPainter, const Vec
 			// The camera records the image along the star trail of the exposure and over the blur disk of the
 			// lens: copies of it, each with its share of the light, added up (only for images that add light)
 			// (and only for images in or near the frame: the copies cost)
+			drawer->notePhotoLensImageDrawn();
 			const std::vector<StelSkyDrawer::PhotoImageSample> samples =
 				alphaBlend && sPainter.getProjector()->getViewportConvexPolygon(64.f, 64.f)->intersects(poly)
 				? drawer->getPhotoImageSamples(*sPainter.getProjector(), poly->getPointInside())
